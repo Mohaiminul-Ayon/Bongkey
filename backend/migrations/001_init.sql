@@ -1,0 +1,3 @@
+-- Bongkey MVP schema is created automatically by backend/internal/database/database.go
+-- when the Go server starts with a PostgreSQL connection.
+-- This placeholder keeps the migrations folder ready for future explicit migration tooling.

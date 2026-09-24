@@ -1,0 +1,235 @@
+{
+  "info": {
+    "name": "Bongkey — guest order access",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run requests individually against the NEW local backend after configuring an isolated development database. Requests 3 and 5 create orders and reduce test stock. Do not use production data. Keep access tokens private. These are prepared checks, not evidence of execution."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "order_a_id",
+      "value": ""
+    },
+    {
+      "key": "order_a_token",
+      "value": ""
+    },
+    {
+      "key": "order_b_id",
+      "value": ""
+    },
+    {
+      "key": "order_b_token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health",
+        "description": "Checks HTTP availability; it does not prove checkout correctness."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Backend responds\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Deny order access without a credential",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/api/orders/ORD-000001",
+        "description": "Expected 401, even if the identifier exists."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Credential required\", () => pm.response.to.have.status(401));",
+              "pm.test(\"No private data\", () => pm.expect(pm.response.json()).not.to.have.property(\"customer_phone\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Create test order A",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/orders",
+        "description": "Creates one order and reduces test stock by one. Check product_id against the local catalog before sending.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customer_name\": \"Postman Test Customer\",\n  \"customer_phone\": \"01000000000\",\n  \"shipping_address\": \"Test address — not for delivery\",\n  \"city\": \"Dhaka\",\n  \"delivery_note\": \"Development test only\",\n  \"items\": [\n    {\n      \"product_id\": 1,\n      \"quantity\": 1,\n      \"lens_option\": \"Frame only\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Checkout succeeds\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.unset(\"order_a_id\");",
+              "pm.collectionVariables.unset(\"order_a_token\");",
+              "if (pm.response.code === 200) {",
+              "  const order = pm.response.json();",
+              "  pm.test(\"Credential is returned\", () => pm.expect(order.access_token).to.have.lengthOf(43));",
+              "  pm.collectionVariables.set(\"order_a_id\", order.id);",
+              "  pm.collectionVariables.set(\"order_a_token\", order.access_token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Read order A with its credential",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{order_a_token}}"
+          }
+        ],
+        "url": "{{base_url}}/api/orders/{{order_a_id}}",
+        "description": "Expected 200 with order A's details."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Owner can read order\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Correct order\", () => pm.expect(String(pm.response.json().id)).to.eql(String(pm.collectionVariables.get(\"order_a_id\"))));",
+              "pm.test(\"Private response is not cached\", () => pm.expect(pm.response.headers.get(\"Cache-Control\")).to.eql(\"no-store\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Create test order B",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/orders",
+        "description": "Creates a separate order for the cross-order authorization check and reduces test stock by one.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customer_name\": \"Second Postman Test Customer\",\n  \"customer_phone\": \"01000000000\",\n  \"shipping_address\": \"Test address — not for delivery\",\n  \"city\": \"Dhaka\",\n  \"delivery_note\": \"Development test only\",\n  \"items\": [\n    {\n      \"product_id\": 1,\n      \"quantity\": 1,\n      \"lens_option\": \"Frame only\"\n    }\n  ]\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Checkout succeeds\", () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.unset(\"order_b_id\");",
+              "pm.collectionVariables.unset(\"order_b_token\");",
+              "if (pm.response.code === 200) {",
+              "  const order = pm.response.json();",
+              "  pm.test(\"Credential is returned\", () => pm.expect(order.access_token).to.have.lengthOf(43));",
+              "  pm.collectionVariables.set(\"order_b_id\", order.id);",
+              "  pm.collectionVariables.set(\"order_b_token\", order.access_token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Deny order B with order A credential",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{order_a_token}}"
+          }
+        ],
+        "url": "{{base_url}}/api/orders/{{order_b_id}}",
+        "description": "Expected 404 with the same response used for a nonexistent or expired order grant."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Different test orders\", () => pm.expect(pm.collectionVariables.get(\"order_a_id\")).not.to.eql(pm.collectionVariables.get(\"order_b_id\")));",
+              "pm.test(\"Cross-order access denied\", () => pm.response.to.have.status(404));",
+              "pm.test(\"No private data\", () => pm.expect(pm.response.json()).not.to.have.property(\"customer_phone\"));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Read order B with its own credential",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{order_b_token}}"
+          }
+        ],
+        "url": "{{base_url}}/api/orders/{{order_b_id}}",
+        "description": "Confirms order B exists and request 6 was an authorization denial."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Order B owner can read it\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
