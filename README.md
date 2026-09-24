@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Bongkey
 
 An eyewear ecommerce application for Bangladesh, with a Next.js/TypeScript frontend and Go/Gin backend. PostgreSQL is the intended database. This working copy is for development and synthetic test data; it is not ready for real customers.
@@ -84,3 +85,6 @@ Import [the Postman collection](backend/Bongkey.postman_collection.json) through
 Requests 3 and 5 create orders and decrement test stock. Confirm the payload's `product_id` exists in the isolated database. Tokens and database credentials should be redacted from shared output and collection exports. The collection is prepared, not executed evidence.
 
 Migration `backend/migrations/002_order_access.sql` is embedded and invoked after the inherited startup schema. It adds a table without granting access to historical orders. The inherited `001_init.sql` remains only a placeholder; a complete versioned migration baseline is still required.
+=======
+# Bongkey
+>>>>>>> a55e19f01e096e20a8f51af02240bbde367a3e14
