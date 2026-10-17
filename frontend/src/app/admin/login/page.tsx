@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { loginAdmin, setAdminToken } from "@/lib/api";
 
+// AdminLoginPage submits owner credentials without bundling demo credentials.
 export default function AdminLoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("admin@bongkey.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  // submit stores only a successful owner session in this browser tab.
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -21,20 +23,10 @@ export default function AdminLoginPage() {
       setAdminToken(result.token);
       router.push("/admin/dashboard");
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? `${err.message}. Make sure the backend is running on port 8080 and PostgreSQL is started.`
-          : "Login failed. Make sure the backend and PostgreSQL are running."
-      );
+      setError(err instanceof Error ? err.message : "Login failed.");
     } finally {
       setLoading(false);
     }
-  }
-
-  function fillDefaultCredentials() {
-    setEmail("admin@bongkey.com");
-    setPassword("admin12345");
-    setError("");
   }
 
   return (
@@ -62,7 +54,7 @@ export default function AdminLoginPage() {
                 name="email"
                 required
                 className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]"
-                placeholder="admin@bongkey.com"
+                placeholder="Owner email"
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -74,26 +66,14 @@ export default function AdminLoginPage() {
                 name="password"
                 required
                 className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]"
-                placeholder="admin12345"
+                placeholder="Password"
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />
             </label>
             <Button className="mt-2 w-full" type="submit">{loading ? "Signing In..." : "Sign In"}</Button>
-            <button
-              className="rounded-md border border-[#173c34] bg-[#f0f7f4] px-5 py-3 text-sm font-black text-[#173c34]"
-              onClick={fillDefaultCredentials}
-              type="button"
-            >
-              Fill Local MVP Login
-            </button>
           </form>
-          <div className="mt-5 rounded-md bg-[#f0f7f4] p-4 text-sm font-semibold leading-6 text-[#173c34]">
-            <p>Local MVP admin login:</p>
-            <p>Email: admin@bongkey.com</p>
-            <p>Password: admin12345</p>
-          </div>
         </div>
       </div>
     </section>

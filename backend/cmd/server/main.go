@@ -8,7 +8,7 @@ import (
 	"bongkey/backend/internal/routes"
 )
 
-// main connects application dependencies and starts the inherited HTTP server.
+// main starts the server only after configuration and database setup succeed.
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -22,15 +22,16 @@ func main() {
 	}
 
 	if err := database.Connect(cfg.DatabaseURL); err != nil {
-		log.Fatalf("database connection failed for DATABASE_URL=%q: %v", cfg.DatabaseURL, err)
+		// Driver errors can include the connection URL, so do not log either value here.
+		log.Fatal("database connection failed; check DATABASE_URL and PostgreSQL availability")
 	}
 	log.Println("database connected")
 
 	if err := database.MigrateAndSeed(cfg); err != nil {
-		log.Fatalf("database migration/seed failed: %v", err)
+		log.Fatal("database migration/seed failed; check database availability and migration state")
 	}
 
-	router := routes.SetupRouter(cfg, database.DB)
+	router := routes.SetupRouter(cfg)
 
 	if err := router.Run(":" + cfg.ServerPort); err != nil {
 		log.Fatalf("server failed: %v", err)

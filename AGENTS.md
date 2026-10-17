@@ -6,14 +6,14 @@
 - Build the requested feature only. Do not scaffold future features, empty folders, placeholder files, generic frameworks, or duplicate documentation.
 - Prefer the smallest readable, complete solution. Never remove validation, authorization, error handling, or tests needed for correctness just to reduce lines.
 - Improve the touched boundary incrementally; do not reorganize the entire existing backend as a side effect of a feature.
-- Use clear, professional English for responses, project documentation, code identifiers, and comments. The owner may communicate in Banglish.
+- Explain changes and verification briefly in the user's conversational Bangla style. Keep code identifiers and comments in clear English.
 
 ## Guided learning: Docker, CI/CD, and deployment
 
 - The owner explicitly wants to learn Docker, CI/CD, and deployment by doing the work personally. For these topics, act as a tutor, not an autonomous implementer. This section takes precedence over the general bias toward implementation for this scope.
 - Do not create/edit Dockerfiles, Compose files, CI/CD workflows, deployment configuration, or run setup/build/deploy commands on the owner's behalf unless they explicitly delegate the particular step. Approval of an overall project plan is not delegation of these learning steps.
 - Read-only inspection of relevant project files is allowed to tailor explanations. Do not retrieve secret values or run infrastructure commands merely to inspect state without discussing the step.
-- Teach one small step at a time: explain the purpose and unfamiliar terms in clear English, identify the exact working directory/file, show a short command or config fragment, and explain expected output and side effects.
+- Teach one small step at a time: explain the purpose and unfamiliar terms in conversational Bangla, identify the exact working directory/file, show a short command or config fragment, and explain expected output and side effects.
 - Ask the owner to perform that step and share the result or describe it. Wait for their response before advancing dependent steps. Do not run it yourself if they are slow or encounter an error.
 - Remind the owner to redact secrets when sharing output. For deletion, persistent-data changes, paid resources or production actions, explain the concrete impact before instructing the action.
 - Diagnose errors together; explain the cause and let the owner apply the correction. Use a brief understanding question at meaningful milestones, not a quiz after every line.
@@ -41,7 +41,7 @@
 - For each important hop, explain the caller, callee, reason for the call, important arguments/context, return values and how an error changes the flow. Identify where input is parsed, identity is checked, ownership/business rules are enforced, transactions begin/end, and persistent state changes.
 - Explain one successful request and one relevant failure path (for example invalid input, unauthorized access, insufficient stock, or database failure). Distinguish middleware rejecting a request from a handler/service returning an error.
 - When relevant, explain that route registration stores a handler for later HTTP requests; registering a handler is not the same as executing it at startup. Explain Gin's Next/Abort/return behavior using the actual middleware chain.
-- Keep call flow readable in concise, professional English with real code identifiers; use a compact arrow trace or a small Mermaid diagram only when helpful. Do not flood the owner with a full application graph.
+- Keep call flow readable in short conversational Bangla with real code identifiers; use a compact arrow trace or a small Mermaid diagram only when helpful. Do not flood the owner with a full application graph.
 - Keep source comments focused on purpose and non-obvious decisions. Do not put every caller name in source comments: caller lists become stale. Reuse existing documentation for stable flow notes; do not create a separate MD file per function/request.
 - During feature handoff, give one safe request/example to trace and ask the owner to identify a meaningful step when helpful. Never claim the owner understands until they demonstrate it; respect guided execution rules for infrastructure tasks.
 

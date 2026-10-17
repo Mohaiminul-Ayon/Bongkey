@@ -45,16 +45,22 @@ export type OrderPayload = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+// getAdminToken reads the tab-scoped admin bearer token.
 export function getAdminToken() {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("bongkey_admin_token") ?? "";
+  localStorage.removeItem("bongkey_admin_token");
+  return sessionStorage.getItem("bongkey_admin_token") ?? "";
 }
 
+// setAdminToken keeps the admin session only for this browser tab.
 export function setAdminToken(token: string) {
-  localStorage.setItem("bongkey_admin_token", token);
+  localStorage.removeItem("bongkey_admin_token");
+  sessionStorage.setItem("bongkey_admin_token", token);
 }
 
+// clearAdminToken signs out this browser tab by dropping its bearer token.
 export function clearAdminToken() {
+  sessionStorage.removeItem("bongkey_admin_token");
   localStorage.removeItem("bongkey_admin_token");
 }
 
@@ -117,7 +123,7 @@ export async function fetchCategories() {
   return request<Category[]>("/api/categories");
 }
 
-// createOrder receives the private order credential only after checkout commits.
+/** createOrder submits checkout details and receives the guest access token once. */
 export async function createOrder(payload: OrderPayload) {
   return request<{
     id: number;
@@ -132,13 +138,12 @@ export async function createOrder(payload: OrderPayload) {
     total: number;
     payment_method: string;
     order_status: string;
-    access_token: string;
-    access_expires_at: string;
+    guest_access_token: string;
   }>("/api/orders", { method: "POST", body: JSON.stringify(payload) });
 }
 
-// fetchOrder sends the order-specific credential in a header, never in the URL.
-export async function fetchOrder(id: string, accessToken: string) {
+/** fetchOrder uses the order-specific guest token without placing it in the URL. */
+export async function fetchOrder(id: string, token: string) {
   return request<{
     id: number;
     order_number: string;
@@ -151,8 +156,8 @@ export async function fetchOrder(id: string, accessToken: string) {
     delivery_fee: number;
     total: number;
     order_status: string;
-  }>(`/api/orders/${encodeURIComponent(id)}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
+  }>(`/api/orders/${id}`, {
+    headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
 }

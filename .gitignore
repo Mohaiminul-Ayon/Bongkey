@@ -1,8 +1,11 @@
 .env
 .env.*
 !.env.example
-node_modules/
-.next/
-*.tsbuildinfo
-backend/uploads/
-*.exe
+/backup_original_files/
+/frontend/node_modules/
+/frontend/.next/
+/frontend/tsconfig.tsbuildinfo
+/backend/uploads/**
+!/backend/uploads/
+!/backend/uploads/**/
+!/backend/uploads/**/.gitkeep

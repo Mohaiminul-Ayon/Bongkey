@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -15,26 +14,27 @@ import (
 )
 
 type productRequest struct {
-	CategoryID    int    `json:"category_id"`
-	Name          string `json:"name"`
-	Slug          string `json:"slug"`
-	Description   string `json:"description"`
-	Price         int    `json:"price"`
-	OldPrice      int    `json:"old_price"`
-	BrandTier     string `json:"brand_tier"`
-	FrameType     string `json:"frame_type"`
-	Gender        string `json:"gender"`
-	Material      string `json:"material"`
-	Color         string `json:"color"`
-	Size          string `json:"size"`
-	LensWidth     string `json:"lens_width"`
-	BridgeWidth   string `json:"bridge_width"`
-	TempleLength  string `json:"temple_length"`
-	StockQuantity int    `json:"stock_quantity"`
-	ImageURL      string `json:"image_url"`
-	TryOnImageURL string `json:"try_on_image_url"`
-	IsFeatured    bool   `json:"is_featured"`
-	IsActive      bool   `json:"is_active"`
+	CategoryID            int    `json:"category_id"`
+	Name                  string `json:"name"`
+	Slug                  string `json:"slug"`
+	Description           string `json:"description"`
+	Price                 int    `json:"price"`
+	OldPrice              int    `json:"old_price"`
+	BrandTier             string `json:"brand_tier"`
+	FrameType             string `json:"frame_type"`
+	Gender                string `json:"gender"`
+	Material              string `json:"material"`
+	Color                 string `json:"color"`
+	Size                  string `json:"size"`
+	LensWidth             string `json:"lens_width"`
+	BridgeWidth           string `json:"bridge_width"`
+	TempleLength          string `json:"temple_length"`
+	StockQuantity         int    `json:"stock_quantity"`
+	ExpectedStockQuantity *int   `json:"expected_stock_quantity"`
+	ImageURL              string `json:"image_url"`
+	TryOnImageURL         string `json:"try_on_image_url"`
+	IsFeatured            bool   `json:"is_featured"`
+	IsActive              bool   `json:"is_active"`
 }
 
 func ListProducts(c *gin.Context) {
@@ -96,6 +96,7 @@ func UpdateProduct(c *gin.Context) {
 	saveProduct(c, id)
 }
 
+// saveProduct validates admin product input and stores product stock in one authoritative column.
 func saveProduct(c *gin.Context, id int) {
 	if !database.Ready() {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
@@ -115,6 +116,14 @@ func saveProduct(c *gin.Context, id int) {
 	}
 	if req.Name == "" || req.Price <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "product name and price are required"})
+		return
+	}
+	if req.StockQuantity < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stock quantity cannot be negative"})
+		return
+	}
+	if id != 0 && (req.ExpectedStockQuantity == nil || *req.ExpectedStockQuantity < 0) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expected stock quantity is required"})
 		return
 	}
 	if req.Slug == "" {
@@ -141,29 +150,32 @@ func saveProduct(c *gin.Context, id int) {
 			RETURNING id
 		`, req.CategoryID, req.Name, req.Slug, req.Description, req.Price, req.OldPrice, req.BrandTier, req.FrameType, req.Gender, req.Material, req.Color, req.Size, req.LensWidth, req.BridgeWidth, req.TempleLength, req.StockQuantity, req.ImageURL, req.TryOnImageURL, req.IsFeatured, req.IsActive).Scan(&id)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("could not create product: %v", err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create product"})
 			return
 		}
 	} else {
-		_, err := database.DB.Exec(`
+		result, err := database.DB.Exec(`
 			UPDATE products SET category_id=$1, name=$2, slug=$3, description=$4, price=$5, old_price=$6,
 				brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
 				lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
 				image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, updated_at=NOW()
-			WHERE id=$21
-		`, req.CategoryID, req.Name, req.Slug, req.Description, req.Price, req.OldPrice, req.BrandTier, req.FrameType, req.Gender, req.Material, req.Color, req.Size, req.LensWidth, req.BridgeWidth, req.TempleLength, req.StockQuantity, req.ImageURL, req.TryOnImageURL, req.IsFeatured, req.IsActive, id)
+			WHERE id=$21 AND stock_quantity=$22
+		`, req.CategoryID, req.Name, req.Slug, req.Description, req.Price, req.OldPrice, req.BrandTier, req.FrameType, req.Gender, req.Material, req.Color, req.Size, req.LensWidth, req.BridgeWidth, req.TempleLength, req.StockQuantity, req.ImageURL, req.TryOnImageURL, req.IsFeatured, req.IsActive, id, *req.ExpectedStockQuantity)
 		if err != nil {
 			log.Printf("could not update product id=%d: %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("could not update product: %v", err)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update product"})
+			return
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not verify product update"})
+			return
+		}
+		if affected == 0 {
+			c.JSON(http.StatusConflict, gin.H{"error": "product stock changed; reload and retry"})
 			return
 		}
 	}
-
-	_, _ = database.DB.Exec(`
-		INSERT INTO stock_items (product_id, sku, quantity)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (product_id) DO UPDATE SET quantity = EXCLUDED.quantity, updated_at = NOW()
-	`, id, strings.ToUpper(strings.ReplaceAll(req.Slug, "-", "")), req.StockQuantity)
 
 	row := database.DB.QueryRow(productSelectSQL+" WHERE p.id = $1", id)
 	product, err := scanProduct(row)

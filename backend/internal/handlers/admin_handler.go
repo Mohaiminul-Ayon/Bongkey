@@ -1,20 +1,16 @@
 package handlers
 
 import (
-	"database/sql"
+	"errors"
 	"net/http"
-	"time"
 
-	"bongkey/backend/internal/config"
-	"bongkey/backend/internal/database"
+	"bongkey/backend/internal/auth"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type AdminHandler struct {
-	Config config.Config
+	Service auth.Service
 }
 
 type loginRequest struct {
@@ -22,47 +18,33 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+// Login parses credentials and maps the admin use case result to HTTP.
 func (h AdminHandler) Login(c *gin.Context) {
-	if !database.Ready() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
-		return
-	}
-
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email and password are required"})
 		return
 	}
 
-	var id int
-	var name, email, passwordHash string
-	err := database.DB.QueryRow(`SELECT id, name, email, password_hash FROM admins WHERE email = $1`, req.Email).Scan(&id, &name, &email, &passwordHash)
-	if err == sql.ErrNoRows || bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)) != nil {
+	admin, token, err := h.Service.Login(c.Request.Context(), req.Email, req.Password)
+	if errors.Is(err, auth.ErrInvalidCredentials) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "login failed"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "login unavailable"})
 		return
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"admin_id": id,
-		"email":    email,
-		"exp":      time.Now().Add(24 * time.Hour).Unix(),
-	})
-	tokenString, err := token.SignedString([]byte(h.Config.JWTSecret))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create session"})
-		return
-	}
-
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
-		"token": tokenString,
-		"admin": gin.H{"id": id, "name": name, "email": email},
+		"token": token,
+		"admin": gin.H{"id": admin.ID, "name": admin.Name, "email": admin.Email},
 	})
 }
 
+// Me confirms that the admin middleware accepted the current session.
 func (h AdminHandler) Me(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{"authenticated": true})
 }

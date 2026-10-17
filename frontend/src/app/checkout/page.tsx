@@ -7,14 +7,15 @@ import { createOrder } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { formatPrice, products as fallbackProducts } from "@/lib/products";
 
-// CheckoutPage collects customer details and submits the current cart.
+/** CheckoutPage submits the cart and keeps guest order access in this browser session. */
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, subtotal, deliveryFee, total, clearCart } = useCart();
   const [error, setError] = useState("");
+  const [placedOrderNumber, setPlacedOrderNumber] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // submitOrder retains only this order's credential for its confirmation page.
+  /** submitOrder stores the returned token only after the server accepts the order. */
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -38,8 +39,15 @@ export default function CheckoutPage() {
           lens_option: item.lensOption,
         })),
       });
-      sessionStorage.setItem(`bongkey_order_access_${order.id}`, order.access_token);
-      sessionStorage.removeItem("bongkey_last_order");
+      try {
+        // shortcut: Guest access lasts for this browser session; add OTP recovery in R1.
+        sessionStorage.removeItem("bongkey_last_order");
+        sessionStorage.setItem(`bongkey_order_access_${order.id}`, order.guest_access_token);
+      } catch {
+        clearCart();
+        setPlacedOrderNumber(order.order_number);
+        return;
+      }
       clearCart();
       router.push(`/order-success/${order.id}`);
     } catch (err) {
@@ -60,6 +68,7 @@ export default function CheckoutPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
         <form className="grid gap-5 rounded-xl border border-black/10 bg-white p-5 shadow-sm" onSubmit={submitOrder}>
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
+          {placedOrderNumber ? <p role="status" className="rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Order {placedOrderNumber} was placed, but this browser could not save access. Contact support with this order number.</p> : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">Name<input name="name" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Your full name" /></label>
             <label className="grid gap-2 text-sm font-black">Phone<input name="phone" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="01XXXXXXXXX" /></label>
@@ -74,7 +83,7 @@ export default function CheckoutPage() {
             <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
             <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
           </div>
-          <Button className="w-full" type="submit">{loading ? "Placing Order..." : "Place Order"}</Button>
+          {!placedOrderNumber ? <Button className="w-full" type="submit">{loading ? "Placing Order..." : "Place Order"}</Button> : null}
         </form>
 
         <aside className="rounded-xl border border-black/10 bg-white p-5 shadow-sm lg:self-start">

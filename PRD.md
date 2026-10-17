@@ -1,7 +1,7 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 0.5  
-Last updated: 2026-09-25  
+Version: 2.2  
+Last updated: 2026-10-15  
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
 
@@ -219,6 +219,9 @@ Keep a record in story evidence of whether each step is Explained, Owner practic
 - Use a modular monolith. Feature modules may include auth, catalog, inventory, orders, payments, delivery, prescriptions, and returns.
 - Follow SOLID principles pragmatically. A folder/component has a clear responsibility; related focused functions can share a file. Do not require one function per file or interfaces without a useful boundary.
 - Separate HTTP handling, business services, and persistence. Prefer small consumer-oriented interfaces and explicit dependency wiring.
+- Apply DDD pragmatically to each touched feature: name domain concepts and rules in business code, keep Gin/JSON and SQL out of those rules, and let the service coordinate transactions. A repository handles persistence; it does not decide order, stock, payment, or ownership policy.
+- Keep feature boundaries explicit: a handler calls its use case, and cross-feature behavior goes through a narrow service/API contract rather than importing another feature's handler or writing its tables directly. Share the PostgreSQL transaction when one business operation must be atomic; avoid mutable package-global dependencies and import cycles.
+- Extract existing layer-based code only while changing that flow. Do not create speculative bounded-context packages, interfaces for every struct, a generic repository, an event bus, or parallel old/new implementations merely to claim DDD.
 - JWT middleware, if used for sessions, validates allowed signature algorithm, signature, expiry, issuer/audience. Define refresh rotation/revocation and secure browser storage/CSRF protections appropriate to the chosen transport.
 - Authentication does not replace ownership/permission checks; enforce these for every private resource.
 - Mutex protects in-process shared memory only. Database integrity and idempotency must work across multiple server instances.
@@ -347,16 +350,59 @@ Example: `ST-01 / REQ-02 — As the owner, I can publish a frame variant so cust
 
 ### Initial ordered repair backlog
 
-Owner for all rows: business owner/developer with AI assistance. FIX-01 is In progress with the guest-access implementation awaiting database and owner verification; other stories remain Backlog unless stated below. Estimate at sprint selection, not by guessing hours here.
+Owner for all rows: business owner/developer with AI assistance. `FIX-01`, `FIX-02`, and `FIX-03` are in Review/QA after their 2026-10-15 implementations; all other rows remain Backlog. No live database verification is claimed. The provisional focused-hour ranges below support sprint selection; revise them with actual results instead of treating them as a delivery forecast.
 
 | Story | Priority / REQ | Outcome and acceptance | Dependency / evidence |
 | --- | --- | --- | --- |
-| FIX-01 | Critical / REQ-05,08 | Private order access: anonymous/other-customer requests reveal no personal data; authorized owner/admin can access; guessing order numbers is insufficient | In progress: hashed order-specific guest credentials implemented in D:\Project; unit/HTTP checks pass. SQL/rollback, browser and owner Postman verification pending; admin access still depends on FIX-03 |
-| FIX-02 | Critical / REQ-11 | Remove connection credentials from failure logs; test failure path with synthetic secrets and verify redaction | `backend/cmd/server/main.go:25`; never use real credentials in a test |
-| FIX-03 | High / REQ-01,11 | Explicit JWT algorithm/required identity/admin checks; malformed, expired, wrong-role/issuer/audience tokens denied; startup no longer resets existing admin credentials | `backend/internal/middleware/cors.go:28` and `backend/internal/database/database.go:66`; decide claims/seed lifecycle; preserve existing data |
-| FIX-04 | Critical / REQ-08 | Insufficient stock rejects atomically, concurrent attempts cannot oversell, invalid quantity rejects, write failures are handled, one authoritative stock representation is defined | Inherited stock updates now in `backend/internal/orders/repository.go:75`; invalid quantities/write failures now handled, but stock/concurrency still unverified/unfixed; extend to checkout idempotency in R0 |
+| FIX-01 | Critical / REQ-05,08 | Private order access: anonymous/other-customer requests reveal no personal data; authorized owner/admin can access; guessing order numbers is insufficient | Choose minimal secure guest access; static finding in `backend/internal/routes/routes.go:24` and `backend/internal/handlers/order_handler.go:166`; add negative access tests |
+| FIX-02 | Critical / REQ-11 | Remove connection credentials from failure logs; test failure path with synthetic secrets and verify redaction | Implemented in `backend/cmd/server/main.go`; `TestDatabaseFailureDoesNotLogCredentials` passed on 2026-10-15; owner review pending |
+| FIX-03 | High / REQ-01,11 | Explicit JWT algorithm/required identity/admin checks; malformed, expired, wrong-role/issuer/audience tokens denied; startup no longer resets existing admin credentials | Implemented in `backend/internal/security/admin_token.go`, `backend/internal/auth/admin.go`, `backend/internal/middleware/admin_auth.go`, and `backend/internal/database/database.go`; live PostgreSQL and owner review remain |
+| FIX-04 | Critical / REQ-08 | Insufficient stock rejects atomically, concurrent attempts cannot oversell, invalid quantity rejects, write failures are handled, one authoritative stock representation is defined | `backend/internal/handlers/order_handler.go:108`; real-database concurrency/rollback tests; extend to checkout idempotency in R0 |
 | BASE-01 | High / REQ-01,12 | Reconcile README and PRD status with code and available verification; establish runnable test/CI baseline | Inspect remaining areas rather than copying old “not implemented” notes; record actual results |
 | FLOW-01 | High / REQ-02,04,06,08 | R0 frame-only slice in milestone B; configurable delivery charge replaces hardcoded fee; separate transport/business/persistence where touched | FIX-01–04; split into session-sized stories before starting; no whole-project rewrite |
+
+### Separate execution checklists (2026-10-15)
+
+These unchecked items are open work, not proof of a runtime failure. The code findings are from static inspection; each story needs its own test/demo evidence. Keep only one implementation story in progress at a time, close its failure paths, and then select the next Ready story. A–E are milestones, not a promised number of sprints; R2 starts after pilot feedback.
+
+**Problem checklist — what currently blocks a verified MVP**
+
+- [ ] `FIX-01`: Token-protected lookup and the guest-token migration are implemented; live PostgreSQL has no order yet, so verify guest/admin access with a real local order before closing the former public-order exposure.
+- [ ] `FIX-02`: Startup failure logging is sanitized and a synthetic-secret regression test passes; owner review remains before marking Done.
+- [ ] `FIX-03`: Token/role checks and one-time owner provisioning are implemented; local PostgreSQL auth route checks pass. Owner review, credential handling, and a supported race run remain.
+- [ ] `FIX-04`: Atomic checkout reservation, rollback, checked writes, and stale admin-edit rejection are implemented and locally tested. The new nonnegative-stock constraint still needs owner-led server restart and live migration verification; legacy `stock_items` is retained but no longer used by application code.
+- [ ] `FLOW-01`: The frame-only path still needs idempotency, authoritative pricing/delivery, variant stock, private PDF invoice, and fulfillment/cancellation evidence.
+- [ ] `BASE-01`: Gin warns that all proxies are trusted; configure the trusted proxy boundary before relying on client IPs or exposing this server beyond local development.
+- [ ] R1 gaps: compatible lens pricing/private prescription review, guest OTP, delivery zones, manual payment/advance verification, automatic offers, returns/refunds, operational queues, and pilot release checks.
+
+**Work checklist — priority order; choose an independent Ready item that fits the sprint and split large items before implementation**
+
+- [ ] Close `FIX-01` with secure guest/admin access and negative tests for guessed/other-customer orders.
+- [ ] Close `FIX-02` with redacted failure logging and a synthetic-secret regression test.
+- [ ] Close `FIX-03` after owner review, live-database verification of token/role checks and safe one-time admin provisioning, and a supported CI race run.
+- [ ] Close `FIX-04` with one authoritative stock representation, atomic rejection, checked errors, and real-PostgreSQL concurrency/rollback tests.
+- [ ] Complete `BASE-01`: reconcile implementation notes and record actual Go/frontend checks; the owner performs CI configuration through the guided-learning steps in section 12.
+- [ ] Split `FLOW-01` into small stories, then demonstrate the complete R0 frame-only COD flow and its privacy, repeat-submit, stock, invoice, and cancellation failures.
+- [ ] Split milestone C into R1 lens/prescription, delivery/offers, and manual payment/advance stories with server-side rules and review gates.
+- [ ] Split milestone D into guest OTP, fulfillment/returns/refunds, notification, and operational-report stories; verify the real provider and deadline paths.
+- [ ] Complete milestone E only after the section 18 checklist, owner-led staging/recovery practice, and explicit pilot acceptance pass.
+- [ ] For each backend story before marking Done, review dependency direction: handler handles HTTP, service owns domain rules/transaction, repository owns SQL; cross-feature calls use a narrow contract, with no new package globals, import cycles, or duplicate implementation. Trace one success and one failure request through the real code.
+
+**Work-time checklist — first-pass focused hours, including focused tests/review**
+
+These ranges are planning guesses from static code inspection, not elapsed days or a launch promise. Owner decisions, provider onboarding, and infrastructure practice can add waiting time. Record actual focused hours and blockers after each story; revise the remaining ranges after two verified stories.
+
+| Check | Story | Initial estimate | Actual focused hours / evidence |
+| --- | --- | --- | --- |
+| [ ] | `FIX-01` | 8–16 hours after guest-access design is chosen | Unit QA passed 2026-10-15; local PostgreSQL guest-token column check passed 2026-10-17, but no existing order was available for real guest/admin access checks; actual focused hours not recorded |
+| [ ] | `FIX-02` | 1–3 hours | Synthetic-secret failure-path test passed again 2026-10-15; owner review pending; actual focused hours not recorded |
+| [ ] | `FIX-03` | 8–16 hours | Unit QA passed 2026-10-15; local PostgreSQL owner account and `/api/admin/me` 401/401/200 checks passed 2026-10-17; owner review and supported CI race run pending; actual focused hours not recorded |
+| [ ] | `FIX-04` | 12–24 hours if a test PostgreSQL instance is available | Go tests/vet, frontend build, and local PostgreSQL concurrent reservation, rollback, checkout, and stale-admin-edit tests passed 2026-10-17. New CHECK migration and restarted HTTP server behavior remain; actual focused hours not recorded |
+| [ ] | `BASE-01` | 3–6 hours for code/docs/check baseline; owner-led CI practice tracked separately | — |
+| [ ] | `FLOW-01`, C, D, E | Estimate each small story when split and Ready; do not assign one number to a milestone | — |
+
+- [ ] At sprint planning, record the owner's available focused hours for the next two weeks and select only stories that fit.
+- [ ] After each Done story, record actual hours, tests/demo, and carry-over; after two Done stories, forecast a range for the remaining R1 work.
 
 ### Implementation evidence register
 
@@ -365,26 +411,21 @@ Static inspection recorded on 2026-09-25. These findings are limited to inspecte
 | Area | Implementation state | Verification state / next evidence |
 | --- | --- | --- |
 | PRD and coding rules | Written and reviewed as documents | No implication of application correctness |
+| Local PostgreSQL service | Owner installed PostgreSQL 18 and created the local app role/database in pgAdmin | Owner observed `postgresql-x64-18` Running and connected with `psql` to `127.0.0.1:5432` as `postgres`. After creating the app role/database, owner ran `psql` as `bongkey` on database `bongkey`; `SELECT current_database(), current_user` returned `bongkey, bongkey` on 2026-10-16. Owner started the backend on 2026-10-17; its `:8080` listener and HTTP `/health` 200 were observed, and read-only QA confirmed database connection, owner row and guest-token column. The startup sequence reaches these only after migration/seed succeeds |
 | Catalog/order endpoints | Partial: handlers/routes exist despite stale README claims | End-to-end behavior not verified in this review |
-| Owner authentication | Partial; JWT/bcrypt present, access/seed gaps identified | Negative authorization and startup tests required |
-| Order privacy | Partial: guest token boundary implemented in D:\Project; existing admin access still needs FIX-03 | Unit/HTTP checks passed 2026-09-25; real PostgreSQL integration test skipped, browser/Postman not run |
-| Stock/order integrity | Known blocker; decrement clamps to zero without availability check | FIX-04 unverified/unfixed |
+| Owner authentication | Token claim/algorithm verification, current owner-role check, and one-time seed implemented | Fresh `go test ./... -count=1`, `go vet ./...`, and frontend TypeScript check passed on 2026-10-15; prior clean `npm run build` passed. Owner replaced the rejected demo bootstrap password before startup. Read-only `TestLocalDatabaseAccessQA` passed on local PostgreSQL 2026-10-17: `/api/admin/me` returned 401 without a token, 401 with a bad token, and 200 with a current-owner token; its owner password hash is valid and not the old demo password. Local `go test -race ./...` could not start binaries (`0xc0000139`); owner review and supported CI race run remain |
+| Database connection failure logging | Generic startup error replaces URL/driver output | Synthetic-secret failure-path test included in fresh `go test ./... -count=1` and `go vet ./...` on 2026-10-15; owner review pending |
+| Order privacy | Guest token/hash access and admin route implemented on 2026-10-15; older orders have no guest token | Fresh `go test ./... -count=1` and `go vet ./...` passed 2026-10-15; read-only real-DB test in `backend/cmd/server/live_qa_test.go` confirmed `guest_token_hash` column on 2026-10-17. No existing order was present, so live guest denial and owner access remain unverified |
+| Runtime proxy trust | Gin currently emits an all-proxies-trusted warning | Configure trusted proxies before relying on forwarded client IPs or exposing the backend beyond local development |
+| Stock/order integrity | Checkout service reserves aggregated quantities in product-ID order using a conditional PostgreSQL update; order, items, invoice, and stock commit atomically. Admin edits require the stock count loaded by the form. `products.stock_quantity` is the runtime source; old `stock_items` rows are retained but unused | Go tests/vet and frontend build passed 2026-10-17. Local PostgreSQL tests passed concurrent one-winner reservation, rollback, full checkout/rejection, and stale admin update. The new nonnegative CHECK migration has not run on the owner's existing DB; restart and constraint test remain before FIX-04 can close |
 | Delivery/lens pricing | Partial: delivery hardcoded to 80; lens label accepted without lens charge | R0/R1 pricing tests required |
 | Invoice | Invoice database creation present | PDF generation/download and secure access not established by this inspection |
-| Tests | Backend security/service/HTTP tests added; opt-in PostgreSQL integration test and Postman collection added | Go vet/unit tests and frontend typecheck/build passed 2026-09-25; PostgreSQL test skipped; frontend lint requires configuration |
+| Tests | No test/spec files found in searched backend/frontend source paths | Confirm tooling, add meaningful regression coverage and run it |
 | Remaining R1/R2 features | Not audited | Do not label missing or complete without inspection |
 
 Use two independent fields going forward: implementation = Missing / Partial / Implemented / Not audited; verification = Not run / Failed / Passed (with date, scope, command/demo evidence). Never claim a completion percentage from file counts. The owner should explain each accepted story's request-to-database flow, failure paths, and the tests proving them.
 
-**2026-09-25 working-copy update:** The owner authorized continuing from the existing application source in `D:\Project`, with separate `frontend/` and `backend/` folders. Source was copied from `E:\Eyewear-mvp`; the original project, secrets, uploads and infrastructure were not changed or copied. Responses, documentation and new/changed code comments use professional English; the owner may communicate in Banglish.
-
-The FIX-01 internal-demo implementation issues a random 256-bit bearer token per new order, stores only its hash atomically with the order, and expires access after 30 days. Tokens are sent in headers and retained per order in browser session storage. Historical orders receive no automatic grant; production guest recovery/OTP and transport policy still require their own decisions. The handler/service/repository checkout extraction preserves inherited delivery/lens pricing and stock behavior; it does not close FIX-04. Invalid quantities and write errors now reject checkout. The admin queue remains on the inherited authentication boundary and is not claimed secure by this guest-only repair.
-
-Verification commands and the actual request flow are recorded in README. The opt-in PostgreSQL test requires an isolated test database; its skip is not a pass for SQL/transaction behavior. Owner Postman practice, browser/mobile verification, Docker, CI and deployment remain Not run. The inherited frontend dependency install reported three high and two critical vulnerabilities; remediation and ESLint configuration remain follow-up work. FIX-01 is not Done and no R0/R1 readiness is claimed.
-
 ### 16.5 Change and defect management
-
-**2026-09-25 sequencing decision:** The owner chose to develop against locally installed PostgreSQL and postpone Docker until the core application works, before staging/deployment. PostgreSQL installation was explained but is not confirmed practiced or verified. Development is paused at the owner's request after today's checks; resume with local database installation/configuration and the outstanding FIX-01 database/Postman verification. Docker remains owner-led and is still required before the planned containerized release; no release gates are removed.
 
 - New ideas enter the backlog and are prioritized against the MVP. Changes affecting current goals require an explicit scope tradeoff; record the reason and forecast impact.
 - A changed business rule updates its requirement, acceptance scenarios, related tests, and policy snapshot behavior. Keep a brief decision entry here with date, choice, rationale, and affected REQ IDs.
@@ -459,3 +500,20 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-09-25 | 0.3 | Owner authorized critique-based revision: reduced R1 pilot scope, deferred gateway/accounts/coupons to R2, withdrew unsupported 17-week forecast, prioritized known security/stock fixes, added implementation/evidence register and rolling sprint planning, and replaced arbitrary operating targets with pre-launch evidence-based decisions. No application fixes claimed. |
 | 2026-09-25 | 0.4 | Added owner-led guided learning for Docker, CI/CD and deployment, explicit implementation stages and practice/verification evidence. AI teaches and reviews rather than performing infrastructure steps unless specifically delegated. |
 | 2026-09-25 | 0.5 | Added concrete request/function-call tracing to backend learning acceptance: actual callers/callees, reasons, inputs/results, middleware behavior, database effects and failure paths with code references. |
+| 2026-10-15 | 0.6 | Added separate problem, work, and provisional work-time checklists; made one-story-at-a-time delivery and pragmatic DDD/low-coupling boundaries explicit. No application story marked Done. |
+| 2026-10-15 | 0.7 | Recorded FIX-01 guest-token implementation and passing unit/static checks as Review/QA; live PostgreSQL migration/access verification and FIX-03 remain open. |
+| 2026-10-15 | 0.8 | Recorded FIX-02 sanitized database startup logging and passing synthetic-secret failure-path test as Review/QA. |
+| 2026-10-15 | 0.9 | Implemented FIX-03 owner JWT validation, current-role lookup, one-time seed, fail-closed secret configuration, tab-scoped frontend session and sign-out; focused tests/static checks passed. Local Windows race binaries could not start, so a supported owner-led CI race run joins live PostgreSQL/owner QA and credential review. |
+| 2026-10-15 | 1.0 | Added read-only local PostgreSQL access QA for FIX-01/03 and reran Go/frontend static checks. The live test stopped before DB connection because local JWT configuration is missing or still a rejected template; no live DB result is claimed. FIX-02 regression passed again; owner review remains. |
+| 2026-10-15 | 1.1 | Recorded the owner's PostgreSQL 18 service check as Running. Read-only live QA was retried and again stopped at local JWT configuration before making a database connection. |
+| 2026-10-15 | 1.2 | Diagnosed the local JWT configuration without exposing its value: one JWT_SECRET line exists, but its 25-character value is below the required 32 characters. Live database QA remains pending. |
+| 2026-10-15 | 1.3 | Owner corrected JWT configuration. Read-only live QA now reaches the connection attempt and reports configured localhost port 5433 unreachable; PostgreSQL 18 service is Running, but its actual listener port is not yet verified. |
+| 2026-10-15 | 1.4 | Recorded the owner's service-PID listener check returning no rows. This result is inconclusive because PostgreSQL may own its listening socket in a child process; process-level port check remains. |
+| 2026-10-15 | 1.5 | Owner verified a read-only `psql` connection to local PostgreSQL on port 5432. App configuration still uses port 5433, so application connectivity and live access QA remain pending. |
+| 2026-10-15 | 1.6 | Owner changed the app database port to 5432. Read-only app QA cannot access loopback inside the execution sandbox; outside it, the QA reaches PostgreSQL but the configured app password is rejected. User/database verification and live auth/order access QA remain pending. |
+| 2026-10-15 | 1.7 | Owner queried local PostgreSQL catalogs and verified that the app role and database are both absent. Owner-led creation with a fresh private password is the next local setup step; live app QA remains pending. |
+| 2026-10-16 | 1.8 | Owner created the app role/database in pgAdmin and verified a read-only `psql` login as `bongkey` to `bongkey`. App credential update and live application QA remain pending. |
+| 2026-10-17 | 1.9 | Confirmed the app reads the intended local `.env` endpoint and no process override exists. Read-only live app QA reaches PostgreSQL but the configured password is rejected; role/app credential alignment remains before schema and access QA. |
+| 2026-10-17 | 2.0 | Owner reset the local app role password and aligned `.env`; read-only app QA now connects to PostgreSQL. QA stops at the unreadable/missing owner account. The current demo `ADMIN_PASSWORD` is rejected by first-owner seed, so owner must replace it before startup migration/seed and live access QA. |
+| 2026-10-17 | 2.1 | Owner started the backend after replacing bootstrap secrets. Live `/health` returned 200; read-only PostgreSQL QA passed owner-account, admin-token 401/401/200, and guest-token column checks. No order exists yet for live order-access checks. Gin's all-proxies-trusted startup warning was recorded for the runtime boundary. |
+| 2026-10-17 | 2.2 | Implemented FIX-04 checkout stock reservation in an order service/repository transaction, removed runtime writes to duplicate `stock_items`, added stale admin-edit rejection and a nonnegative-stock migration. Go tests/vet, frontend build, and focused local PostgreSQL checkout/concurrency/rollback/admin-edit tests passed. Owner-led restart, migration check, and restarted HTTP verification remain; legacy stock table is not dropped. |

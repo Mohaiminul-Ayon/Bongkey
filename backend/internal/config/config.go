@@ -33,17 +33,29 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{
+	cfg := Config{
 		AppEnv:        getEnv("APP_ENV", "development"),
 		ServerPort:    getEnv("SERVER_PORT", "8080"),
 		DatabaseURL:   getEnv("DATABASE_URL", "postgres://bongkey:bongkey_password@localhost:5432/bongkey?sslmode=disable"),
-		AdminEmail:    getEnv("ADMIN_EMAIL", "admin@bongkey.com"),
-		AdminPassword: getEnv("ADMIN_PASSWORD", "admin12345"),
-		JWTSecret:     getEnv("JWT_SECRET", "change-this-secret"),
+		AdminEmail:    getEnv("ADMIN_EMAIL", ""),
+		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
+		JWTSecret:     getEnv("JWT_SECRET", ""),
 		ProjectRoot:   projectRoot,
 		EnvFile:       loadedEnvFile,
 		EnvFileHint:   envFileHint,
-	}, nil
+	}
+	if err := cfg.validateSecurity(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// validateSecurity rejects missing or known template keys before startup.
+func (cfg Config) validateSecurity() error {
+	if len(cfg.JWTSecret) < 32 || strings.HasPrefix(cfg.JWTSecret, "change-this-secret") {
+		return fmt.Errorf("JWT_SECRET must be a non-template secret of at least 32 characters")
+	}
+	return nil
 }
 
 func getEnv(key string, fallback string) string {
@@ -55,7 +67,6 @@ func getEnv(key string, fallback string) string {
 	return value
 }
 
-// findProjectRoot locates application sources without requiring Docker configuration.
 func findProjectRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -63,13 +74,13 @@ func findProjectRoot() (string, error) {
 	}
 
 	for {
-		if fileExists(filepath.Join(dir, "backend", "go.mod")) && fileExists(filepath.Join(dir, "frontend", "package.json")) {
+		if fileExists(filepath.Join(dir, ".env.example")) && fileExists(filepath.Join(dir, "docker-compose.yml")) {
 			return dir, nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", fmt.Errorf("could not find project root from %s; expected backend/go.mod and frontend/package.json", dir)
+			return "", fmt.Errorf("could not find project root from %s; expected .env.example and docker-compose.yml", dir)
 		}
 		dir = parent
 	}

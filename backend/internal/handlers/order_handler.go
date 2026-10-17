@@ -1,79 +1,86 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/orders"
+
 	"github.com/gin-gonic/gin"
 )
 
-type orderService interface {
-	Create(context.Context, orders.Input) (orders.Created, error)
-	GetGuest(context.Context, string, string) (orders.Order, error)
+type orderRequest struct {
+	CustomerName        string             `json:"customer_name"`
+	CustomerPhone       string             `json:"customer_phone"`
+	CustomerEmail       string             `json:"customer_email"`
+	ShippingAddress     string             `json:"shipping_address"`
+	City                string             `json:"city"`
+	DeliveryNote        string             `json:"delivery_note"`
+	PrescriptionFileURL string             `json:"prescription_file_url"`
+	Items               []orderItemRequest `json:"items"`
 }
 
-// OrderHandler adapts checkout and guest access to HTTP without owning persistence.
-type OrderHandler struct{ Service orderService }
+type orderItemRequest struct {
+	ProductID  int    `json:"product_id"`
+	Quantity   int    `json:"quantity"`
+	LensOption string `json:"lens_option"`
+}
 
-// Create parses bounded checkout input and returns a credential only after commit.
-func (h OrderHandler) Create(c *gin.Context) {
+// CheckoutHandler maps order input and checkout decisions to HTTP.
+type CheckoutHandler struct {
+	Service orders.CheckoutService
+}
+
+// CreateOrder places a COD order without exposing persistence details to HTTP.
+func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
+	if !database.Ready() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
+		return
+	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
-	var input orders.Input
-	if err := c.ShouldBindJSON(&input); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "order request too large"})
-		} else {
+	var req orderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order data"})
+		return
+	}
+	if req.CustomerName == "" || req.CustomerPhone == "" || req.ShippingAddress == "" || req.City == "" || len(req.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "customer details and cart items are required"})
+		return
+	}
+	items := make([]orders.CheckoutItem, len(req.Items))
+	for i, item := range req.Items {
+		items[i] = orders.CheckoutItem{ProductID: item.ProductID, Quantity: item.Quantity, LensOption: item.LensOption}
+	}
+	receipt, err := h.Service.Place(c.Request.Context(), orders.CheckoutRequest{
+		CustomerName: req.CustomerName, CustomerPhone: req.CustomerPhone,
+		CustomerEmail: req.CustomerEmail, ShippingAddress: req.ShippingAddress,
+		City: req.City, DeliveryNote: req.DeliveryNote,
+		PrescriptionFileURL: req.PrescriptionFileURL, Items: items,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, orders.ErrInvalidCheckout):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order data"})
+		case errors.Is(err, orders.ErrUnavailable):
+			c.JSON(http.StatusConflict, gin.H{"error": "item unavailable or out of stock"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create order"})
 		}
 		return
 	}
-	result, err := h.Service.Create(c.Request.Context(), input)
-	if err != nil {
-		writeOrderError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
+	c.JSON(http.StatusOK, gin.H{
+		"id": receipt.ID, "order_number": receipt.OrderNumber,
+		"invoice_number": receipt.InvoiceNumber,
+		"customer_name":  req.CustomerName, "customer_phone": req.CustomerPhone,
+		"shipping_address": req.ShippingAddress, "city": req.City,
+		"subtotal": receipt.Subtotal, "delivery_fee": receipt.DeliveryFee,
+		"total": receipt.Total, "payment_method": "cash_on_delivery",
+		"order_status": "pending", "guest_access_token": receipt.GuestAccessToken,
+	})
 }
-
-// Get rejects absent credentials before the service can read private order fields.
-func (h OrderHandler) Get(c *gin.Context) {
-	c.Header("Cache-Control", "no-store")
-	parts := strings.Fields(c.GetHeader("Authorization"))
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		writeOrderError(c, orders.ErrCredentials)
-		return
-	}
-	result, err := h.Service.GetGuest(c.Request.Context(), c.Param("id"), parts[1])
-	if err != nil {
-		writeOrderError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, result)
-}
-
-// writeOrderError maps expected failures and hides internal database diagnostics.
-func writeOrderError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, orders.ErrInvalid):
-		c.JSON(http.StatusBadRequest, gin.H{"error": orders.ErrInvalid.Error()})
-	case errors.Is(err, orders.ErrUnavailable):
-		c.JSON(http.StatusBadRequest, gin.H{"error": orders.ErrUnavailable.Error()})
-	case errors.Is(err, orders.ErrCredentials):
-		c.JSON(http.StatusUnauthorized, gin.H{"error": orders.ErrCredentials.Error()})
-	case errors.Is(err, orders.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": orders.ErrNotFound.Error()})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not process order"})
-	}
-}
-
-// ListOrders returns the inherited administrator order queue.
 func ListOrders(c *gin.Context) {
 	rows, err := database.DB.Query(`SELECT id, order_number, customer_name, customer_phone, city, total, order_status, created_at FROM orders ORDER BY id DESC`)
 	if err != nil {
@@ -92,4 +99,47 @@ func ListOrders(c *gin.Context) {
 		orders = append(orders, gin.H{"id": id, "order_number": orderNumber, "customer_name": name, "customer_phone": phone, "city": city, "total": total, "order_status": status, "created_at": createdAt})
 	}
 	c.JSON(http.StatusOK, orders)
+}
+
+// OrderAccessHandler maps private order access decisions to HTTP responses.
+type OrderAccessHandler struct {
+	Service orders.AccessService
+}
+
+// GetOrder requires the secret issued when this guest order was created.
+func (h OrderAccessHandler) GetOrder(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !ok || token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	order, err := h.Service.Guest(c.Request.Context(), c.Param("id"), token)
+	respondWithOrder(c, order, err)
+}
+
+// GetAdminOrder returns private details after AdminAuth has accepted the request.
+func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	order, err := h.Service.Admin(c.Request.Context(), c.Param("id"))
+	respondWithOrder(c, order, err)
+}
+
+// respondWithOrder keeps errors generic and excludes the stored access hash.
+func respondWithOrder(c *gin.Context, order orders.Summary, err error) {
+	if errors.Is(err, orders.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load order"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"id": order.ID, "order_number": order.OrderNumber, "invoice_number": order.InvoiceNumber,
+		"customer_name": order.CustomerName, "customer_phone": order.CustomerPhone,
+		"shipping_address": order.ShippingAddress, "city": order.City,
+		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee,
+		"total": order.Total, "order_status": order.Status,
+	})
 }

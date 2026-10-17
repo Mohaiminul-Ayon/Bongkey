@@ -20,34 +20,36 @@ type Order = {
   order_status: string;
 };
 
-// OrderSuccessPage displays only a server-authorized summary for the requested order.
+/** OrderSuccessPage loads private order details using this session's guest token. */
 export default function OrderSuccessPage() {
   const params = useParams<{ orderId: string }>();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let active = true;
-    setOrder(null);
-    setError("");
-    sessionStorage.removeItem("bongkey_last_order");
-    const token = sessionStorage.getItem(`bongkey_order_access_${params.orderId}`);
+    let token: string | null;
+    try {
+      sessionStorage.removeItem("bongkey_last_order");
+      token = sessionStorage.getItem(`bongkey_order_access_${params.orderId}`);
+    } catch {
+      setError("Order access is unavailable in this browser session. Please contact support.");
+      return;
+    }
     if (!token) {
-      setError("This order requires the access credential from checkout. Please contact the store if you need help.");
+      setError("Order access is unavailable in this browser session. Please contact support.");
       return;
     }
     fetchOrder(params.orderId, token)
-      .then((result) => { if (active) setOrder(result); })
-      .catch(() => { if (active) setError("We could not access this order. Your access may have expired, or the service may be unavailable."); });
-    return () => { active = false; };
+      .then(setOrder)
+      .catch(() => setError("Could not load this order. Please contact support if the problem continues."));
   }, [params.orderId]);
 
   return (
     <section className="mx-auto max-w-3xl px-4 py-10 md:px-6">
       <div className="rounded-xl bg-white p-6 shadow-sm">
-        <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Order information</p>
-        <h1 className="mt-2 text-4xl font-black text-neutral-950">Your order details</h1>
-        {order && String(order.id) === params.orderId ? (
+        <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Order received</p>
+        <h1 className="mt-2 text-4xl font-black text-neutral-950">Thank you for ordering from Bongkey.</h1>
+        {order ? (
           <div className="mt-6 grid gap-3 text-sm">
             <div className="rounded-md bg-[#f0f7f4] p-4 text-[#173c34]">
               <p className="font-black">Order: {order.order_number}</p>
@@ -63,8 +65,10 @@ export default function OrderSuccessPage() {
             </div>
             <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p>
           </div>
+        ) : error ? (
+          <p role="alert" className="mt-5 text-red-700">{error}</p>
         ) : (
-          <p className="mt-5 text-neutral-600" role={error ? "alert" : "status"}>{error || "Loading order summary..."}</p>
+          <p className="mt-5 text-neutral-600">Loading invoice summary...</p>
         )}
         <Button className="mt-6" href="/products">Continue Shopping</Button>
       </div>

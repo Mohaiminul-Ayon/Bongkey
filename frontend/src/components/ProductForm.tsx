@@ -9,6 +9,7 @@ type ProductFormProps = {
   product?: Product;
 };
 
+// ProductForm sends the loaded stock count so stale admin edits cannot overwrite a sale.
 export function ProductForm({ product }: ProductFormProps) {
   const router = useRouter();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -66,6 +67,7 @@ export function ProductForm({ product }: ProductFormProps) {
       price: formNumber(form, "price"),
       old_price: formNumber(form, "old_price"),
       stock_quantity: formNumber(form, "stock_quantity"),
+      expected_stock_quantity: product?.id ? (product.stockQuantity ?? 0) : undefined,
       brand_tier: formString(form, "brand_tier"),
       frame_type: formString(form, "frame_type"),
       gender: formString(form, "gender"),

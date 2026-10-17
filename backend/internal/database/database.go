@@ -1,13 +1,16 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"bongkey/backend/internal/config"
-	"bongkey/backend/migrations"
 
 	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
@@ -31,7 +34,7 @@ func Ready() bool {
 	return DB != nil
 }
 
-// MigrateAndSeed applies the inherited schema, order-access addition and development seeds.
+// MigrateAndSeed applies the current schema and idempotent migrations before local seed data.
 func MigrateAndSeed(cfg config.Config) error {
 	if DB == nil {
 		return fmt.Errorf("database is not connected")
@@ -39,10 +42,16 @@ func MigrateAndSeed(cfg config.Config) error {
 	if _, err := DB.Exec(schemaSQL); err != nil {
 		return err
 	}
-	if _, err := DB.Exec(migrations.OrderAccess); err != nil {
-		return err
+	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql"} {
+		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+		if _, err := DB.Exec(string(migration)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
 	}
-	if err := seedAdmin(cfg.AdminEmail, cfg.AdminPassword); err != nil {
+	if err := seedAdmin(DB, cfg.AdminEmail, cfg.AdminPassword); err != nil {
 		return err
 	}
 	if err := seedCategories(); err != nil {
@@ -55,17 +64,37 @@ func MigrateAndSeed(cfg config.Config) error {
 	return nil
 }
 
-func seedAdmin(email, password string) error {
+// seedAdmin bootstraps the first owner once without changing any existing credential.
+func seedAdmin(db *sql.DB, email, password string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Serialize concurrent startup so two instances cannot bootstrap different owners.
+	if _, err := tx.ExecContext(ctx, `LOCK TABLE admins IN EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM admins`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return tx.Commit()
+	}
+	if strings.TrimSpace(email) == "" || len(password) < 12 || password == "admin12345" {
+		return fmt.Errorf("first admin requires ADMIN_EMAIL and a non-template ADMIN_PASSWORD of at least 12 characters")
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	_, err = DB.Exec(`
-		INSERT INTO admins (name, email, password_hash, role)
-		VALUES ($1, $2, $3, 'owner')
-		ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = NOW()
-	`, "Bongkey Owner", email, string(hash))
-	return err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO admins (name, email, password_hash, role) VALUES ($1, $2, $3, 'owner')`, "Bongkey Owner", email, string(hash)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func seedCategories() error {
@@ -86,6 +115,7 @@ type seedProduct struct {
 	Featured                                     bool
 }
 
+// seedProducts inserts local catalog examples while products.stock_quantity remains the stock source.
 func seedProducts() error {
 	items := []seedProduct{
 		{"Bongkey Classic Black Blue-Cut", "Blue-Cut Glasses", "unisex", "budget", "blue_cut", 1190, 1590, 18, "TR90", "Matte Black", "Medium", "52 mm", "18 mm", "140 mm", true},
@@ -125,11 +155,6 @@ func seedProducts() error {
 		if err != nil {
 			return err
 		}
-		_, _ = DB.Exec(`
-			INSERT INTO stock_items (product_id, sku, quantity)
-			SELECT id, $1, stock_quantity FROM products WHERE slug = $2
-			ON CONFLICT (product_id) DO NOTHING
-		`, strings.ToUpper(strings.ReplaceAll(slug, "-", "")), slug)
 	}
 	return nil
 }
@@ -194,15 +219,6 @@ CREATE TABLE IF NOT EXISTS product_images (
 	alt_text TEXT NOT NULL DEFAULT '',
 	sort_order INTEGER NOT NULL DEFAULT 0,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE TABLE IF NOT EXISTS stock_items (
-	id SERIAL PRIMARY KEY,
-	product_id INTEGER NOT NULL UNIQUE REFERENCES products(id) ON DELETE CASCADE,
-	sku TEXT NOT NULL,
-	quantity INTEGER NOT NULL DEFAULT 0,
-	low_stock_threshold INTEGER NOT NULL DEFAULT 5,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-	updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE IF NOT EXISTS orders (
 	id SERIAL PRIMARY KEY,
