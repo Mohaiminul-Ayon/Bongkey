@@ -29,6 +29,8 @@ type Summary struct {
 type Record struct {
 	Summary
 	GuestTokenHash string
+	CustomerEmail  string
+	EmailVerified  bool
 }
 
 // Reader loads one order for the access rule without depending on HTTP.
@@ -38,10 +40,11 @@ type Reader interface {
 
 // AccessService decides whether a guest or admin may receive private order details.
 type AccessService struct {
-	Reader Reader
+	Reader           Reader
+	EmailProofSecret string
 }
 
-// Guest returns an order only when its guest token matches the stored hash.
+// Guest returns an order for its guest token or a proof of its verified email.
 func (s AccessService) Guest(ctx context.Context, id, token string) (Summary, error) {
 	if token == "" {
 		return Summary{}, ErrNotFound
@@ -51,7 +54,10 @@ func (s AccessService) Guest(ctx context.Context, id, token string) (Summary, er
 		return Summary{}, err
 	}
 	if !security.MatchesOrderToken(token, record.GuestTokenHash) {
-		return Summary{}, ErrNotFound
+		email, err := security.VerifyEmailProof(s.EmailProofSecret, token)
+		if err != nil || !record.EmailVerified || email != record.CustomerEmail {
+			return Summary{}, ErrNotFound
+		}
 	}
 	return record.Summary, nil
 }

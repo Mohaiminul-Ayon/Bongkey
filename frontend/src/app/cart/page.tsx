@@ -10,7 +10,7 @@ export default function CartPage() {
   const { items, subtotal, deliveryFee, total, updateQuantity, removeItem } = useCart();
 
   return (
-    <section className="mx-auto max-w-7xl px-4 py-8 md:px-6">
+    <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
         <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Cart</p>
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Your selected frames</h1>

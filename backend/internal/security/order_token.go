@@ -1,11 +1,13 @@
 package security
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 )
 
 // NewOrderToken creates a one-time secret for guest order access and its storage hash.
@@ -15,6 +17,18 @@ func NewOrderToken() (string, string, error) {
 		return "", "", err
 	}
 	token := base64.RawURLEncoding.EncodeToString(random)
+	return token, orderTokenHash(token), nil
+}
+
+// IdempotentOrderToken derives the same guest secret for retries without storing it in plaintext.
+func IdempotentOrderToken(secret, idempotencyKey string) (string, string, error) {
+	if len(secret) < 32 || idempotencyKey == "" {
+		return "", "", errors.New("order token secret and idempotency key are required")
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("bongkey-order-access\x00"))
+	_, _ = mac.Write([]byte(idempotencyKey))
+	token := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	return token, orderTokenHash(token), nil
 }
 

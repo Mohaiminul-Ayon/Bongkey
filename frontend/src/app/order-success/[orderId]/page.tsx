@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
-import { fetchOrder } from "@/lib/api";
+import { fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
 type Order = {
@@ -25,6 +25,38 @@ export default function OrderSuccessPage() {
   const params = useParams<{ orderId: string }>();
   const [order, setOrder] = useState<Order | null>(null);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  /** sendRecoveryCode starts a fresh email check without exposing the order. */
+  async function sendRecoveryCode() {
+    setBusy(true);
+    setError("");
+    try {
+      await requestEmailCode(email.trim());
+      setCodeSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send email code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** recoverOrder loads private details only after the email proof matches this order. */
+  async function recoverOrder() {
+    setBusy(true);
+    setError("");
+    try {
+      const { email_proof } = await verifyEmailCode(email.trim(), code.trim());
+      setOrder(await fetchOrder(params.orderId, email_proof));
+    } catch {
+      setError("Email verification failed or this email does not belong to this order.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     let token: string | null;
@@ -45,7 +77,7 @@ export default function OrderSuccessPage() {
   }, [params.orderId]);
 
   return (
-    <section className="mx-auto max-w-3xl px-4 py-10 md:px-6">
+    <section className="store-flow mx-auto max-w-3xl px-4 py-10 md:px-6">
       <div className="rounded-xl bg-white p-6 shadow-sm">
         <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Order received</p>
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Thank you for ordering from Bongkey.</h1>
@@ -65,8 +97,14 @@ export default function OrderSuccessPage() {
             </div>
             <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p>
           </div>
-        ) : error ? (
-          <p role="alert" className="mt-5 text-red-700">{error}</p>
+        ) : error || codeSent ? (
+          <div className="mt-5 space-y-3">
+            {error ? <p role="alert" className="text-red-700">{error}</p> : null}
+            <p className="text-sm text-neutral-600">Enter the email you verified during checkout to view this order again.</p>
+            <label className="grid gap-2 text-sm font-bold">Verified email<input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setCodeSent(false); setCode(""); }} className="rounded-md border border-neutral-300 px-4 py-3 font-normal" /></label>
+            <button type="button" disabled={busy || !email.trim()} onClick={sendRecoveryCode} className="rounded-md border border-[#173c34] px-3 py-2 text-sm font-bold text-[#173c34] disabled:opacity-50">Send email code</button>
+            {codeSent ? <div className="flex flex-wrap gap-3"><input aria-label="Email verification code" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value)} className="w-32 rounded-md border border-neutral-300 px-3 py-2" placeholder="6-digit code" /><button type="button" disabled={busy || code.length !== 6} onClick={recoverOrder} className="site-button button-primary disabled:opacity-50">View order</button></div> : null}
+          </div>
         ) : (
           <p className="mt-5 text-neutral-600">Loading invoice summary...</p>
         )}

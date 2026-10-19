@@ -149,7 +149,7 @@ export function TryOnModal({ product, onClose }: TryOnModalProps) {
             <Control label="Resize" value={placement.scale} min={0.55} max={1.8} step={0.05} onChange={(value) => updatePlacement("scale", value)} />
             <Control label="Rotate" value={placement.rotation} min={-25} max={25} onChange={(value) => updatePlacement("rotation", value)} />
             <button className="rounded-md border px-4 py-3 text-sm font-black" onClick={reset}>Reset</button>
-            {!mockupSrc ? <p className="rounded-md bg-amber-50 p-3 text-xs font-bold leading-5 text-[#7b531c]">This product has no try-on mockup image yet, so a placeholder frame is shown.</p> : null}
+            {!mockupSrc ? <p className="rounded-md bg-amber-50 p-3 text-xs font-bold leading-5 text-[#7b531c]">This product has no try-on mockup image yet.</p> : null}
           </div>
         </div>
       </div>
@@ -216,17 +216,7 @@ function GlassesOverlay({ placement, src }: { placement: Placement; src: string 
         transform: `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
       }}
     >
-      {src ? <img alt="Try-on eyewear mockup" className="w-full select-none" draggable={false} src={src} /> : <DefaultGlasses />}
-    </div>
-  );
-}
-
-function DefaultGlasses() {
-  return (
-    <div className="relative aspect-[3.5/1] w-full">
-      <div className="absolute left-0 top-1/2 h-[80%] w-[42%] -translate-y-1/2 rounded-full border-[9px] border-neutral-950/85 bg-white/10" />
-      <div className="absolute right-0 top-1/2 h-[80%] w-[42%] -translate-y-1/2 rounded-full border-[9px] border-neutral-950/85 bg-white/10" />
-      <div className="absolute left-1/2 top-1/2 h-[18%] w-[18%] -translate-x-1/2 -translate-y-1/2 border-t-[7px] border-neutral-950/85" />
+      {src ? <img alt="Try-on eyewear mockup" className="w-full select-none" draggable={false} src={src} /> : null}
     </div>
   );
 }

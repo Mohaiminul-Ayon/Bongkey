@@ -1,7 +1,7 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.2  
-Last updated: 2026-10-15  
+Version: 2.13
+Last updated: 2026-10-19
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
 
@@ -19,7 +19,7 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 
 - One store, one owner/admin at launch. No marketplace or seller onboarding.
 - Guest customers may purchase without creating an account.
-- Customers may optionally create/access an account using phone OTP.
+- Customers may optionally create/access an account using verified email in R2.
 - Frames may be purchased alone or with optional lenses. Lenses cannot be purchased independently.
 - Sunglasses are supported. Lens compatibility is configured per applicable product.
 - Prices are fixed and administered in the panel; no prescription-based quotation workflow in the initial scope.
@@ -71,18 +71,18 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 
 ### 5.1 Authentication
 
-- Phone + OTP login. First verified account signup creates an account; subsequent login accesses the existing one.
-- Guest checkout verifies the phone using OTP without requiring an account or silently enrolling the customer.
-- An authenticated customer using the same verified number need not reverify for every order. A changed number requires verification.
-- OTP expiry, retry limits, resend cooldown, and phone/IP rate limits are required. Never log OTPs or authentication tokens.
-- Use a mock SMS adapter in development; production uses a selected SMS provider.
-- Customer account supports order history and saved addresses. Linking past guest orders requires verified ownership; never link from unverified submitted contact details.
+- Guest checkout requires a single-use email OTP before order creation. Completing checkout does not silently create a customer account.
+- The sending provider may be Gmail SMTP, but customers may use any valid email provider. A delivery phone number is operational contact data only and is not an authentication factor.
+- A fresh email OTP may recover secure access to orders placed with that verified email. OTP expiry, single-use consumption, retry/resend limits, email/IP rate limits, and safe non-enumerating responses are required. Never log OTPs or authentication tokens.
+- R2 account signup/login verifies the email explicitly. A guest has no row in the customer-account table; guest and account orders remain in the same orders table, with a nullable customer ID linking an order to an account.
+- After account signup, the customer may explicitly link eligible historical guest orders. The service may update only orders whose normalized email was verified when those orders were placed, must perform the link transactionally, and must never copy/move orders or infer ownership from an unverified address.
+- An authenticated customer using the same verified email need not complete another checkout OTP while the session is valid. Email changes require fresh verification. Shared/reassigned mailbox risk and session expiry/revocation remain part of the R2 account design.
 - Reordering revalidates current stock/prices/options and asks for confirmation before reusing a prescription.
 
 ### 5.2 Checkout data and behavior
 
-- Required: customer name, verified phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice.
-- Optional: email, alternate phone, delivery note. Prescription requirements depend on the selected lens option.
+- Required: customer name, verified email, delivery phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice.
+- Optional: alternate phone and delivery note. Prescription requirements depend on the selected lens option.
 - Show itemized frame/lens prices, discounts, delivery, grand total, advance due now, and amount due on delivery before submission.
 - Detect changed cart prices/availability and require the customer to review the updated checkout before submission.
 - Repeated submission must not create duplicate orders or payments.
@@ -157,7 +157,8 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 ### 9.3 Mandatory invoices
 
 - Every successfully created order receives a uniquely numbered invoice, accessible from confirmation and downloadable as PDF.
-- Registered users access it through order history; guests use secure access; admin can download/print it.
+- Registered users access it through authorized order history; guests use a fresh verified-email proof or an existing secure order session; admin can download/print it.
+- An email may carry an HTTPS order-page link with a nonsecret order identifier; the page must still require a valid scoped proof/session before revealing invoice details or PDF. Never put a bearer token or OTP in the link.
 - Include store information, invoice/order numbers, dates, necessary customer/delivery details, separate frame/lens lines, discounts, delivery charge, total, payment status, paid amount, and balance.
 - Unpaid/COD/pending orders still receive invoices with accurate status. Verified collection updates payment information without rewriting the agreed order prices.
 - Do not include prescription images or detailed prescription values.
@@ -190,7 +191,7 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 - Dashboard: new orders, prescription/advance reviews pending, production/shipping queue, low stock, return/refund deadlines.
 - Catalog, variants, lens compatibility, discounts, delivery zones, payments, orders, prescriptions, policies, and store contact information are administered in dedicated screens.
 - Customer lookup shows necessary contact and order history. No separate support-ticket system at launch.
-- Customer tracking and notifications cover confirmation, missing prescription/action needed, shipping, delivery, and refund updates. Admin controls which events use SMS; separate essential authentication delivery from optional notification settings.
+- Customer tracking and email notifications cover confirmation, missing prescription/action needed, shipping, delivery, and refund updates. Separate essential OTP delivery from optional notification settings.
 - WhatsApp support action may prefill an order number, without putting prescription/private details in a public URL.
 - Basic reporting distinguishes placed order value, collected funds, outstanding COD, pending/completed refunds, and best-selling frames/lens packages. Define gross/net metrics explicitly.
 - One secured owner account; public registration cannot create admins. Include secure recovery and audit history for sensitive changes. Detailed admin authentication/MFA mechanism remains a design decision.
@@ -239,9 +240,9 @@ Keep a record in story evidence of whether each step is Explained, Owner practic
 
 MVP means a complete, safe purchase-and-support flow for a controlled pilot, not completion of the entire feature catalog. First prove a frame-only flow with test data; then add the minimum lens flow required by the real business before the pilot. Security, money/stock correctness, and after-sales obligations cannot be postponed to reduce scope.
 
-- **R0 — verified internal slice:** fix known blockers, then demonstrate owner-managed frame → guest checkout → COD order → private invoice → fulfillment/cancellation and correct stock behavior. No real customers; mock SMS is allowed and clearly labeled.
-- **R1 — controlled pilot MVP:** frame/sunglasses catalog with variants, Men/Women/Unisex browsing and price filter; optional compatible fixed-price lens packages with prescription upload/WhatsApp review; guest OTP; admin-configured delivery zones; COD and manual bKash/Nagad; full/partial advance rules for supported carts; basic automatic discounts scoped to frame/lens/both; secure tracking and PDF invoice; owner fulfillment, payment verification, recovery/audit; returns/exchanges/refunds and deadline queue; operational totals and essential notifications. Production gates apply.
-- **R2 — after pilot feedback:** SSLCOMMERZ, optional customer accounts/history/saved addresses/reorder, coupon campaigns and complex offer combinations, lens extras beyond the initial packages, quick price presets, best-seller/report enhancements and richer notification configuration. Each feature must pass its own acceptance/security checks before enablement.
+- **R0 — verified internal slice:** fix known blockers, then demonstrate owner-managed frame → guest checkout → COD order → private invoice → fulfillment/cancellation and correct stock behavior. No real customers; development email delivery is clearly labeled.
+- **R1 — controlled pilot MVP:** frame/sunglasses catalog with variants, Men/Women/Unisex browsing and price filter; optional compatible fixed-price lens packages with prescription upload/WhatsApp review; guest email OTP; admin-configured delivery zones; COD and manual bKash/Nagad; full/partial advance rules for supported carts; basic automatic discounts scoped to frame/lens/both; secure tracking and PDF invoice; owner fulfillment, payment verification, recovery/audit; returns/exchanges/refunds and deadline queue; operational totals and essential notifications. Production gates apply.
+- **R2 — after pilot feedback:** SSLCOMMERZ, optional customer accounts/history/saved addresses/reorder, coupon campaigns with bounded offer rules, banner/home merchandising controls, storefront/admin UI improvements, lens extras beyond the initial packages, quick price presets, best-seller/report enhancements and richer notification configuration. Section 13.1 specifies the proposed slices and performance gates; arbitrary offer combinations require later refinement. Each feature must pass its own acceptance/security checks before enablement.
 - **R3 — optional future ideas:** section 14. Do not scaffold these now.
 
 R1 uses a small real catalog and a finite set of lens packages/settings. Mixed carts need a documented advance rule before checkout; resolve it when implementing pricing. Coupon input, account login and gateway options must be absent or clearly unavailable until R2 is implemented. Customers must never be promised an unavailable feature. An R0 demo is not an R1 launch.
@@ -252,7 +253,7 @@ R1 uses a small real catalog and a finite set of lens packages/settings. Mixed c
 | REQ-02 | Admin catalog/variants, categories/audiences, images/measurements, stock history and storefront filtering | 3, 9.2 | R0 basic flow; R1 discovery; R2 quick presets |
 | REQ-03 | Optional compatible lens packages/extras, fixed pricing, no standalone lens sales, prescription review | 4 | R1 packages/review; R2 additional extras |
 | REQ-04 | Cart, frame/lens/both offers and coupons, authoritative price calculation and snapshots | 5.2, 6 | R0 correct totals; R1 automatic offers; R2 coupons |
-| REQ-05 | Guest OTP checkout, optional phone account, secure order access, history, addresses and safe reorder | 5 | R1 guest OTP/access; R2 accounts/history/reorder |
+| REQ-05 | Guest email-OTP checkout, optional verified-email account, secure order access, safe historical linking, addresses and reorder | 5 | R1 guest email OTP/access; R2 accounts/history/link/reorder |
 | REQ-06 | Admin-configured delivery zones, coverage and charges, manual courier tracking | 7 | R1; no hardcoded charge in R0 verified checkout |
 | REQ-07 | COD, manual bKash/Nagad, SSLCOMMERZ, configurable advance, reconciliation and retry protection | 8 | R0 COD; R1 manual/advance; R2 gateway |
 | REQ-08 | Idempotent orders, stock reservations, admin processing, customer tracking and mandatory PDF invoices | 9 | R0 basic complete flow; R1 lens/manual collection |
@@ -269,7 +270,7 @@ The reduced release boundary above is the explicit scope change authorized in ve
 
 Apply each scenario to its enabled release scope. R2 scenarios do not block R1, but R1 must not expose their incomplete flows. The coupon and gateway-callback portions below are R2; stock/idempotency and basic offer protections apply from R0/R1.
 
-- Frame-only guest verifies a phone, orders without an account/prescription, and securely downloads an unpaid COD invoice.
+- Frame-only guest verifies an email, orders without an account/prescription, and securely downloads an unpaid COD invoice.
 - Frame-with-lens checkout computes valid option prices and accepts image/PDF or WhatsApp-later; production is blocked until required review/advance verification.
 - No standalone lens purchase or incompatible lens combination can be submitted through either UI or API.
 - Admin category/price/zone/policy changes affect new purchases while old order snapshots remain consistent.
@@ -282,6 +283,121 @@ Apply each scenario to its enabled release scope. R2 scenarios do not block R1, 
 - Order tracking, essential notifications, low-stock warnings, refund alerts, and collected/outstanding reports reflect actual state.
 - Owner can recover access; backup restore succeeds; production starts without test accounts/secrets.
 
+### 13.1 Phase 2 (R2) — reviewable delivery specification
+
+Prepared 2026-10-18 at the owner's request. This is a proposed implementation backlog, not completed work or authorization to deploy. R2 starts after the R1 pilot review; the owner can reprioritize the slices using actual customer/support evidence. The goal is an independently operable admin workspace, a clear mobile shopping experience, and measured responsiveness. “Best shop” is evaluated through the acceptance checks below, not a visual or speed guarantee.
+
+#### Problem checklist and release boundary
+
+- [ ] Close existing R0/R1 gaps before enabling real sales: browser verified-email recovery, remaining admin-auth verification, configurable delivery/pricing, variant stock, private PDF invoices, fulfillment/cancellation, lens/prescription/payment/return operations and section 18 gates. Consult the implementation register for evidence; this is not a new claim that every item is unimplemented.
+- [ ] Separate admin and storefront presentation. Current `frontend/src/app/layout.tsx` applies the customer header/footer/cart to all routes; separate layouts are needed. Backend authorization remains mandatory regardless of layout.
+- [ ] Complete the R1 catalog operations before R2 enhancements. Current `ProductForm.tsx` has price, old price, size text, stock and a primary image; size text is not variant inventory, and old price is not a discount engine.
+- [ ] Improve campaign control: R2 adds banners, curated home sections and coupons. Basic automatic discounts, category management, variant prices/images and usable order operations remain R1 obligations.
+- [ ] Add optional accounts with verified historical-order linking; preserve guest checkout and the single orders table.
+- [ ] Measure current performance before claiming the site is fast. Record page, API and provider latency separately; there is no measured baseline yet.
+
+#### Work checklist and sequence
+
+All rows initially have state **Backlog**, owner **business owner/developer with AI assistance**. These are feature slices to split into 1–3-session stories at refinement, not eight promised sprints. Each slice includes relevant negative tests, mobile checks, review and owner demonstration. P1 means first R2 candidates; P2 means later R2 candidates. Correctness and privacy are mandatory at either priority.
+
+| Done | Slice / priority / traceability | Outcome and acceptance | Dependency |
+| --- | --- | --- | --- |
+| [ ] | R2-01 Storefront and admin UX / P1 / REQ-02,10,12 | Agree one home, listing, product, checkout and admin-order design before coding. Separate layouts; consistent typography/forms/buttons; usable navigation and filter state; keyboard/mobile/error states pass the UI checklist below. Required R1 usability fixes happen earlier. | Pilot feedback, real product photography and brand direction |
+| [ ] | R2-02 Merchandising controls / P1 / REQ-02,10 | Owner creates a banner with mobile/desktop image, alt text, title, safe internal destination, display order and start/end time; previews draft, publishes/unpublishes and sees it in the intended section. Add bounded featured collections and gallery ordering/captions. Reject invalid schedules and unsafe links; missing/expired content leaves a usable page. | R1 catalog; R2-01 components; image handling and cache invalidation |
+| [ ] | R2-03 Coupon campaigns / P1 / REQ-04 | Fixed/percentage coupons support frame/lens/both scope, eligible products/categories, minimum subtotal, cap, dates, enabled state and global usage limit. Backend recalculates; expiry/invalid code explains failure without losing cart. Concurrent final-use requests accept at most the allowed count; retries do not consume twice. Order records preserve the applied rule and exact amount. | R1 pricing/automatic offers, idempotent checkout; overlap and usage-release policy agreed |
+| [ ] | R2-04 Customer account / P1 / REQ-05 | Explicit email-verified signup/login, logout and session expiry; profile, saved addresses, private order/invoice history and reorder. Customer explicitly confirms historical guest linking; only eligible verified matching-email orders link atomically, never orders owned by another account. Reorder checks current prices/stock/options and reconfirms prescription use. Wrong-account access and replayed OTP/session are denied. | Verified real email delivery; account/session and email-change policy |
+| [ ] | R2-05 Online payment / P1 / REQ-07,08 | SSLCOMMERZ initiation, authoritative server verification, pending/failure/cancel views and reconciliation queue. Validate amount/currency/order/provider identity; duplicated or out-of-order callbacks cannot double-collect or change stock twice. Network timeout remains recoverable; late success after reservation expiry follows an agreed rule. Sandbox evidence precedes separately authorized live payment/refund verification. | R1 payment records/advance/stock lifecycle, provider onboarding and official contract review |
+| [ ] | R2-06 Lens and discovery enhancements / P2 / REQ-02,03 | Compatible optional lens extras without double charging; admin price-range presets; bounded product search and combined filters with URL state/reset/empty results. Reject hidden/incompatible options server-side. Display price, filter price and checkout agree under active offers. | Stable R1 lens package pricing and catalog; owner-approved extras |
+| [ ] | R2-07 Reports and notification controls / P2 / REQ-10,11 | Date-range summaries and bounded export distinguish order value, receipts, refunds and outstanding amounts; best sellers use a documented basis and match reconciliation fixtures. Essential messages have delivery/retry status; optional message settings never disable verification or required operational communication. Safe exports exclude prescriptions, secrets and formula injection. | Reliable R1 operational records and notification delivery; metric definitions |
+| [ ] | R2-08 Performance and release verification / P1, continuous / REQ-01,11,12 | Capture baseline before R2-01; measure each changed flow; fix demonstrated bottlenecks and run the final matrix below. Record dataset, environment, latency/error results and recovery evidence. No correctness regression under concurrent stock/coupon/payment operations. | All enabled slices; owner-led staging/CI readiness |
+
+Proposed order: baseline → R2-01 → R2-02 → R2-03 → R2-04 → R2-05 → selected R2-06/07 → final R2-08 gate. Adjust gateway/account/coupon order after pilot evidence. Work on one implementation story at a time; performance checks accompany each story rather than waiting until the end.
+
+#### Admin control contract
+
+The owner must be able to change enabled business settings without editing code: category publication, variant size/color/SKU/price/stock, gallery, compatible lens prices, automatic discounts, delivery charges, permitted payment/advance settings, order processing and return policy belong to R1. R2 adds campaign coupons, banner/home-section scheduling, richer reports and notification settings. Technical secrets, arbitrary SQL, unrestricted HTML/scripts and infrastructure access are not admin content controls.
+
+Every sensitive mutation requires server-side authorization, explicit allowed fields, validation and an audit record with actor/time/reason where relevant. Reject stale stock/settings edits where overwriting another action would lose business state. Preview and publish are distinct for promotional content. Destructive actions explain impact; archive referenced products instead of breaking old orders. New settings never rewrite accepted order agreements.
+
+Coupon policy proposal for owner review: one coupon per order; no stacking on already-discounted item amounts; calculate only over eligible merchandise, excluding delivery; apply percentage rounding once using the documented money unit; never exceed eligible value. Reserve usage atomically with the accepted order; define exactly which cancellation/expiry states release it and how refunds affect it before implementing. Per-customer limits require verified identity and cannot rely on a typed email. Arbitrary combinations and free-delivery campaigns are not included in the initial coupon slice.
+
+#### UI acceptance checklist
+
+- [ ] Approve visual direction using actual eyewear photos: readable type, consistent spacing/colors, clear price hierarchy and restrained motion. Build reusable existing components where appropriate; avoid an unrelated redesign framework.
+- [ ] Review home, collection/search, product, cart, OTP checkout, tracking/invoice, account and admin screens at 360, 390, 768 and 1440 px. No page overflow or obscured actions; deliberate scroll regions for wide admin tables are labeled.
+- [ ] Product page clearly shows variant availability, measurements/size guide, gallery, frame price, optional lens cost, delivery/return terms and final item total. A mobile add-to-cart action must not cover content or keyboard focus.
+- [ ] Filters preserve selections/back-navigation; show result count and reset. Cart edits and checkout errors preserve valid input. Repeated submit is safe, with an obvious pending state and recoverable retry.
+- [ ] Forms have visible labels, field-specific errors and error summary/focus behavior. All actions work by keyboard; dialogs return focus, status changes are announced, color is not the only signal, and reduced-motion preferences are respected. Aim for at least 44 px touch controls.
+- [ ] Loading, empty, unavailable, out-of-stock, session-expired and network-failure states are designed. Never display demo purchases/products as real data when production APIs fail.
+- [ ] Admin lists offer bounded pagination, relevant search/filter, status and next action; forms identify unsaved changes and show save success/failure. Customer pages never show internal notes.
+- [ ] Public pages have accurate titles/descriptions, canonical URLs and indexable published products; private/admin pages are excluded from indexing, while authorization independently protects them. Structured product data, if added, must match actual price/availability.
+- [ ] Owner demonstrates finding a frame, choosing a size/lens, completing verified checkout and finding an invoice on mobile, plus changing a campaign and processing an order in admin. Record usability issues and fixes; visual approval alone does not establish usability.
+
+A responsive Next.js/React website is the mobile delivery scope. A native React Native app is a separate future effort; the Go API can be reused, but existing web components are not automatically native screens. Native apps, offline checkout and push notifications are not prerequisites for R2.
+
+#### Speed budgets and measurement checklist
+
+The following are **proposed acceptance budgets**, not current results or guaranteed hosting capacity. Confirm the staging machine, network profile and expected traffic during baseline measurement; record approved changes rather than quietly lowering a failed target. Section 17 still governs R1 readiness.
+
+| Surface | Proposed budget | Measurement boundary |
+| --- | --- | --- |
+| Mobile/desktop shopping | p75 LCP ≤ 2.5 s, INP ≤ 200 ms, CLS ≤ 0.1 | Real-user data segmented by device, route and release where sample size permits; these thresholds follow [Google's Web Vitals guidance](https://web.dev/articles/vitals), checked 2026-10-18 |
+| Catalog/search API | p95 ≤ 300 ms | Server request arrival to response completion, including database work; report cache hit/miss separately |
+| Checkout application work | p95 ≤ 800 ms | Verified-input order request through transaction commit/response; separate OTP delivery and external payment calls |
+| Admin list/detail API | p95 ≤ 500 ms | Bounded page/filter workload, including database work; large exports measured separately |
+| Unexpected failures | < 1% unexpected 5xx/timeouts in the agreed steady workload | Report expected validation/rate-limit responses separately; zero tolerated duplicate money effects, overselling or unauthorized disclosure |
+
+- [ ] Use a production build on isolated staging, not dev-server timings or customer data. Initial proposed dataset: 1,000 products, 3,000 variants, 10,000 synthetic orders; report indexes, database size, machine specs and app/database placement.
+- [ ] Proposed initial load: 25 virtual users for 10 minutes after warm-up, with 80% catalog/search, 15% private/admin reads and 5% checkout writes; document pacing, achieved requests/second, sample counts, p50/p95/p99 and errors. Use sufficient synthetic stock and valid test identities. Run contention/failure scenarios separately. Revisit workload against real pilot traffic.
+- [ ] Test cold and warm browsing on a recorded representative mobile device or fixed browser/device emulation and network/CPU profile. Repeat key journeys at least five times and retain raw results. Lab results are provisional; a Lighthouse score alone does not prove field INP or p75 performance.
+- [ ] Mock external providers only for load isolation and label results; separately verify real delivery/provider behavior at low volume. Never flood Gmail or payment providers as a performance test. Report complete customer wait time as well as application-only latency.
+- [ ] Compare before/after query counts, slow-query plans, payload sizes and frontend bundles. Set route-specific asset budgets from baseline; investigate large images, repeated queries, excessive client scripts and request waterfalls first.
+- [ ] Record low-sample field results as insufficient evidence, not a pass. Collect privacy-safe timings without email, tokens, addresses, prescriptions or full URLs containing private identifiers.
+
+#### Go/DDD architecture and response-time approach
+
+Keep Go, PostgreSQL and the existing Next.js frontend. Use a modular monolith with focused business boundaries: catalog, pricing/promotions, orders/inventory, identity, payments and communication. These describe responsibilities, not permission to create empty packages or rewrite the whole backend. Extract only the touched feature; retain one implementation of each rule.
+
+Target flow for a new coupon checkout (proposed, not today's implemented endpoint contract): customer submits cart and coupon to `POST /api/orders` → ordered transport/auth/rate-limit middleware → handler parses bounded input → checkout use case resolves trusted identity and current prices → repositories atomically reserve stock/coupon usage and persist order snapshots/idempotency → commit → handler returns receipt → UI shows accepted totals. Invalid/expired coupon returns a safe validation result without consuming stock; a retry returns the prior accepted receipt. Middleware does not price orders. Actual named-function tracing is required when this story is implemented.
+
+- Keep small interfaces at consuming boundaries, with startup wiring concrete implementations. A use case owns an atomic transaction; repositories must not independently commit parts of checkout. External payment/email calls stay outside long-held database locks.
+- Customer accounts use a separate account table and optional order linkage, not a duplicate guest database. Do not merge by unverified email or copy orders. Define secure browser transport, CSRF protection where needed, session expiry/rotation/revocation, logout and email-change handling before R2-04 is Ready.
+- Render public catalog content with a deliberate Next.js server/client split; keep interactive cart/filter controls focused. Size/compress images, reserve their dimensions, and defer below-fold assets. Validate behavior against the installed Next.js version during implementation.
+- Cache only suitable public content with explicit invalidation after catalog/campaign publication; scheduled campaigns must expire correctly. Private orders/invoices/accounts must never enter shared caches. Always revalidate price/stock/coupon eligibility at checkout despite cached display data.
+- Use bounded pagination, query-driven indexes and measured query-plan improvements. Configure database pool limits/timeouts and propagate request cancellation. Do not introduce Redis, a search cluster, microservices or extra goroutines without an observed need.
+- Critical notifications/reconciliation retries need durable state, idempotent processing, bounded workers and visible failures when introduced; never detached request goroutines. Payment success cannot depend on an email send succeeding.
+- Run relevant business/security and real-database concurrency tests for every changed boundary. Supported race verification remains required; current Windows race execution limitations are not a passing result. Docker/CI/deployment remain owner-led under section 12 and AGENTS.md.
+
+#### Work-time checklist and forecast limits
+
+These are rough focused engineering hours for **incremental R2 work after R1 is complete**, including implementation, relevant tests and review. They exclude remaining R1 work, provider/owner waiting, catalog photography/content creation, infrastructure learning sessions and newly discovered scope. Do not add these to older estimates without reconciling overlapping work. No actual hours have been recorded for these slices.
+
+| Refine estimate | Slice | Provisional hours |
+| --- | --- | --- |
+| [ ] | R2-01 UI/UX | 24–40 |
+| [ ] | R2-02 Merchandising | 24–40 |
+| [ ] | R2-03 Coupons | 32–48 |
+| [ ] | R2-04 Accounts | 28–48 |
+| [ ] | R2-05 Gateway | 32–56 |
+| [ ] | R2-06 Lens/discovery extras | 16–28 |
+| [ ] | R2-07 Reports/notifications | 16–24 |
+| [ ] | R2-08 Baseline/final performance and release verification | 16–28 |
+| | Total if every proposed slice is selected | **188–312** |
+
+At a hypothetical 20 focused hours/week this is about 10–16 engineering weeks, before excluded waits/learning and unknowns; it is not a committed schedule or the time remaining to MVP. R2-08 covers shared measurement/final verification, while each feature's tests remain in that feature estimate. Re-estimate after the first two completed small stories and pilot review. Record actual focused hours and blocked time separately; select only capacity-sized stories each two-week sprint.
+
+#### Decisions and R2 release gate
+
+Before the affected slice becomes Ready, settle branding/language, banner placements, coupon overlap/release rules, account/session/email-change policy, gateway settlement/refund behavior, lens extras, report definitions and staging traffic assumptions. Existing section 15 business decisions remain open until recorded as accepted.
+
+- [ ] Selected R2 stories are split, accepted and linked to evidence; unselected enhancements remain visibly deferred.
+- [ ] Existing guest checkout and R1 operational flows still pass; account creation remains optional.
+- [ ] Private account/history/invoice access, coupon contention, payment replay/late success and session failures pass negative/integration checks.
+- [ ] UI and performance checklists have recorded results; limitations and target changes are explicit.
+- [ ] Owner practices required infrastructure steps; migrations preserve existing orders, and backup/restore plus application recovery are rehearsed.
+- [ ] Owner can disable a campaign or new payment initiation without losing accepted orders or blocking reconciliation; rollout and reconciliation responsibilities are documented.
+- [ ] Owner accepts staged rollout after review. This PRD update does not mark any feature, infrastructure step or release Done.
+
 ## 14. Deferred roadmap
 
 These ideas are recorded for later, not first-release requirements: wishlist, public reviews, loyalty points, advanced analytics, courier API automation, free-delivery campaigns, virtual try-on, and AI-assisted prescription interpretation. Staff roles are added only when staff are needed. Reassess safety, value, effort, and business requirements before enabling any automated prescription feature.
@@ -290,7 +406,7 @@ These ideas are recorded for later, not first-release requirements: wishlist, pu
 
 - Actual lens packages/extras, compatible frame rules, and lens sourcing/availability process.
 - Initial catalog, store branding/contact/invoice details, delivery coverage, and configured prices/charges.
-- SMS provider and production OTP parameters; secure guest link/session design and admin recovery/MFA approach.
+- Production email OTP parameters; a dedicated Gmail sending account/app password or another verified mail sender; secure guest link/session design and admin recovery/MFA approach.
 - SSLCOMMERZ onboarding and manual receiving-account details; permitted refund methods and provider-specific behavior.
 - Discount overlap/precedence, per-customer coupon restrictions if desired, and mixed-cart advance calculation.
 - Stock reservation duration and recovery of late successful payments; fulfillment cancellation rules.
@@ -322,7 +438,7 @@ The next sprint has a two-week timebox starting when implementation starts; ther
 | A | Close privacy, secret logging, admin auth/seeding and stock blockers; correct stale implementation notes | Regression tests and actual command results linked to each finding; README describes reality |
 | B | Complete R0 frame-only vertical slice | Owner creates a variant, guest places one correctly priced COD order, repeated submission is deduplicated, another guest cannot access it, stock and invoice agree; fulfillment/cancellation demonstrated |
 | C | Add R1 lens and collection flow | Fixed packages, private prescription review, automatic discounts, manual payments and advance rule work together; required checks gate production |
-| D | Complete R1 business operations | Return/exchange/refund obligations, verified delivery date, deadline queue, operational totals, guest OTP and essential communication work with real configured providers |
+| D | Complete R1 business operations | Return/exchange/refund obligations, verified delivery date, deadline queue, operational totals, guest email OTP and essential communication work with a real configured provider |
 | E | R1 production readiness and pilot | Section 18 evidence passes, restore/recovery tested, owner accepts launch; no R2 dependencies are silently required |
 | F | R2 after feedback | Prioritize gateway/accounts/coupons using pilot evidence; estimate each after refinement |
 
@@ -350,16 +466,19 @@ Example: `ST-01 / REQ-02 — As the owner, I can publish a frame variant so cust
 
 ### Initial ordered repair backlog
 
-Owner for all rows: business owner/developer with AI assistance. `FIX-01`, `FIX-02`, and `FIX-03` are in Review/QA after their 2026-10-15 implementations; all other rows remain Backlog. No live database verification is claimed. The provisional focused-hour ranges below support sprint selection; revise them with actual results instead of treating them as a delivery forecast.
+Owner for all rows: business owner/developer with AI assistance. `FIX-01`, `FIX-02`, and `FIX-04` are Done after targeted verification. `FIX-03` remains in Review/QA; other rows remain Backlog. The provisional focused-hour ranges below support sprint selection; revise them with actual results instead of treating them as a delivery forecast.
 
 | Story | Priority / REQ | Outcome and acceptance | Dependency / evidence |
 | --- | --- | --- | --- |
-| FIX-01 | Critical / REQ-05,08 | Private order access: anonymous/other-customer requests reveal no personal data; authorized owner/admin can access; guessing order numbers is insufficient | Choose minimal secure guest access; static finding in `backend/internal/routes/routes.go:24` and `backend/internal/handlers/order_handler.go:166`; add negative access tests |
-| FIX-02 | Critical / REQ-11 | Remove connection credentials from failure logs; test failure path with synthetic secrets and verify redaction | Implemented in `backend/cmd/server/main.go`; `TestDatabaseFailureDoesNotLogCredentials` passed on 2026-10-15; owner review pending |
-| FIX-03 | High / REQ-01,11 | Explicit JWT algorithm/required identity/admin checks; malformed, expired, wrong-role/issuer/audience tokens denied; startup no longer resets existing admin credentials | Implemented in `backend/internal/security/admin_token.go`, `backend/internal/auth/admin.go`, `backend/internal/middleware/admin_auth.go`, and `backend/internal/database/database.go`; live PostgreSQL and owner review remain |
-| FIX-04 | Critical / REQ-08 | Insufficient stock rejects atomically, concurrent attempts cannot oversell, invalid quantity rejects, write failures are handled, one authoritative stock representation is defined | `backend/internal/handlers/order_handler.go:108`; real-database concurrency/rollback tests; extend to checkout idempotency in R0 |
+| FIX-01 | Critical / REQ-05,08 | Private order access: anonymous/other-customer requests reveal no personal data; authorized owner/admin can access; guessing order numbers is insufficient | Done 2026-10-17: unit denial cases and live local PostgreSQL/HTTP QA with two synthetic orders; guest, other-guest, and owner paths passed; fixtures removed |
+| FIX-02 | Critical / REQ-11 | Remove connection credentials from failure logs; test failure path with synthetic secrets and verify redaction | Done 2026-10-17: reviewed startup failure paths; synthetic-secret failure test, Go vet, and full Go test suite passed |
+| FIX-03 | High / REQ-01,11 | Explicit JWT algorithm/required identity/admin checks; malformed, expired, wrong-role/issuer/audience tokens denied; startup no longer resets existing admin credentials | Implemented in `backend/internal/security/admin_token.go`, `backend/internal/auth/admin.go`, `backend/internal/middleware/admin_auth.go`, and `backend/internal/database/database.go`; local PostgreSQL auth checks passed, while owner review and a supported race run remain |
+| FIX-04 | Critical / REQ-08 | Insufficient stock rejects atomically, concurrent attempts cannot oversell, invalid quantity rejects, write failures are handled, one authoritative stock representation is defined | Done 2026-10-17: local PostgreSQL concurrency/rollback/checkout tests, validated stock constraint, and restarted HTTP invalid-quantity rejection; checkout idempotency remains in R0 |
 | BASE-01 | High / REQ-01,12 | Reconcile README and PRD status with code and available verification; establish runnable test/CI baseline | Inspect remaining areas rather than copying old “not implemented” notes; record actual results |
 | FLOW-01 | High / REQ-02,04,06,08 | R0 frame-only slice in milestone B; configurable delivery charge replaces hardcoded fee; separate transport/business/persistence where touched | FIX-01–04; split into session-sized stories before starting; no whole-project rewrite |
+| IDEMP-01 | Critical / REQ-08 | A repeated checkout with the same idempotency key and payload returns the original receipt; it never creates a second order/invoice or decrements stock twice; reusing the key with a different payload is rejected safely | Done 2026-10-18: local PostgreSQL concurrent retries left one order/invoice and one stock reservation; restarted HTTP returned the same receipt on replay and 409 on changed payload; QA fixtures removed |
+| EMAIL-01 | High / REQ-05,08 | Required verified email at guest checkout and email OTP recovery of private order/invoice summary; PDF remains a separate story | On 2026-10-19 the owner received and verified a real Gmail code in checkout. Browser COD checkout created order 20 and invoice 20, reload preserved guest access, and a tokenless GET returned 404. Exact synthetic order/invoice/items were removed and its single stock unit restored (stock 9→10). Real browser email recovery and supported race verification remain. One OTP request returned 503 before a later 202; its underlying cause is not yet known |
+| ACCOUNT-01 | R2 / REQ-05 | Explicit verified-email account signup/login; one customer table; orders use nullable `customer_id`; customer-confirmed historical linking updates eligible verified-email guest orders without copying data | Deferred until after pilot feedback; do not scaffold during R1 |
 
 ### Separate execution checklists (2026-10-15)
 
@@ -367,24 +486,28 @@ These unchecked items are open work, not proof of a runtime failure. The code fi
 
 **Problem checklist — what currently blocks a verified MVP**
 
-- [ ] `FIX-01`: Token-protected lookup and the guest-token migration are implemented; live PostgreSQL has no order yet, so verify guest/admin access with a real local order before closing the former public-order exposure.
-- [ ] `FIX-02`: Startup failure logging is sanitized and a synthetic-secret regression test passes; owner review remains before marking Done.
+- [x] `FIX-01`: Token-protected lookup and guest-token migration passed live PostgreSQL/HTTP QA. No token, bad token, and another order's token returned 404 without private fields; matching guest and owner tokens returned 200. Synthetic QA records were removed.
+- [x] `FIX-02`: Startup failure logging is sanitized; synthetic-secret regression test and full Go checks passed on 2026-10-17.
 - [ ] `FIX-03`: Token/role checks and one-time owner provisioning are implemented; local PostgreSQL auth route checks pass. Owner review, credential handling, and a supported race run remain.
-- [ ] `FIX-04`: Atomic checkout reservation, rollback, checked writes, and stale admin-edit rejection are implemented and locally tested. The new nonnegative-stock constraint still needs owner-led server restart and live migration verification; legacy `stock_items` is retained but no longer used by application code.
-- [ ] `FLOW-01`: The frame-only path still needs idempotency, authoritative pricing/delivery, variant stock, private PDF invoice, and fulfillment/cancellation evidence.
+- [x] `FIX-04`: Atomic checkout reservation, rollback, checked writes, and stale admin-edit rejection passed local PostgreSQL tests. Owner restarted the server; `products_stock_quantity_nonnegative` exists and is validated, and live HTTP rejected zero quantity with 400. Legacy `stock_items` is retained but unused by application code.
+- [x] `IDEMP-01`: Local PostgreSQL concurrency QA proved one order/invoice and one stock reservation for equal requests. Restarted HTTP QA returned the original receipt/token on replay and 409 without a token for changed input; synthetic fixtures were removed.
+- [ ] `FLOW-01`: The remaining frame-only path needs authoritative pricing/delivery, variant stock, private PDF invoice, and fulfillment/cancellation evidence.
 - [ ] `BASE-01`: Gin warns that all proxies are trusted; configure the trusted proxy boundary before relying on client IPs or exposing this server beyond local development.
-- [ ] R1 gaps: compatible lens pricing/private prescription review, guest OTP, delivery zones, manual payment/advance verification, automatic offers, returns/refunds, operational queues, and pilot release checks.
+- [ ] R1 gaps: compatible lens pricing/private prescription review, real browser email recovery and investigation of one OTP request 503, delivery zones, manual payment/advance verification, automatic offers, returns/refunds, operational queues, and pilot release checks.
+- [ ] `EMAIL-01`: Verified-email browser checkout, real Gmail receipt, order confirmation/reload, and tokenless 404 passed 2026-10-19. Synthetic order 20 was removed and stock restored. Browser email recovery, transient 503 diagnosis, and supported race verification remain. PDF invoice remains open.
 
 **Work checklist — priority order; choose an independent Ready item that fits the sprint and split large items before implementation**
 
-- [ ] Close `FIX-01` with secure guest/admin access and negative tests for guessed/other-customer orders.
-- [ ] Close `FIX-02` with redacted failure logging and a synthetic-secret regression test.
+- [x] Close `FIX-01` with secure guest/admin access and negative tests for guessed/other-customer orders.
+- [x] Close `FIX-02` with redacted failure logging and a synthetic-secret regression test.
 - [ ] Close `FIX-03` after owner review, live-database verification of token/role checks and safe one-time admin provisioning, and a supported CI race run.
-- [ ] Close `FIX-04` with one authoritative stock representation, atomic rejection, checked errors, and real-PostgreSQL concurrency/rollback tests.
+- [x] Close `FIX-04` with one authoritative stock representation, atomic rejection, checked errors, and real-PostgreSQL concurrency/rollback tests.
+- [x] Close `IDEMP-01`: PostgreSQL concurrent integration, migration `005_checkout_idempotency.sql`, and restarted HTTP retry/conflict checks passed on 2026-10-18.
 - [ ] Complete `BASE-01`: reconcile implementation notes and record actual Go/frontend checks; the owner performs CI configuration through the guided-learning steps in section 12.
 - [ ] Split `FLOW-01` into small stories, then demonstrate the complete R0 frame-only COD flow and its privacy, repeat-submit, stock, invoice, and cancellation failures.
 - [ ] Split milestone C into R1 lens/prescription, delivery/offers, and manual payment/advance stories with server-side rules and review gates.
-- [ ] Split milestone D into guest OTP, fulfillment/returns/refunds, notification, and operational-report stories; verify the real provider and deadline paths.
+- [ ] Split milestone D into guest email OTP, fulfillment/returns/refunds, notification, and operational-report stories; verify the real provider and deadline paths.
+- [ ] Finish `EMAIL-01`: real Gmail verification and browser checkout passed; demonstrate browser verified-email order recovery and investigate the observed OTP request 503 before closing the story.
 - [ ] Complete milestone E only after the section 18 checklist, owner-led staging/recovery practice, and explicit pilot acceptance pass.
 - [ ] For each backend story before marking Done, review dependency direction: handler handles HTTP, service owns domain rules/transaction, repository owns SQL; cross-feature calls use a narrow contract, with no new package globals, import cycles, or duplicate implementation. Trace one success and one failure request through the real code.
 
@@ -394,12 +517,14 @@ These ranges are planning guesses from static code inspection, not elapsed days 
 
 | Check | Story | Initial estimate | Actual focused hours / evidence |
 | --- | --- | --- | --- |
-| [ ] | `FIX-01` | 8–16 hours after guest-access design is chosen | Unit QA passed 2026-10-15; local PostgreSQL guest-token column check passed 2026-10-17, but no existing order was available for real guest/admin access checks; actual focused hours not recorded |
-| [ ] | `FIX-02` | 1–3 hours | Synthetic-secret failure-path test passed again 2026-10-15; owner review pending; actual focused hours not recorded |
+| [x] | `FIX-01` | 8–16 hours after guest-access design is chosen | Unit QA and guest-token migration checks passed. On 2026-10-17, live local PostgreSQL/HTTP QA created two synthetic orders, verified missing/bad/other-guest tokens return 404 without private fields, matching guest token and owner token return 200, and cleanup left zero QA products/orders. Actual focused hours not recorded |
+| [x] | `FIX-02` | 1–3 hours | Reviewed startup failure paths; synthetic-secret failure-path test, `go vet ./...`, and `go test ./... -count=1` passed 2026-10-17. Actual focused hours not recorded |
 | [ ] | `FIX-03` | 8–16 hours | Unit QA passed 2026-10-15; local PostgreSQL owner account and `/api/admin/me` 401/401/200 checks passed 2026-10-17; owner review and supported CI race run pending; actual focused hours not recorded |
-| [ ] | `FIX-04` | 12–24 hours if a test PostgreSQL instance is available | Go tests/vet, frontend build, and local PostgreSQL concurrent reservation, rollback, checkout, and stale-admin-edit tests passed 2026-10-17. New CHECK migration and restarted HTTP server behavior remain; actual focused hours not recorded |
+| [x] | `FIX-04` | 12–24 hours if a test PostgreSQL instance is available | Go tests/vet, frontend build, and local PostgreSQL concurrent reservation, rollback, checkout, and stale-admin-edit tests passed 2026-10-17. Owner verified the new CHECK constraint as validated; restarted `/health` returned 200 and `POST /api/orders` with zero quantity returned 400. Actual focused hours not recorded |
+| [x] | `IDEMP-01` | 4–8 hours | Go tests/vet and frontend production build passed; local PostgreSQL concurrent retries left one order/invoice and one stock decrement; restarted HTTP replay returned the same receipt and changed payload returned 409. Synthetic fixtures removed. Windows race binaries exited `0xc0000139`; actual focused hours not recorded |
 | [ ] | `BASE-01` | 3–6 hours for code/docs/check baseline; owner-led CI practice tracked separately | — |
 | [ ] | `FLOW-01`, C, D, E | Estimate each small story when split and Ready; do not assign one number to a milestone | — |
+| [ ] | `EMAIL-01` | 4–8 hours of focused implementation/QA plus sender setup | Real Gmail verification and browser checkout created a private order/invoice on 2026-10-19; reload and tokenless 404 passed. Exact QA fixture was removed and stock restored. Browser recovery, transient 503 diagnosis, and supported race verification remain; actual focused hours not recorded |
 
 - [ ] At sprint planning, record the owner's available focused hours for the next two weeks and select only stories that fit.
 - [ ] After each Done story, record actual hours, tests/demo, and carry-over; after two Done stories, forecast a range for the remaining R1 work.
@@ -412,15 +537,16 @@ Static inspection recorded on 2026-09-25. These findings are limited to inspecte
 | --- | --- | --- |
 | PRD and coding rules | Written and reviewed as documents | No implication of application correctness |
 | Local PostgreSQL service | Owner installed PostgreSQL 18 and created the local app role/database in pgAdmin | Owner observed `postgresql-x64-18` Running and connected with `psql` to `127.0.0.1:5432` as `postgres`. After creating the app role/database, owner ran `psql` as `bongkey` on database `bongkey`; `SELECT current_database(), current_user` returned `bongkey, bongkey` on 2026-10-16. Owner started the backend on 2026-10-17; its `:8080` listener and HTTP `/health` 200 were observed, and read-only QA confirmed database connection, owner row and guest-token column. The startup sequence reaches these only after migration/seed succeeds |
-| Catalog/order endpoints | Partial: handlers/routes exist despite stale README claims | End-to-end behavior not verified in this review |
+| Catalog/order endpoints | Partial: handlers/routes exist despite stale README claims | Local checkout and guest/admin order-access QA passed; the complete R0 storefront flow remains unverified |
 | Owner authentication | Token claim/algorithm verification, current owner-role check, and one-time seed implemented | Fresh `go test ./... -count=1`, `go vet ./...`, and frontend TypeScript check passed on 2026-10-15; prior clean `npm run build` passed. Owner replaced the rejected demo bootstrap password before startup. Read-only `TestLocalDatabaseAccessQA` passed on local PostgreSQL 2026-10-17: `/api/admin/me` returned 401 without a token, 401 with a bad token, and 200 with a current-owner token; its owner password hash is valid and not the old demo password. Local `go test -race ./...` could not start binaries (`0xc0000139`); owner review and supported CI race run remain |
-| Database connection failure logging | Generic startup error replaces URL/driver output | Synthetic-secret failure-path test included in fresh `go test ./... -count=1` and `go vet ./...` on 2026-10-15; owner review pending |
-| Order privacy | Guest token/hash access and admin route implemented on 2026-10-15; older orders have no guest token | Fresh `go test ./... -count=1` and `go vet ./...` passed 2026-10-15; read-only real-DB test in `backend/cmd/server/live_qa_test.go` confirmed `guest_token_hash` column on 2026-10-17. No existing order was present, so live guest denial and owner access remain unverified |
+| Database connection failure logging | Generic startup error replaces URL/driver output | Startup logging reviewed; synthetic-secret failure-path test, `go test ./... -count=1`, and `go vet ./...` passed 2026-10-17. FIX-02 is Done |
+| Email verification and recovery | New guest orders require a verified email from a one-use 5-minute code; a 10-minute scoped proof can read only orders created with that verified mailbox. Already accepted no-email guest orders remain accessible by their existing token/key | Go HTTP and local PostgreSQL abuse/single-use and synthetic recovery QA passed. Owner received and verified a real Gmail OTP in browser, placed a synthetic COD order with invoice, reloaded private summary, and observed tokenless 404 on 2026-10-19. Fixture cleanup restored stock. Browser email recovery, cause of one request 503, and supported CI race run remain; PDF delivery is separate |
+| Order privacy | Guest token/hash access and admin route implemented; older orders without a guest token remain admin-only | Unit denial checks, fresh Go tests/vet, and live local PostgreSQL/HTTP QA passed 2026-10-17. `TestLiveOrderAccessQA` verified missing/bad/other-guest tokens return 404 without private fields, matching guest token and owner token return 200, private responses use `no-store`, and synthetic records are removed |
 | Runtime proxy trust | Gin currently emits an all-proxies-trusted warning | Configure trusted proxies before relying on forwarded client IPs or exposing the backend beyond local development |
-| Stock/order integrity | Checkout service reserves aggregated quantities in product-ID order using a conditional PostgreSQL update; order, items, invoice, and stock commit atomically. Admin edits require the stock count loaded by the form. `products.stock_quantity` is the runtime source; old `stock_items` rows are retained but unused | Go tests/vet and frontend build passed 2026-10-17. Local PostgreSQL tests passed concurrent one-winner reservation, rollback, full checkout/rejection, and stale admin update. The new nonnegative CHECK migration has not run on the owner's existing DB; restart and constraint test remain before FIX-04 can close |
+| Stock/order integrity | Checkout service reserves aggregated quantities in product-ID order using a conditional PostgreSQL update; order, items, invoice, and stock commit atomically. Hashed checkout keys use a PostgreSQL advisory lock and unique partial index so equal retries share one receipt and conflicting reuse is rejected. Admin edits require the stock count loaded by the form. `products.stock_quantity` is the runtime source; old `stock_items` rows are retained but unused | Stock concurrency/rollback QA passed 2026-10-17. IDEMP-01 unit/HTTP/security/CORS, Go tests/vet, frontend build, real PostgreSQL concurrent retries, and restarted HTTP replay/conflict passed 2026-10-18. FIX-04 and IDEMP-01 are Done; a supported race run remains |
 | Delivery/lens pricing | Partial: delivery hardcoded to 80; lens label accepted without lens charge | R0/R1 pricing tests required |
 | Invoice | Invoice database creation present | PDF generation/download and secure access not established by this inspection |
-| Tests | No test/spec files found in searched backend/frontend source paths | Confirm tooling, add meaningful regression coverage and run it |
+| Tests | Backend unit and PostgreSQL integration tests cover access, auth, and checkout paths | Go tests/vet and frontend build passed on 2026-10-17 for FIX-04; supported race verification remains for FIX-03 |
 | Remaining R1/R2 features | Not audited | Do not label missing or complete without inspection |
 
 Use two independent fields going forward: implementation = Missing / Partial / Implemented / Not audited; verification = Not run / Failed / Passed (with date, scope, command/demo evidence). Never claim a completion percentage from file counts. The owner should explain each accepted story's request-to-database flow, failure paths, and the tests proving them.
@@ -455,13 +581,13 @@ Do not treat unmeasured numbers as commitments. Establish baselines on the actua
 | Actual availability and learning pace are unmeasured | Owner | Next sprint planning; revisit after two completed stories | Select realistic commitment and forecast from evidence; preserve release gates |
 | Existing prototype has security/schema gaps | Developer with owner review | Milestone A, before expanding checkout | Fix verified boundaries with regression tests; incremental migrations |
 | Product images, sizing, lens packages and policy wording | Owner | Before relevant R0/R1 stories | Use labeled sample data for demos; real content required for launch |
-| SMS/manual receiving accounts and later gateway onboarding | Owner; developer integrates | SMS/manual before R1; gateway before R2 enablement | Use development adapters; verify real integrations at their release gate |
+| Email sender/manual receiving accounts and later gateway onboarding | Owner; developer integrates | Email sender/manual before R1; gateway before R2 enablement | Use development adapters; verify real integrations at their release gate |
 | Hosting, domain, private storage and backup configuration | Owner selects budget; developer configures | Select during R1 work; rehearse before pilot | Keep deployment documented and recoverable; confirm actual provider capabilities |
 | Fraud/duplicate payments, prescription exposure, overselling | Developer | Affected feature sprint | Threat/negative testing, access boundaries, constraints and reconciliation |
 | One-person operations and refund deadlines | Owner | Before R1 real orders | Daily review of exception/deadline queue, documented recovery/support procedure |
 | Scope growth from unlimited configurable settings | Owner + developer | Every planning session | Bound settings to agreed workflows; backlog additional capabilities |
 
-Budget is not yet committed. Before production, record one-time setup/domain costs and recurring hosting, database, storage/backups, SMS, gateway fees, and monitoring costs with an owner-approved monthly ceiling. Do not invent provider prices or purchase services as part of this PRD update.
+Budget is not yet committed. Before production, record one-time setup/domain costs and recurring hosting, database, storage/backups, email delivery, gateway fees, and monitoring costs with an owner-approved monthly ceiling. Do not invent provider prices or purchase services as part of this PRD update.
 
 Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a maintained README/runbook, versioned migrations, API contracts for implemented endpoints, relevant tests/CI, and sample environment keys without secrets. Add artifacts when used; do not pre-create empty document trees.
 
@@ -475,7 +601,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 - [ ] Critical/high defects are closed; lower-priority known issues and workarounds are documented.
 - [ ] Development, staging and production data/secrets are isolated; no seeded demo admin credentials exist in production.
 - [ ] CI checks and staging smoke tests pass; reviewed migrations have backups and a safe rollout/recovery plan. Code rollback must not assume destructive schema rollback is safe.
-- [ ] R1 SMS and COD/manual payment configuration and verification procedures are checked; SSLCOMMERZ is not an R1 dependency. Any live test transaction/refund is separately authorized and reconciled.
+- [ ] R1 email delivery and COD/manual payment configuration and verification procedures are checked; SSLCOMMERZ is not an R1 dependency. Any live test transaction/refund is separately authorized and reconciled.
 - [ ] HTTPS/domain, private file access, monitoring, error alerts, bounded workers and graceful shutdown are verified.
 - [ ] Backup restore meets the agreed recovery objective and a payment reconciliation procedure is available.
 - [ ] Mobile/accessibility/performance checks meet accepted targets or have explicit owner-approved changes to those targets.
@@ -495,6 +621,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 
 | Date | Version | Change |
 | --- | --- | --- |
+| 2026-10-18 | 2.11 | Added detailed proposed R2 feature slices, separate problem/work/time checklists, admin control boundaries, UI acceptance, measurable performance budgets and measurement method, incremental Go/DDD design, dependencies and release gates. Retained R1 variants/basic offers/operations obligations. Estimates are provisional; no implementation or deployment claimed. |
 | 2026-09-25 | 0.1 | Initial baseline from owner discussion, including approved operational suggestions, staged delivery, and deferred roadmap. |
 | 2026-09-25 | 0.2 | Added explicit MVP requirement IDs, solo Agile workflow, proposed capacity and sprint schedule, Ready/Done criteria, risk/dependency register, measurable operating targets, release checklist and pilot metrics. |
 | 2026-09-25 | 0.3 | Owner authorized critique-based revision: reduced R1 pilot scope, deferred gateway/accounts/coupons to R2, withdrew unsupported 17-week forecast, prioritized known security/stock fixes, added implementation/evidence register and rolling sprint planning, and replaced arbitrary operating targets with pre-launch evidence-based decisions. No application fixes claimed. |
@@ -517,3 +644,13 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-10-17 | 2.0 | Owner reset the local app role password and aligned `.env`; read-only app QA now connects to PostgreSQL. QA stops at the unreadable/missing owner account. The current demo `ADMIN_PASSWORD` is rejected by first-owner seed, so owner must replace it before startup migration/seed and live access QA. |
 | 2026-10-17 | 2.1 | Owner started the backend after replacing bootstrap secrets. Live `/health` returned 200; read-only PostgreSQL QA passed owner-account, admin-token 401/401/200, and guest-token column checks. No order exists yet for live order-access checks. Gin's all-proxies-trusted startup warning was recorded for the runtime boundary. |
 | 2026-10-17 | 2.2 | Implemented FIX-04 checkout stock reservation in an order service/repository transaction, removed runtime writes to duplicate `stock_items`, added stale admin-edit rejection and a nonnegative-stock migration. Go tests/vet, frontend build, and focused local PostgreSQL checkout/concurrency/rollback/admin-edit tests passed. Owner-led restart, migration check, and restarted HTTP verification remain; legacy stock table is not dropped. |
+| 2026-10-17 | 2.3 | Closed FIX-04 after owner-restarted backend, validated live PostgreSQL stock constraint, and restarted HTTP health/invalid-quantity checks. Legacy stock table remains unused; repeat-submit idempotency is tracked in FLOW-01. |
+| 2026-10-17 | 2.4 | Closed FIX-01 after live local PostgreSQL/HTTP guest and owner access QA with two synthetic orders. Missing, bad, and other-guest tokens revealed no private fields; matching guest/owner access passed. QA fixtures were removed and cleanup counts returned zero. |
+| 2026-10-17 | 2.5 | Closed FIX-02 after reviewing startup failure logging and rerunning the synthetic-secret test, Go vet, and full Go tests. Database connection and migration errors use generic log messages without printing driver errors or credentials. |
+| 2026-10-18 | 2.6 | Added optional Gmail-backed email OTP for checkout verification and private order/invoice-summary recovery without an account. Go unit/HTTP, local PostgreSQL, TypeScript, and frontend build checks passed. Gmail credentials and real send/receive remain pending, as do phone OTP, PDF invoices, and a supported race run (Windows race binaries exited `0xc0000139`). |
+| 2026-10-18 | 2.7 | Replaced planned phone authentication with required guest email OTP while retaining the phone as delivery contact. Recorded one orders table with nullable customer linkage, explicit verified historical-order linking in R2, and no separate guest database or copied orders. Added `IDEMP-01` as the next implementation story before expanding the checkout/account scope. |
+| 2026-10-18 | 2.8 | Implemented IDEMP-01 across browser, HTTP, service, security and PostgreSQL boundaries. Checkout keys are hashed at rest; advisory locking and a unique index coordinate retries across instances; identical retries return the original receipt/token and changed payloads return conflict. Go tests/vet and frontend build pass. Real PostgreSQL concurrency/migration proof remains because no process was listening on local port 5432; Windows race binaries exited `0xc0000139`. |
+| 2026-10-18 | 2.9 | Closed IDEMP-01 after PostgreSQL resumed on port 5432. Focused real-database concurrent checkout and restarted HTTP replay/conflict QA passed; an earlier synthetic order was removed and current tests clean their fixtures. Checkout retry now returns the accepted receipt after email proof expiry. Go tests/vet passed; a supported race run remains outstanding. |
+| 2026-10-18 | 2.10 | Required verified email for every new guest checkout while preserving retries of previously accepted no-email orders. Updated checkout UI/API types and recovery copy. Go tests/vet, frontend build, local PostgreSQL checkout/concurrency, and restarted HTTP rejection, accepted checkout, retry/conflict, and private recovery checks passed with synthetic proofs. Real Gmail delivery and owner browser walkthrough still gate EMAIL-01 completion. |
+| 2026-10-19 | 2.12 | Verified real Gmail OTP delivery through the local HTTP endpoint and owner-confirmed Inbox receipt. Added PostgreSQL expiry and hourly-limit regression checks plus HTTP rate-limit/provider-failure redaction checks. Go tests/vet and focused local PostgreSQL OTP tests passed; owner browser verification/checkout/recovery and supported race verification remain open. |
+| 2026-10-19 | 2.13 | Owner verified real OTP in checkout. Browser placed synthetic order 20 and invoice 20, reload showed its private summary, tokenless HTTP returned 404; exact QA rows were deleted and stock returned from 9 to 10. One browser OTP request returned 503 before a later 202; its cause is unknown. Browser email recovery remains open. |

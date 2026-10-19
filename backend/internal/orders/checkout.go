@@ -2,8 +2,13 @@ package orders
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 
 	"bongkey/backend/internal/security"
 )
@@ -15,6 +20,8 @@ var (
 	ErrInvalidCheckout = errors.New("invalid checkout")
 	// ErrUnavailable hides whether a product is missing, inactive, or out of stock.
 	ErrUnavailable = errors.New("product unavailable")
+	// ErrIdempotencyConflict means one retry key was reused for different order data.
+	ErrIdempotencyConflict = errors.New("idempotency key reused with different checkout")
 )
 
 // CheckoutItem is one requested product and lens choice.
@@ -26,9 +33,12 @@ type CheckoutItem struct {
 
 // CheckoutRequest contains the customer details and items needed to place a COD order.
 type CheckoutRequest struct {
+	IdempotencyKey      string
 	CustomerName        string
 	CustomerPhone       string
 	CustomerEmail       string
+	EmailProof          string
+	EmailVerified       bool
 	ShippingAddress     string
 	City                string
 	DeliveryNote        string
@@ -55,8 +65,9 @@ type ReservedProduct struct {
 
 // CheckoutTx persists all pieces of an order inside one transaction.
 type CheckoutTx interface {
+	FindIdempotentOrder(context.Context, string) (CheckoutReceipt, string, bool, error)
 	ReserveProduct(context.Context, int, int) (ReservedProduct, error)
-	InsertOrder(context.Context, CheckoutRequest, int, int, int, string) (int, string, error)
+	InsertOrder(context.Context, CheckoutRequest, int, int, int, string, string, string) (int, string, error)
 	InsertItem(context.Context, int, CheckoutItem, ReservedProduct, int) error
 	InsertInvoice(context.Context, int, CheckoutRequest, int, int, int) (string, error)
 }
@@ -66,16 +77,20 @@ type CheckoutStore interface {
 	InTransaction(context.Context, func(CheckoutTx) error) error
 }
 
-// CheckoutService enforces stock and total rules before accepting an order.
+// CheckoutService enforces verified email, retry, stock, and total rules.
 type CheckoutService struct {
-	Store CheckoutStore
+	Store            CheckoutStore
+	EmailProofSecret string
+	OrderTokenSecret string
 }
 
 // Place reserves products in a stable order and commits the order and invoice together.
 func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (CheckoutReceipt, error) {
-	if request.CustomerName == "" || request.CustomerPhone == "" || request.ShippingAddress == "" || request.City == "" || len(request.Items) == 0 {
+	if !ValidIdempotencyKey(request.IdempotencyKey) || request.CustomerName == "" || request.CustomerPhone == "" || request.ShippingAddress == "" || request.City == "" || len(request.Items) == 0 {
 		return CheckoutReceipt{}, ErrInvalidCheckout
 	}
+	request.CustomerEmail = strings.ToLower(strings.TrimSpace(request.CustomerEmail))
+	request.EmailVerified = request.CustomerEmail != ""
 	quantities := make(map[int]int, len(request.Items))
 	for _, item := range request.Items {
 		if item.ProductID <= 0 || item.Quantity <= 0 || item.Quantity > maxOrderAmount-quantities[item.ProductID] {
@@ -89,12 +104,37 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	}
 	sort.Ints(productIDs)
 
-	guestToken, tokenHash, err := security.NewOrderToken()
+	requestHash, err := checkoutRequestHash(request)
+	if err != nil {
+		return CheckoutReceipt{}, err
+	}
+	idempotencyKeyHash := textHash(request.IdempotencyKey)
+	guestToken, tokenHash, err := security.IdempotentOrderToken(s.OrderTokenSecret, request.IdempotencyKey)
 	if err != nil {
 		return CheckoutReceipt{}, err
 	}
 	var receipt CheckoutReceipt
 	err = s.Store.InTransaction(ctx, func(tx CheckoutTx) error {
+		existing, storedRequestHash, found, err := tx.FindIdempotentOrder(ctx, idempotencyKeyHash)
+		if err != nil {
+			return err
+		}
+		if found {
+			if subtle.ConstantTimeCompare([]byte(storedRequestHash), []byte(requestHash)) != 1 {
+				return ErrIdempotencyConflict
+			}
+			receipt = existing
+			return nil
+		}
+		// Existing guest orders may retry their accepted key; new orders require verified email.
+		if !request.EmailVerified {
+			return ErrInvalidCheckout
+		}
+		verifiedEmail, err := security.VerifyEmailProof(s.EmailProofSecret, request.EmailProof)
+		if err != nil || verifiedEmail != request.CustomerEmail {
+			return ErrInvalidCheckout
+		}
+
 		products := make(map[int]ReservedProduct, len(productIDs))
 		for _, id := range productIDs {
 			product, err := tx.ReserveProduct(ctx, id, quantities[id])
@@ -117,7 +157,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			subtotal += int(lineTotal)
 		}
 		total := subtotal + deliveryFee
-		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash)
+		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash)
 		if err != nil {
 			return err
 		}
@@ -141,4 +181,41 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	}
 	receipt.GuestAccessToken = guestToken
 	return receipt, nil
+}
+
+// ValidIdempotencyKey accepts opaque browser-generated retry keys with bounded safe characters.
+func ValidIdempotencyKey(key string) bool {
+	if len(key) < 16 || len(key) > 128 {
+		return false
+	}
+	for _, char := range key {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' && char != '_' && char != '.' && char != ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// checkoutRequestHash fingerprints accepted business input while excluding the expiring email proof.
+func checkoutRequestHash(request CheckoutRequest) (string, error) {
+	payload := struct {
+		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
+		EmailVerified                                                                                        bool
+		Items                                                                                                []CheckoutItem
+	}{
+		CustomerName: request.CustomerName, CustomerPhone: request.CustomerPhone, CustomerEmail: request.CustomerEmail,
+		ShippingAddress: request.ShippingAddress, City: request.City, DeliveryNote: request.DeliveryNote,
+		PrescriptionFileURL: request.PrescriptionFileURL, EmailVerified: request.EmailVerified, Items: request.Items,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return textHash(string(encoded)), nil
+}
+
+// textHash returns a stable non-reversible database key for checkout coordination.
+func textHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }

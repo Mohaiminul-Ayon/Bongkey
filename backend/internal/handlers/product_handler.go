@@ -1,14 +1,11 @@
 package handlers
 
 import (
-	"database/sql"
-	"log"
+	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"bongkey/backend/internal/database"
-	"bongkey/backend/internal/models"
+	"bongkey/backend/internal/catalog"
 
 	"github.com/gin-gonic/gin"
 )
@@ -37,219 +34,145 @@ type productRequest struct {
 	IsActive              bool   `json:"is_active"`
 }
 
-func ListProducts(c *gin.Context) {
-	listProducts(c, false, false)
+// ProductHandler maps product HTTP requests to catalog decisions.
+type ProductHandler struct{ Service catalog.ProductService }
+
+// ListProducts returns published catalog products.
+func (h ProductHandler) ListProducts(c *gin.Context) {
+	h.listProducts(c, false, false)
 }
 
-func ListFeaturedProducts(c *gin.Context) {
-	listProducts(c, true, false)
+// ListFeaturedProducts returns published featured products.
+func (h ProductHandler) ListFeaturedProducts(c *gin.Context) {
+	h.listProducts(c, true, false)
 }
 
-func AdminListProducts(c *gin.Context) {
-	listProducts(c, false, true)
+// AdminListProducts returns the owner catalog, including unpublished products.
+func (h ProductHandler) AdminListProducts(c *gin.Context) {
+	h.listProducts(c, false, true)
 }
 
-func listProducts(c *gin.Context, featuredOnly bool, includeInactive bool) {
-	if !database.Ready() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
-		return
-	}
-	where := "WHERE ($1 OR p.is_active = true) AND ($2 = false OR p.is_featured = true)"
-	rows, err := database.DB.Query(productSelectSQL+" "+where+" ORDER BY p.id DESC", includeInactive, featuredOnly)
+// listProducts delegates filtering and maps storage failures to safe responses.
+func (h ProductHandler) listProducts(c *gin.Context, featuredOnly, includeInactive bool) {
+	products, err := h.Service.List(c.Request.Context(), featuredOnly, includeInactive)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load products"})
-		return
-	}
-	defer rows.Close()
-	products, err := scanProducts(rows)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not read products"})
+		productError(c, err, "could not load products")
 		return
 	}
 	c.JSON(http.StatusOK, products)
 }
 
-func GetProduct(c *gin.Context) {
-	if !database.Ready() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
-		return
-	}
-	row := database.DB.QueryRow(productSelectSQL+" WHERE p.slug = $1 AND p.is_active = true", c.Param("slug"))
-	product, err := scanProduct(row)
-	if err == sql.ErrNoRows {
-		c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
-		return
-	}
+// GetProduct returns one published product by its slug.
+func (h ProductHandler) GetProduct(c *gin.Context) {
+	product, err := h.Service.GetBySlug(c.Request.Context(), c.Param("slug"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load product"})
+		productError(c, err, "could not load product")
 		return
 	}
 	c.JSON(http.StatusOK, product)
 }
 
-func CreateProduct(c *gin.Context) {
-	saveProduct(c, 0)
+// CreateProduct accepts an owner product and delegates its rules and persistence.
+func (h ProductHandler) CreateProduct(c *gin.Context) {
+	h.saveProduct(c, 0)
 }
 
-func UpdateProduct(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	saveProduct(c, id)
-}
-
-// saveProduct validates admin product input and stores product stock in one authoritative column.
-func saveProduct(c *gin.Context, id int) {
-	if !database.Ready() {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
+// UpdateProduct accepts an owner edit after parsing its product ID.
+func (h ProductHandler) UpdateProduct(c *gin.Context) {
+	id, ok := productID(c)
+	if !ok {
 		return
 	}
+	h.saveProduct(c, id)
+}
+
+// saveProduct parses transport input and maps catalog errors to HTTP statuses.
+func (h ProductHandler) saveProduct(c *gin.Context, id int) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
 	var req productRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product data"})
 		return
 	}
-	if gin.Mode() == gin.DebugMode {
-		log.Printf("admin product save id=%d category_id=%d name=%q slug=%q price=%d old_price=%d stock_quantity=%d image_url=%q try_on_image_url=%q", id, req.CategoryID, req.Name, req.Slug, req.Price, req.OldPrice, req.StockQuantity, req.ImageURL, req.TryOnImageURL)
-	}
-	if req.CategoryID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select a category."})
-		return
-	}
-	if req.Name == "" || req.Price <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "product name and price are required"})
-		return
-	}
-	if req.StockQuantity < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "stock quantity cannot be negative"})
-		return
-	}
-	if id != 0 && (req.ExpectedStockQuantity == nil || *req.ExpectedStockQuantity < 0) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "expected stock quantity is required"})
-		return
-	}
-	if req.Slug == "" {
-		req.Slug = slugify(req.Name)
-	}
-	if req.BrandTier == "" {
-		req.BrandTier = "budget"
-	}
-	if req.FrameType == "" {
-		req.FrameType = "prescription_ready"
-	}
-	if req.Gender == "" {
-		req.Gender = "unisex"
-	}
-
-	if id == 0 {
-		err := database.DB.QueryRow(`
-			INSERT INTO products (
-				category_id, name, slug, description, price, old_price, brand_tier, frame_type, gender,
-				material, color, size, lens_width, bridge_width, temple_length, stock_quantity,
-				image_url, try_on_image_url, is_featured, is_active
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-			RETURNING id
-		`, req.CategoryID, req.Name, req.Slug, req.Description, req.Price, req.OldPrice, req.BrandTier, req.FrameType, req.Gender, req.Material, req.Color, req.Size, req.LensWidth, req.BridgeWidth, req.TempleLength, req.StockQuantity, req.ImageURL, req.TryOnImageURL, req.IsFeatured, req.IsActive).Scan(&id)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create product"})
-			return
-		}
-	} else {
-		result, err := database.DB.Exec(`
-			UPDATE products SET category_id=$1, name=$2, slug=$3, description=$4, price=$5, old_price=$6,
-				brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
-				lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
-				image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, updated_at=NOW()
-			WHERE id=$21 AND stock_quantity=$22
-		`, req.CategoryID, req.Name, req.Slug, req.Description, req.Price, req.OldPrice, req.BrandTier, req.FrameType, req.Gender, req.Material, req.Color, req.Size, req.LensWidth, req.BridgeWidth, req.TempleLength, req.StockQuantity, req.ImageURL, req.TryOnImageURL, req.IsFeatured, req.IsActive, id, *req.ExpectedStockQuantity)
-		if err != nil {
-			log.Printf("could not update product id=%d: %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update product"})
-			return
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not verify product update"})
-			return
-		}
-		if affected == 0 {
-			c.JSON(http.StatusConflict, gin.H{"error": "product stock changed; reload and retry"})
-			return
-		}
-	}
-
-	row := database.DB.QueryRow(productSelectSQL+" WHERE p.id = $1", id)
-	product, err := scanProduct(row)
+	product, err := h.Service.Save(c.Request.Context(), id, catalog.ProductInput{
+		CategoryID: req.CategoryID, Name: req.Name, Slug: req.Slug, Description: req.Description,
+		Price: req.Price, OldPrice: req.OldPrice, StockQuantity: req.StockQuantity,
+		ExpectedStockQuantity: req.ExpectedStockQuantity,
+		BrandTier:             req.BrandTier, FrameType: req.FrameType, Gender: req.Gender,
+		Material: req.Material, Color: req.Color, Size: req.Size,
+		LensWidth: req.LensWidth, BridgeWidth: req.BridgeWidth, TempleLength: req.TempleLength,
+		ImageURL: req.ImageURL, TryOnImageURL: req.TryOnImageURL,
+		IsFeatured: req.IsFeatured, IsActive: req.IsActive,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "product saved but could not reload"})
+		productError(c, err, "could not save product")
 		return
 	}
 	c.JSON(http.StatusOK, product)
 }
 
-func DeleteProduct(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	_, err := database.DB.Exec(`DELETE FROM products WHERE id = $1`, id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not delete product"})
+// DeleteProduct removes a product after the owner route has authenticated the caller.
+func (h ProductHandler) DeleteProduct(c *gin.Context) {
+	id, ok := productID(c)
+	if !ok {
+		return
+	}
+	if err := h.Service.Delete(c.Request.Context(), id); err != nil {
+		productError(c, err, "could not delete product")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
-func PatchProductStatus(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	var req struct {
-		IsActive bool `json:"is_active"`
+// PatchProductStatus changes publication without changing product price or stock.
+func (h ProductHandler) PatchProductStatus(c *gin.Context) {
+	id, ok := productID(c)
+	if !ok {
+		return
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+	var req struct {
+		IsActive *bool `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.IsActive == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "is_active is required"})
 		return
 	}
-	_, err := database.DB.Exec(`UPDATE products SET is_active=$1, updated_at=NOW() WHERE id=$2`, req.IsActive, id)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update status"})
+	if err := h.Service.SetActive(c.Request.Context(), id, *req.IsActive); err != nil {
+		productError(c, err, "could not update status")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"updated": true})
 }
 
-const productSelectSQL = `
-SELECT p.id, COALESCE(p.category_id, 0), COALESCE(c.name, ''), p.name, p.slug, p.description,
-	p.price, p.old_price, p.brand_tier, p.frame_type, p.gender, p.material, p.color, p.size,
-	p.lens_width, p.bridge_width, p.temple_length, p.stock_quantity, p.image_url,
-	p.try_on_image_url, p.is_featured, p.is_active
-FROM products p
-LEFT JOIN categories c ON c.id = p.category_id
-`
-
-type scanner interface {
-	Scan(dest ...interface{}) error
-}
-
-func scanProduct(row scanner) (models.Product, error) {
-	var p models.Product
-	err := row.Scan(&p.ID, &p.CategoryID, &p.CategoryName, &p.Name, &p.Slug, &p.Description, &p.Price, &p.OldPrice, &p.BrandTier, &p.FrameType, &p.Gender, &p.Material, &p.Color, &p.Size, &p.LensWidth, &p.BridgeWidth, &p.TempleLength, &p.StockQuantity, &p.ImageURL, &p.TryOnImageURL, &p.IsFeatured, &p.IsActive)
-	return p, err
-}
-
-func scanProducts(rows *sql.Rows) ([]models.Product, error) {
-	var products []models.Product
-	for rows.Next() {
-		product, err := scanProduct(rows)
-		if err != nil {
-			return nil, err
-		}
-		products = append(products, product)
+// productID rejects malformed route IDs before catalog work begins.
+func productID(c *gin.Context) (int, bool) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product id"})
+		return 0, false
 	}
-	return products, rows.Err()
+	return id, true
 }
 
-func slugify(value string) string {
-	slug := strings.ToLower(value)
-	replacer := strings.NewReplacer("'", "", " ", "-", "/", "-", "’", "", "(", "", ")", "")
-	slug = replacer.Replace(slug)
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
+// productError exposes expected catalog outcomes while keeping storage details private.
+func productError(c *gin.Context, err error, fallback string) {
+	switch {
+	case errors.Is(err, catalog.ErrUnavailable):
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
+	case errors.Is(err, catalog.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
+	case errors.Is(err, catalog.ErrStaleStock):
+		c.JSON(http.StatusConflict, gin.H{"error": "product stock changed; reload and retry"})
+	case errors.Is(err, catalog.ErrCategoryRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Please select a category."})
+	case errors.Is(err, catalog.ErrNamePriceRequired):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "product name and price are required"})
+	case errors.Is(err, catalog.ErrNegativeStock):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stock quantity cannot be negative"})
+	case errors.Is(err, catalog.ErrExpectedStockMissing):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "expected stock quantity is required"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fallback})
 	}
-	return strings.Trim(slug, "-")
 }

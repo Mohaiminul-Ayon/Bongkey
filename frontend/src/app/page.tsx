@@ -1,175 +1,86 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Image from "next/image";
 import { Button } from "@/components/Button";
 import { CategoryCard } from "@/components/CategoryCard";
 import { ProductCard } from "@/components/ProductCard";
-import { ProductVisual } from "@/components/ProductVisual";
 import { TrustBadge } from "@/components/TrustBadge";
-import { featuredProducts, products } from "@/lib/products";
+import { fetchFeaturedProducts } from "@/lib/api";
+import { type Product } from "@/lib/products";
 
 const categories = [
-  {
-    title: "Blue-Cut Glasses",
-    text: "Comfortable lenses for long office hours, study sessions, and phone-heavy days.",
-  },
-  {
-    title: "Sunglasses",
-    text: "Clean everyday sun protection for commutes, travel, and weekends.",
-  },
-  {
-    title: "Men's Frames",
-    text: "Structured silhouettes with lightweight materials and confident finishes.",
-  },
-  {
-    title: "Women's Frames",
-    text: "Soft, refined, and modern shapes made for daily wear.",
-  },
-  {
-    title: "Premium Collection",
-    text: "Better materials, polished details, and elevated Bongkey styling.",
-  },
-  {
-    title: "Budget Picks",
-    text: "Good-looking frames with practical prices and Cash on Delivery.",
-  },
+  { title: "Eyeglasses", text: "Everyday frames with a clean, considered fit." },
+  { title: "Sunglasses", text: "Easy silhouettes for bright days." },
+  { title: "Find your frame", text: "Explore the full Bongkey collection." },
 ];
 
-const trustItems = [
-  {
-    title: "Cash on Delivery",
-    text: "Order first, pay when your frame arrives at your doorstep.",
-  },
-  {
-    title: "Easy Exchange",
-    text: "Size or style concerns are handled through a simple exchange process.",
-  },
-  {
-    title: "Prescription Upload",
-    text: "Share your prescription during checkout for lens-ready orders.",
-  },
-  {
-    title: "Invoice Provided",
-    text: "Every confirmed order includes a proper invoice for your records.",
-  },
+const shopNotes = [
+  { title: "Easy to explore", text: "Clear product details and pricing before you add a frame to your bag." },
+  { title: "Try it your way", text: "Use the available try-on preview to get a feel for a frame." },
+  { title: "Order with confidence", text: "Verify your email and review your order before checkout." },
 ];
 
+/** Home presents the live featured catalog with an original editorial hero image. */
 export default function Home() {
-  const heroProduct = products[2];
+  const [featured, setFeatured] = useState<Product[]>([]);
+
+  useEffect(() => {
+    fetchFeaturedProducts().then(setFeatured).catch(() => setFeatured([]));
+  }, []);
 
   return (
     <>
-      <section className="bg-white">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 md:grid-cols-[1.05fr_0.95fr] md:items-center md:px-6 lg:py-18">
-          <div>
-            <p className="mb-4 text-sm font-black uppercase tracking-[0.22em] text-[#9a6a24]">
-              Bongkey Eyewear Bangladesh
-            </p>
-            <h1 className="max-w-4xl text-4xl font-black leading-tight text-neutral-950 md:text-6xl">
-              Affordable Premium Eyewear in Bangladesh
-            </h1>
-            <p className="mt-5 max-w-2xl text-lg leading-8 text-neutral-700">
-              Shop blue-cut glasses, sunglasses, and prescription-ready frames
-              with modern styling, practical pricing, and Cash on Delivery across Bangladesh.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/products">Shop Now</Button>
-              <Button href="/products/bk-blue-101" variant="secondary">
-                Try On Frames
-              </Button>
-            </div>
-            <div className="mt-8 grid grid-cols-2 gap-3 text-sm font-bold text-neutral-700 sm:grid-cols-4">
-              {["COD across BD", "Invoice included", "Blue-cut options", "Try-on ready"].map((item) => (
-                <div key={item} className="rounded-md border border-black/10 bg-[#f7f5ef] px-3 py-3">
-                  {item}
-                </div>
-              ))}
-            </div>
+      <section className="home-hero">
+        <div className="home-hero-copy">
+          <p className="eyebrow">Bongkey eyewear / Bangladesh</p>
+          <h1>See life <em>clearly.</em><br />Look entirely yourself.</h1>
+          <p className="hero-description">Eyewear made for the way you live. Find a frame that feels right, with a simple path from browsing to checkout.</p>
+          <div className="hero-actions">
+            <Button href="/products">Explore the collection <span aria-hidden="true">↗</span></Button>
+            <Button href="/products" variant="secondary">Shop all frames</Button>
           </div>
-          <div className="rounded-xl border border-black/10 bg-[#f7f5ef] p-4 shadow-sm">
-            <ProductVisual product={heroProduct} />
-            <div className="mt-4 flex items-center justify-between gap-4 rounded-lg bg-white p-4">
-              <div>
-                <p className="text-xs font-black uppercase tracking-[0.18em] text-[#9a6a24]">Featured frame</p>
-                <h2 className="mt-1 font-black text-neutral-950">{heroProduct.name}</h2>
-              </div>
-              <span className="rounded-full bg-[#f0f7f4] px-3 py-1 text-xs font-black text-[#173c34]">
-                Try online
-              </span>
-            </div>
-          </div>
+          <p className="hero-caption">Thoughtful style. Clear view. Everyday wear.</p>
+        </div>
+        <div className="home-hero-media">
+          <Image alt="Woman and man wearing modern eyeglasses" fill priority sizes="(max-width: 1000px) 100vw, 55vw" src="/images/eyewear-editorial.png" />
+          <span className="hero-image-note">A better way to see your day.</span>
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-4 py-12 md:px-6">
-        <div className="mb-7 flex items-end justify-between gap-4">
-          <div>
-            <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Shop categories</p>
-            <h2 className="mt-2 text-3xl font-black text-neutral-950">Find frames by your daily need</h2>
-          </div>
-          <Button className="hidden sm:inline-flex" href="/products" variant="ghost">
-            View All
-          </Button>
+      <section className="home-section">
+        <div className="section-heading">
+          <div><p className="eyebrow">01 / Discover</p><h2>Find your next frame.</h2></div>
+          <p>Simple choices, made for every day.</p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {categories.map((category) => (
-            <CategoryCard key={category.title} title={category.title} text={category.text} />
-          ))}
+        <div className="category-grid">
+          {categories.map((category, index) => <CategoryCard key={category.title} index={index + 1} {...category} />)}
         </div>
       </section>
 
-      <section className="bg-white py-12">
-        <div className="mx-auto max-w-7xl px-4 md:px-6">
-          <div className="mb-7 flex items-end justify-between gap-4">
-            <div>
-              <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Featured products</p>
-              <h2 className="mt-2 text-3xl font-black text-neutral-950">Frames customers can order today</h2>
-            </div>
-            <Button href="/products" variant="ghost">
-              Browse Products
-            </Button>
-          </div>
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {featuredProducts.map((product) => (
-              <ProductCard key={product.slug} product={product} />
-            ))}
-          </div>
+      <section className="home-section featured-section" id="featured">
+        <div className="section-heading">
+          <div><p className="eyebrow">02 / Selected for you</p><h2>Featured eyewear.</h2></div>
+          <Button href="/products" variant="ghost">View all <span aria-hidden="true">↗</span></Button>
         </div>
+        <div className="product-grid">
+          {featured.map((product) => <ProductCard key={product.slug} product={product} />)}
+        </div>
+        {featured.length === 0 ? <p className="empty-note">Featured frames will appear here when available.</p> : null}
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-12 md:grid-cols-[0.9fr_1.1fr] md:items-center md:px-6">
-        <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm">
-          <ProductVisual product={products[0]} />
-        </div>
+      <section className="editorial-band">
         <div>
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Virtual try-on</p>
-          <h2 className="mt-2 text-3xl font-black leading-tight text-neutral-950 md:text-4xl">
-            Try frames online before placing your Cash on Delivery order.
-          </h2>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-neutral-700">
-            Upload or take a photo, place a frame on your face, adjust the fit,
-            and choose with more confidence before checkout.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Button href="/products/bk-blue-101" variant="secondary">
-              Try On Frames
-            </Button>
-            <Button href="/products" variant="ghost">
-              Explore Catalog
-            </Button>
-          </div>
+          <p className="eyebrow">The Bongkey approach</p>
+          <h2>Good glasses make the everyday feel different.</h2>
         </div>
+        <p>From your first look to the final fit, choosing a frame should feel clear and uncomplicated.</p>
+        <Button href="/products" variant="secondary">Discover frames <span aria-hidden="true">↗</span></Button>
       </section>
 
-      <section className="bg-[#f0f7f4] py-12">
-        <div className="mx-auto max-w-7xl px-4 md:px-6">
-          <div className="mb-7">
-            <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Why Bongkey</p>
-            <h2 className="mt-2 text-3xl font-black text-neutral-950">Built for confident eyewear shopping</h2>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {trustItems.map((item) => (
-              <TrustBadge key={item.title} title={item.title} text={item.text} />
-            ))}
-          </div>
-        </div>
+      <section className="home-section" id="how-it-works">
+        <div className="section-heading"><div><p className="eyebrow">03 / How it works</p><h2>Shop with clarity.</h2></div></div>
+        <div className="notes-grid">{shopNotes.map((item, index) => <TrustBadge key={item.title} index={index + 1} {...item} />)}</div>
       </section>
     </>
   );

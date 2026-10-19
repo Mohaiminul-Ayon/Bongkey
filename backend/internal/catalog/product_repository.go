@@ -1,0 +1,122 @@
+package catalog
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"bongkey/backend/internal/models"
+)
+
+// PostgresProductRepository persists catalog products in PostgreSQL.
+type PostgresProductRepository struct{ DB *sql.DB }
+
+const productSelectSQL = `
+SELECT p.id, COALESCE(p.category_id, 0), COALESCE(c.name, ''), p.name, p.slug, p.description,
+	p.price, p.old_price, p.brand_tier, p.frame_type, p.gender, p.material, p.color, p.size,
+	p.lens_width, p.bridge_width, p.temple_length, p.stock_quantity, p.image_url,
+	p.try_on_image_url, p.is_featured, p.is_active
+FROM products p
+LEFT JOIN categories c ON c.id = p.category_id
+`
+
+// List reads published or owner-visible products and checks row iteration errors.
+func (r PostgresProductRepository) List(ctx context.Context, featuredOnly, includeInactive bool) ([]models.Product, error) {
+	if r.DB == nil {
+		return nil, ErrUnavailable
+	}
+	rows, err := r.DB.QueryContext(ctx, productSelectSQL+` WHERE ($1 OR p.is_active = true) AND ($2 = false OR p.is_featured = true) ORDER BY p.id DESC`, includeInactive, featuredOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	products := make([]models.Product, 0)
+	for rows.Next() {
+		product, err := scanProduct(rows)
+		if err != nil {
+			return nil, err
+		}
+		products = append(products, product)
+	}
+	return products, rows.Err()
+}
+
+// GetBySlug reads one published product.
+func (r PostgresProductRepository) GetBySlug(ctx context.Context, slug string) (models.Product, error) {
+	if r.DB == nil {
+		return models.Product{}, ErrUnavailable
+	}
+	product, err := scanProduct(r.DB.QueryRowContext(ctx, productSelectSQL+` WHERE p.slug = $1 AND p.is_active = true`, slug))
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.Product{}, ErrNotFound
+	}
+	return product, err
+}
+
+// Save inserts or updates one product, then returns the stored owner view.
+func (r PostgresProductRepository) Save(ctx context.Context, id int, input ProductInput) (models.Product, error) {
+	if r.DB == nil {
+		return models.Product{}, ErrUnavailable
+	}
+	if id == 0 {
+		err := r.DB.QueryRowContext(ctx, `
+			INSERT INTO products (
+				category_id, name, slug, description, price, old_price, brand_tier, frame_type, gender,
+				material, color, size, lens_width, bridge_width, temple_length, stock_quantity,
+				image_url, try_on_image_url, is_featured, is_active
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			RETURNING id
+		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive).Scan(&id)
+		if err != nil {
+			return models.Product{}, err
+		}
+	} else {
+		// The stock predicate prevents an old admin form from replacing a concurrent sale.
+		result, err := r.DB.ExecContext(ctx, `
+			UPDATE products SET category_id=$1, name=$2, slug=$3, description=$4, price=$5, old_price=$6,
+				brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
+				lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
+				image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, updated_at=NOW()
+			WHERE id=$21 AND stock_quantity=$22
+		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, id, *input.ExpectedStockQuantity)
+		if err != nil {
+			return models.Product{}, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return models.Product{}, err
+		}
+		if affected == 0 {
+			return models.Product{}, ErrStaleStock
+		}
+	}
+	return scanProduct(r.DB.QueryRowContext(ctx, productSelectSQL+` WHERE p.id = $1`, id))
+}
+
+// Delete removes a product only when the database allows it.
+func (r PostgresProductRepository) Delete(ctx context.Context, id int) error {
+	if r.DB == nil {
+		return ErrUnavailable
+	}
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM products WHERE id = $1`, id)
+	return err
+}
+
+// SetActive changes one product's publication state.
+func (r PostgresProductRepository) SetActive(ctx context.Context, id int, active bool) error {
+	if r.DB == nil {
+		return ErrUnavailable
+	}
+	_, err := r.DB.ExecContext(ctx, `UPDATE products SET is_active=$1, updated_at=NOW() WHERE id=$2`, active, id)
+	return err
+}
+
+type productScanner interface{ Scan(...any) error }
+
+// scanProduct keeps the read column mapping next to its SQL definition.
+func scanProduct(row productScanner) (models.Product, error) {
+	var product models.Product
+	err := row.Scan(&product.ID, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive)
+	return product, err
+}

@@ -18,12 +18,14 @@ import (
 
 var DB *sql.DB
 
+// Connect opens and verifies the shared PostgreSQL connection pool.
 func Connect(databaseURL string) error {
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
 		return err
 	}
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return err
 	}
 	DB = db
@@ -42,7 +44,7 @@ func MigrateAndSeed(cfg config.Config) error {
 	if _, err := DB.Exec(schemaSQL); err != nil {
 		return err
 	}
-	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql"} {
+	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)

@@ -9,15 +9,17 @@ import (
 )
 
 type Config struct {
-	AppEnv        string
-	ServerPort    string
-	DatabaseURL   string
-	AdminEmail    string
-	AdminPassword string
-	JWTSecret     string
-	ProjectRoot   string
-	EnvFile       string
-	EnvFileHint   string
+	AppEnv           string
+	ServerPort       string
+	DatabaseURL      string
+	AdminEmail       string
+	AdminPassword    string
+	JWTSecret        string
+	GmailFrom        string
+	GmailAppPassword string
+	ProjectRoot      string
+	EnvFile          string
+	EnvFileHint      string
 }
 
 func Load() (Config, error) {
@@ -34,15 +36,17 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:        getEnv("APP_ENV", "development"),
-		ServerPort:    getEnv("SERVER_PORT", "8080"),
-		DatabaseURL:   getEnv("DATABASE_URL", "postgres://bongkey:bongkey_password@localhost:5432/bongkey?sslmode=disable"),
-		AdminEmail:    getEnv("ADMIN_EMAIL", ""),
-		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
-		JWTSecret:     getEnv("JWT_SECRET", ""),
-		ProjectRoot:   projectRoot,
-		EnvFile:       loadedEnvFile,
-		EnvFileHint:   envFileHint,
+		AppEnv:           getEnv("APP_ENV", "development"),
+		ServerPort:       getEnv("SERVER_PORT", "8080"),
+		DatabaseURL:      getEnv("DATABASE_URL", "postgres://bongkey:bongkey_password@localhost:5432/bongkey?sslmode=disable"),
+		AdminEmail:       getEnv("ADMIN_EMAIL", ""),
+		AdminPassword:    getEnv("ADMIN_PASSWORD", ""),
+		JWTSecret:        getEnv("JWT_SECRET", ""),
+		GmailFrom:        getEnv("GMAIL_FROM", ""),
+		GmailAppPassword: getEnv("GMAIL_APP_PASSWORD", ""),
+		ProjectRoot:      projectRoot,
+		EnvFile:          loadedEnvFile,
+		EnvFileHint:      envFileHint,
 	}
 	if err := cfg.validateSecurity(); err != nil {
 		return Config{}, err
@@ -54,6 +58,9 @@ func Load() (Config, error) {
 func (cfg Config) validateSecurity() error {
 	if len(cfg.JWTSecret) < 32 || strings.HasPrefix(cfg.JWTSecret, "change-this-secret") {
 		return fmt.Errorf("JWT_SECRET must be a non-template secret of at least 32 characters")
+	}
+	if (cfg.GmailFrom == "") != (cfg.GmailAppPassword == "") {
+		return fmt.Errorf("GMAIL_FROM and GMAIL_APP_PASSWORD must be set together")
 	}
 	return nil
 }

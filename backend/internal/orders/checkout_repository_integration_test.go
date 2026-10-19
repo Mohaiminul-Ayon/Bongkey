@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +44,13 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
+	}
+	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "005_checkout_idempotency.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+		t.Fatal("could not apply local checkout idempotency migration")
 	}
 	return db
 }
@@ -133,9 +141,15 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	id := checkoutFixtureProduct(t, db, 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}}
+	const emailSecret = "synthetic-email-proof-secret-at-least-32-characters"
+	proof, err := security.IssueEmailProof(emailSecret, "qa-buyer@example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret}
 	request := CheckoutRequest{
-		CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof,
 		Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
 	}
 	receipt, err := service.Place(ctx, request)
@@ -151,10 +165,11 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	})
 	var remaining, itemCount, invoiceCount int
 	var tokenHash string
+	var emailVerified bool
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil {
 		t.Fatal("could not read checkout stock")
 	}
-	if err := db.QueryRowContext(ctx, `SELECT guest_token_hash FROM orders WHERE id = $1`, receipt.ID).Scan(&tokenHash); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT guest_token_hash, email_verified FROM orders WHERE id = $1`, receipt.ID).Scan(&tokenHash, &emailVerified); err != nil {
 		t.Fatal("could not read local order")
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM order_items WHERE order_id = $1`, receipt.ID).Scan(&itemCount); err != nil {
@@ -163,15 +178,105 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoices WHERE order_id = $1`, receipt.ID).Scan(&invoiceCount); err != nil {
 		t.Fatal("could not read local invoice")
 	}
-	if remaining != 1 || itemCount != 1 || invoiceCount != 1 || receipt.Total != 180 || !security.MatchesOrderToken(receipt.GuestAccessToken, tokenHash) {
+	if remaining != 1 || itemCount != 1 || invoiceCount != 1 || receipt.Total != 180 || !security.MatchesOrderToken(receipt.GuestAccessToken, tokenHash) || !emailVerified {
 		t.Fatal("accepted checkout did not persist stock, order, invoice, and private access together")
 	}
+	retry, err := service.Place(ctx, request)
+	if err != nil || retry != receipt {
+		t.Fatalf("identical retry did not return the original receipt: retry=%+v err=%v", retry, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil || remaining != 1 {
+		t.Fatal("identical retry changed stock")
+	}
+	access := AccessService{Reader: PostgresReader{DB: db}, EmailProofSecret: emailSecret}
+	orderID := fmt.Sprint(receipt.ID)
+	if order, err := access.Guest(ctx, orderID, proof); err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
+		t.Fatal("verified email could not access its stored invoice summary")
+	}
+	otherProof, err := security.IssueEmailProof(emailSecret, "someone-else@example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := access.Guest(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
+		t.Fatal("another email accessed the invoice summary")
+	}
 	request.Items[0].Quantity = 2
+	request.IdempotencyKey = "checkout-postgres-0002"
 	if _, err := service.Place(ctx, request); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("checkout accepted more stock than remained")
 	}
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil || remaining != 1 {
 		t.Fatal("rejected checkout changed stock")
+	}
+}
+
+// TestConcurrentIdempotentCheckoutPostgres proves equal retries create one order and reserve stock once.
+func TestConcurrentIdempotentCheckoutPostgres(t *testing.T) {
+	db := localCheckoutDB(t)
+	productID := checkoutFixtureProduct(t, db, 2)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	proof, err := security.IssueEmailProof(testEmailProofSecret, "qa-buyer@example.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}
+	request := CheckoutRequest{
+		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof,
+		Items: []CheckoutItem{{ProductID: productID, Quantity: 1}},
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM orders WHERE idempotency_key_hash = $1 AND customer_name = 'QA'`, textHash(request.IdempotencyKey)); err != nil {
+			t.Error("could not remove concurrent checkout fixture")
+		}
+	})
+	start := make(chan struct{})
+	results := make(chan CheckoutReceipt, 2)
+	errorsFound := make(chan error, 2)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	for i := 0; i < 2; i++ {
+		// The test owns both workers; the timeout bounds lock waits and Wait observes completion.
+		go func() {
+			defer workers.Done()
+			<-start
+			receipt, err := service.Place(ctx, request)
+			if err != nil {
+				errorsFound <- err
+				return
+			}
+			results <- receipt
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	close(errorsFound)
+	for err := range errorsFound {
+		t.Fatalf("concurrent idempotent checkout failed: %v", err)
+	}
+	var receipts []CheckoutReceipt
+	for receipt := range results {
+		receipts = append(receipts, receipt)
+	}
+	if len(receipts) != 2 || receipts[0] != receipts[1] {
+		t.Fatalf("concurrent retries returned different receipts: %+v", receipts)
+	}
+	var remaining, orderCount, invoiceCount int
+	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, productID).Scan(&remaining); err != nil {
+		t.Fatal("could not read stock after concurrent retry")
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM orders WHERE idempotency_key_hash = $1`, textHash(request.IdempotencyKey)).Scan(&orderCount); err != nil {
+		t.Fatal("could not count concurrent retry orders")
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoices WHERE order_id = $1`, receipts[0].ID).Scan(&invoiceCount); err != nil {
+		t.Fatal("could not count concurrent retry invoices")
+	}
+	if remaining != 1 || orderCount != 1 || invoiceCount != 1 {
+		t.Fatalf("remaining=%d orders=%d invoices=%d, want one stock reservation, order and invoice", remaining, orderCount, invoiceCount)
 	}
 }
 

@@ -51,3 +51,25 @@ func TestGuestOrderAccess(t *testing.T) {
 		t.Fatalf("admin should still access a legacy order: %+v, %v", legacy, err)
 	}
 }
+
+// TestVerifiedEmailAccessRejectsOtherAndLegacyOrders checks email ownership at the service boundary.
+func TestVerifiedEmailAccessRejectsOtherAndLegacyOrders(t *testing.T) {
+	const secret = "synthetic-email-proof-secret-at-least-32-characters"
+	proof, err := security.IssueEmailProof(secret, "buyer@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := AccessService{EmailProofSecret: secret, Reader: memoryReader{
+		"1": {Summary: Summary{ID: 1}, CustomerEmail: "buyer@example.com", EmailVerified: true},
+		"2": {Summary: Summary{ID: 2}, CustomerEmail: "other@example.com", EmailVerified: true},
+		"3": {Summary: Summary{ID: 3}, CustomerEmail: "buyer@example.com"},
+	}}
+	if order, err := service.Guest(context.Background(), "1", proof); err != nil || order.ID != 1 {
+		t.Fatal("verified mailbox could not access its order")
+	}
+	for _, id := range []string{"2", "3", "missing"} {
+		if order, err := service.Guest(context.Background(), id, proof); !errors.Is(err, ErrNotFound) || order != (Summary{}) {
+			t.Fatal("email proof accessed another or unverified order")
+		}
+	}
+}

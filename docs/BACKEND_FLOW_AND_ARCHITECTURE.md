@@ -1,0 +1,320 @@
+# Bongkey Eyewear MVP — Backend Architecture & Complete Flow Guide
+
+> **ডকুমেন্ট টাইপ:** ব্যাকএন্ড আর্কিটেকচার, সিস্টেম ডিজাইন এবং কোড কল-ফ্লো গাইড  
+> **প্রযুক্তি:** Go (Golang 1.23+), Gin Web Framework, PostgreSQL (`github.com/lib/pq`), bcrypt, JWT (`golang-jwt/jwt/v5`)  
+> **PDF সংস্করণ:** [`docs/backend_architecture_and_flow.pdf`](file:///E:/Eyewear-mvp/docs/backend_architecture_and_flow.pdf)  
+> **HTML সংস্করণ:** [`docs/backend_architecture_and_flow.html`](file:///E:/Eyewear-mvp/docs/backend_architecture_and_flow.html)
+
+---
+
+## ১. হাই-লেভেল সিস্টেম ডিজাইন (Layered Clean Architecture)
+
+Bongkey ব্যাকএন্ডটি Go এবং Gin ফ্রেমওয়ার্ক দিয়ে তৈরি একটি Production-grade, **Single Responsibility Principle (SRP)** মেনে চলা আর্কিটেকচার। এখানে কোনো ক্যাচ-অল (`utils`, `helpers`, `common`) প্যাকেজ নেই। প্রতিটি লেয়ারের দায়িত্ব সম্পূর্ণ আলাদা এবং সুনির্দিষ্ট।
+
+```
++----------------------------------------------------------------------------------------------------+
+|                                    HTTP CLIENT (Browser / Mobile / cURL)                           |
++----------------------------------------------------------------------------------------------------+
+                                                  │
+                                                  ▼
++----------------------------------------------------------------------------------------------------+
+|                                       TRANSPORT LAYER (HTTP / Gin)                                 |
+|  - Routes: routes.SetupRouter(cfg)                                                                 |
+|  - Middleware: CORS() ──> AdminAuth()                                                              |
+|  - Handlers: Health, Admin, Product, Category, Upload, EmailOTP, Checkout, OrderAccess, OrderList  |
++----------------------------------------------------------------------------------------------------+
+                                                  │ (Passes DTOs, Context; No Gin Context to Services)
+                                                  ▼
++----------------------------------------------------------------------------------------------------+
+|                                       SERVICE LAYER (Business Logic)                               |
+|  - auth.Service: Admin password & session verification                                             |
+|  - catalog.ProductService: Catalog rules, slugification, stock validation                          |
+|  - catalog.CategoryService: Category rules & slug generation                                       |
+|  - emailotp.Service: Challenge rate-limiting, code issuance & verification                         |
+|  - orders.CheckoutService: Idempotency coordination, stock reservation, price calculation          |
+|  - orders.AccessService: Authorization rules for guest tokens vs email proofs vs admin sessions    |
++----------------------------------------------------------------------------------------------------+
+                          │                                                │
+                          ▼                                                ▼
++----------------------------------------------------+    +------------------------------------------+
+|            SECURITY LAYER (Isolated Primitives)    |    |     REPOSITORY LAYER (Persistence / SQL) |
+|  - security.IssueAdminToken / VerifyAdminToken     |    |  - catalog.PostgresProductRepository     |
+|  - security.NewOrderToken / IdempotentOrderToken   |    |  - catalog.PostgresCategoryRepository    |
+|  - security.IssueEmailProof / VerifyEmailProof     |    |  - emailotp.PostgresStore                |
+|  - security.EmailCodeHash / EmailKey               |    |  - orders.PostgresCheckoutStore (Tx)     |
+|  - security.MatchesOrderToken (Constant Time)      |    |  - orders.PostgresReader                 |
++----------------------------------------------------+    |  - auth.PostgresRepository               |
+                                                          +------------------------------------------+
+                                                                            │
+                                                                            ▼
+                                                          +------------------------------------------+
+                                                          |           POSTGRESQL DATABASE            |
+                                                          |  - Connection Pool (database.DB)         |
+                                                          |  - Advisory Locks & Constraints          |
+                                                          +------------------------------------------+
+```
+
+### লেয়ার বাউন্ডারির ৪টি মূল নিয়ম:
+1. **হ্যান্ডলার (Handlers):** শুধু HTTP রিকোয়েস্ট পার্স করে (JSON binding, URL params, headers), সার্ভিসকে `context.Context` সহ কল করে এবং ফলাফলকে HTTP Status Code ও JSON-এ ম্যাপ করে। হ্যান্ডলারে **কোনো SQL বা বিজনেস রুল থাকবে না**।
+2. **সার্ভিস (Services):** সমস্ত বিজনেস নিয়ম এবং ইনভ্যারিয়েন্ট রক্ষা করে। সার্ভিস কখনো Gin বা HTTP রেসপন্স অবজেক্টের ওপর নির্ভর করে না।
+3. **রিপোজিটরি (Repositories):** পিওর SQL এবং ডেটাবেস ট্রানজ্যাকশন এক্সিকিউট করে।
+4. **সিকিউরিটি (Security):** ক্রিপ্টোগ্রাফিক অ্যালগরিদম (JWT, HMAC, Constant-Time Compare) আলাদা প্যাকেজে আইসোলেটেড থাকে।
+
+---
+
+## ২. ফাইল ও ফাংশনভিত্তিক বিস্তারিত গাইড (File-by-File Walkthrough)
+
+### ২.১ সার্ভার বুটস্ট্র্যাপিং ও কনফিগারেশন
+
+#### [`backend/cmd/server/main.go`](file:///E:/Eyewear-mvp/backend/cmd/server/main.go)
+* [`main()`](file:///E:/Eyewear-mvp/backend/cmd/server/main.go#L10-L18):
+  * **কেন আছে:** ব্যাকএন্ডের এন্ট্রি পয়েন্ট।
+  * **কী করে:** প্রথমে [`config.Load()`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L25) কল করে কনফিগ লোড ও ভ্যালিডেট করে। কনফিগ ভ্যালিড হলে [`serve(cfg)`](file:///E:/Eyewear-mvp/backend/cmd/server/server.go#L14) কল করে সার্ভার চালু করে। কোনো ব্যর্থতায় `log.Fatalf` দিয়ে প্রসেস বন্ধ করে।
+
+#### [`backend/cmd/server/server.go`](file:///E:/Eyewear-mvp/backend/cmd/server/server.go)
+* [`serve(cfg config.Config) error`](file:///E:/Eyewear-mvp/backend/cmd/server/server.go#L14-L30):
+  * **কী করে:** 
+    1. `logEnvironment(cfg)` দিয়ে কোন `.env` থেকে ভ্যারিয়েবল নেওয়া হয়েছে তা লগ করে।
+    2. [`database.Connect(cfg.DatabaseURL)`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L22) দিয়ে PostgreSQL কানেকশন পুল তৈরি ও পিং টেস্ট করে। ড্রাইভার এররে যাতে পাসওয়ার্ড ফাঁস না হয় সেজন্য জেনেরিক এরর রিটার্ন করে।
+    3. [`database.MigrateAndSeed(cfg)`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L40) দিয়ে স্কিমা তৈরি ও সিড করে।
+    4. [`routes.SetupRouter(cfg).Run(":" + cfg.ServerPort)`](file:///E:/Eyewear-mvp/backend/internal/routes/routes.go#L17) দিয়ে Gin HTTP লিসেনিং শুরু করে (এটি একটি ব্লকিং কল)।
+* [`logEnvironment(cfg config.Config)`](file:///E:/Eyewear-mvp/backend/cmd/server/server.go#L33-L39): কনসোলে নিরাপদে কনফিগ সোর্স প্রিন্ট করে, কিন্তু সিক্রেট ভ্যালু প্রিন্ট করে না।
+
+#### [`backend/internal/config/config.go`](file:///E:/Eyewear-mvp/backend/internal/config/config.go)
+* [`Config`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L11-L23): ডাটাবেস URL, JWT সিক্রেট, জিমেইল ক্রেডেনশিয়াল এবং পোর্ট ধারণকারী স্ট্রাক্ট।
+* [`Load() (Config, error)`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L25-L55): প্রজেক্ট রুট খুঁজে `.env` ফাইল রিড করে ভ্যালু বসায় এবং `validateSecurity()` রান করে।
+* [`(cfg Config) validateSecurity() error`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L58-L66): `JWTSecret` এর দৈর্ঘ্য ন্যূনতম ৩২ ক্যারেক্টার কিনা এবং Gmail ইউজারনেম ও পাসওয়ার্ড একসাথে কনফিগার করা হয়েছে কিনা যাচাই করে। ডিফল্ট টেমপ্লেট সিক্রেট থাকলে সার্ভার স্টার্ট আটকে দেয়।
+* [`findProjectRoot()`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L77-L94): ওপরের ডিরেক্টরিগুলোতে ট্রাভার্স করে যেখানে `.env.example` ও `docker-compose.yml` আছে সেটি রুট হিসেবে চিহ্নিত করে।
+* [`loadDotEnv(path string)`](file:///E:/Eyewear-mvp/backend/internal/config/config.go#L96-L137): কাস্টম বাফার স্ক্যানার যা কমেন্ট ও ফাঁকা লাইন বাদ দিয়ে `os.Setenv` করে।
+
+---
+
+### ২.২ ডেটাবেস, স্কিমা ও সিডিং
+
+#### [`backend/internal/database/database.go`](file:///E:/Eyewear-mvp/backend/internal/database/database.go)
+* [`DB *sql.DB`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L19): গ্লোবাল কানেকশন পুল।
+* [`Connect(databaseURL string) error`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L22-L33): PostgreSQL ড্রাইভার ইনিশিয়ালাইজ করে এবং `db.Ping()` দিয়ে কানেক্টিভিটি টেস্ট করে।
+* [`MigrateAndSeed(cfg config.Config) error`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L40-L67):
+  * প্রথমে মূল স্কিমা (`schemaSQL`) চালায় (টেবিল: `admins`, `categories`, `products`, `orders`, `order_items`, `invoices`)।
+  * ক্রমান্বয়ে ৪টি মাইগ্রেশন ফাইল এক্সিকিউট করে:
+    * `002_guest_order_access.sql`: `guest_token_hash` কলাম যোগ করে।
+    * `003_stock_quantity_nonnegative.sql`: স্টকে `CHECK (stock_quantity >= 0)` কনস্ট্রেইন্ট দেয়।
+    * `004_email_otp.sql`: ওটিপি চ্যালেঞ্জ ও আইপি লিমিট টেবিল তৈরি করে।
+    * `005_checkout_idempotency.sql`: `idempotency_key_hash` এর ওপর ইউনিক ইনডেক্স তৈরি করে।
+  * এরপর `seedAdmin`, `seedCategories`, এবং `seedProducts` কল করে।
+* [`seedAdmin(db, email, password) error`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L70-L100):
+  * **Concurrency Protection:** ট্রানজ্যাকশনের শুরুতে `LOCK TABLE admins IN EXCLUSIVE MODE` এক্সিকিউট করে যাতে একাধিক ব্যাকএন্ড ইনস্ট্যান্স একসাথে বুট করলেও একের অধিক ওনার অ্যাকাউন্ট তৈরি হতে না পারে।
+  * ওনার একাউন্ট না থাকলে bcrypt দিয়ে পাসওয়ার্ড হ্যাশ করে `role = 'owner'` হিসেবে ইনসার্ট করে।
+* [`seedCategories()`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L102-L110) ও [`seedProducts()`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L121-L162): ডেমো ফ্রেম ও সানগ্লাস প্রোডাক্টগুলো স্পেসিফিকেশনসহ ইনসার্ট করে।
+* [`slugify(value string)`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L164-L172): নাম থেকে স্পেশাল ক্যারেক্টার ও স্পেস সরিয়ে ক্লিন URL স্লাগ তৈরি করে।
+
+---
+
+### ২.৩ সিকিউরিটি সাবসিস্টেম (Dedicated Security Boundary)
+
+#### [`backend/internal/security/admin_token.go`](file:///E:/Eyewear-mvp/backend/internal/security/admin_token.go)
+* [`IssueAdminToken(secret string, id int64) (string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/admin_token.go#L23-L39): অ্যাডমিন লগইন সফল হলে HS256 অ্যালগরিদমে ২৪ ঘণ্টার মেয়াদি একটি JWT সাইন করে ফেরত দেয় (`Issuer: bongkey-api`, `Audience: bongkey-admin`, `Role: owner`)।
+* [`VerifyAdminToken(secret, raw string) (int64, error)`](file:///E:/Eyewear-mvp/backend/internal/security/admin_token.go#L42-L59): ইনকামিং JWT যাচাই করে। সিগনেচার, এক্সপায়ারি, অডিয়েন্স এবং রোল চেক করে অ্যাডমিন আইডি রিটার্ন করে।
+
+#### [`backend/internal/security/order_token.go`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go)
+* [`NewOrderToken() (string, string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L14-L21): গেস্ট অর্ডারের জন্য ৩২-বাইটের ক্রিপ্টোগ্রাফিক র্যান্ডম টোকেন ও তার SHA-256 হেক্স ডাইজেস্ট (স্টোরেজ হ্যাশ) রিটার্ন করে। ডেটাবেসে শুধু হ্যাশ থাকে, কাঁচা টোকেন নয়।
+* [`IdempotentOrderToken(secret, idempotencyKey string) (string, string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L24-L33): একই Idempotency Key দিয়ে রিট্রাই আসলে HMAC ব্যবহার করে ক্লায়েন্টকে অবিকল একই গেস্ট টোকেন ফেরত দেয়।
+* [`MatchesOrderToken(token, storedHash string) bool`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L36-L46): ইনপুট টোকেনটিকে হ্যাশ করে `subtle.ConstantTimeCompare` দিয়ে ডেটাবেস হ্যাশের সাথে তুলনা করে। **এটি ক্রিপ্টোগ্রাফিক টাইমিং সাইড-চ্যানেল অ্যাটাক প্রতিরোধ করে।**
+
+#### [`backend/internal/security/email_proof.go`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go)
+* [`NewEmailCode() (string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go#L21-L27): ৬-ডিজিটের ক্রিপ্টোগ্রাফিক ওটিপি জেনারেট করে (যেমন: `539201`)।
+* [`EmailCodeHash(secret, email, code string)`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go#L30-L34): সিক্রেট কি এবং ইমেইল সল্টসহ ওটিপির HMAC হ্যাশ তৈরি করে, যাতে ডিবি লিক হলেও ওটিপি রিভার্স করা না যায়।
+* [`EmailKey(secret, kind, value string)`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go#L37-L41): রেট লিমিট টেবিলে ব্যবহারের জন্য ইমেইল ও আইপির প্রিফিক্সড HMAC কি তৈরি করে।
+* [`IssueEmailProof(secret, email string) (string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go#L44-L55): ওটিপি যাচাই শেষে ১০ মিনিটের মেয়াদি একটি JWT "Email Proof" টোকেন ইস্যু করে।
+* [`VerifyEmailProof(secret, raw string) (string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/email_proof.go#L58-L71): প্রুফ টোকেন যাচাই করে ভেরিফায়েড ইমেইল রিটার্ন করে।
+
+---
+
+### ২.৪ মিডলওয়্যার (Middleware)
+
+#### [`backend/internal/middleware/cors.go`](file:///E:/Eyewear-mvp/backend/internal/middleware/cors.go)
+* [`CORS() gin.HandlerFunc`](file:///E:/Eyewear-mvp/backend/internal/middleware/cors.go#L10-L23): ব্রাউজার প্রি-ফ্লাইট `OPTIONS` রিকোয়েস্টে `204 No Content` দিয়ে রিটার্ন করে এবং প্রয়োজনীয় CORS হেডার (`Access-Control-Allow-Origin: *`, `Idempotency-Key`, `Authorization`) ইনজেক্ট করে।
+
+#### [`backend/internal/middleware/admin_auth.go`](file:///E:/Eyewear-mvp/backend/internal/middleware/admin_auth.go)
+* [`AdminAuth(service auth.Service) gin.HandlerFunc`](file:///E:/Eyewear-mvp/backend/internal/middleware/admin_auth.go#L14-L34):
+  * **কী করে:** `Authorization: Bearer <token>` হেডার চেক করে `service.Authenticate` কল করে। টোকেন ইনভ্যালিড হলে `401 Unauthorized` দিয়ে রিকোয়েস্ট `c.AbortWithStatusJSON` করে।
+  * ভ্যালিড হলে জিন কন্টেক্সটে `c.Set("admin_id", admin.ID)` সেট করে পরবর্তী হ্যান্ডলারকে এক্সিকিউট করতে দেয় (`c.Next()`)।
+
+---
+
+### ২.৫ অ্যাডমিন ও অথেন্টিকেশন সাবসিস্টেম
+
+#### [`backend/internal/auth/admin.go`](file:///E:/Eyewear-mvp/backend/internal/auth/admin.go)
+* [`PostgresRepository`](file:///E:/Eyewear-mvp/backend/internal/auth/admin.go#L34):
+  * `ByEmail(ctx, email)`: ইমেইল দিয়ে ওনারের পাসওয়ার্ড হ্যাশ পড়ে আনে।
+  * `ByID(ctx, id)`: প্রটেক্টেড রিকোয়েস্টের সময় অ্যাডমিন আইডিটি ডাটাবেসে এখনো বৈধ কিনা নিশ্চিত করে।
+* [`Service.Login(ctx, email, password)`](file:///E:/Eyewear-mvp/backend/internal/auth/admin.go#L59-L75): পাসওয়ার্ড ভেরিফিকেশন (bcrypt) করে এবং রোল `owner` হলে `security.IssueAdminToken` দিয়ে সেশন টোকেন ইস্যু করে। ভুল ক্রেডেনশিয়াল হলে নিরাপদ `ErrInvalidCredentials` এরর দেয়।
+* [`Service.Authenticate(ctx, token)`](file:///E:/Eyewear-mvp/backend/internal/auth/admin.go#L78-L94): টোকেন ভ্যালিডেশনের পর ডেটাবেসে ওনার একাউন্টটি এখনো কার্যকর আছে কিনা পুনঃপরীক্ষা করে।
+
+---
+
+### ২.৬ ক্যাটালগ সাবসিস্টেম (Categories & Products)
+
+#### [`backend/internal/catalog/categories.go`](file:///E:/Eyewear-mvp/backend/internal/catalog/categories.go) & [`category_repository.go`](file:///E:/Eyewear-mvp/backend/internal/catalog/category_repository.go)
+* [`CategoryService`](file:///E:/Eyewear-mvp/backend/internal/catalog/categories.go#L22):
+  * `List(ctx)`: সমস্ত ক্যাটাগরি আনে।
+  * `Save(ctx, id, category)`: ক্যাটাগরির নাম খালি কিনা চেক করে, নাম থেকে স্লাগ তৈরি করে এবং রিপোজিটরির `Save` কল করে।
+  * `Delete(ctx, id)`: আইডি অনুযায়ী ক্যাটাগরি মুছে ফেলে।
+
+#### [`backend/internal/catalog/products.go`](file:///E:/Eyewear-mvp/backend/internal/catalog/products.go) & [`product_repository.go`](file:///E:/Eyewear-mvp/backend/internal/catalog/product_repository.go)
+* [`ProductService.Save(ctx, id, input)`](file:///E:/Eyewear-mvp/backend/internal/catalog/products.go#L56-L82):
+  * নাম ও প্রাইস বাধ্যতামূলক, স্টক নেগেটিভ হওয়া যাবে না।
+  * ওনার যদি কোনো বিদ্যমান প্রোডাক্ট আপডেট করেন, তবে `input.ExpectedStockQuantity` থাকা বাধ্যতামূলক।
+* [`PostgresProductRepository.Save(ctx, id, input)`](file:///E:/Eyewear-mvp/backend/internal/catalog/product_repository.go#L57-L95):
+  * **Optimistic Concurrency Control (OCC):** আপডেটের সময় SQL কোয়ারিটি লক্ষ্য করুন:
+    ```sql
+    UPDATE products SET ... WHERE id=$21 AND stock_quantity=$22
+    ```
+    এখানে `$22` হলো অ্যাডমিনের ফর্ম ওপেন করার সময়ের স্টক। যদি অ্যাডমিন ফর্ম ওপেন রাখার সময়ে লাইভ কোনো কাস্টমার অর্ডার দিয়ে স্টক পরিবর্তন করে ফেলে, তবে `affected == 0` হবে এবং এটি `ErrStaleStock` রিটার্ন করবে! ফলে অ্যাডমিন কোনো লাইভ সেলের ডেটা অসাবধানতাবশত ওভাররাইট করতে পারবেন না।
+
+---
+
+### ২.৭ ওটিপি ও ইমেইল ভেরিফিকেশন সাবসিস্টেম
+
+#### [`backend/internal/emailotp/gmail.go`](file:///E:/Eyewear-mvp/backend/internal/emailotp/gmail.go)
+* [`GmailSender.Send(ctx, to, code)`](file:///E:/Eyewear-mvp/backend/internal/emailotp/gmail.go#L23-L74):
+  * `smtp.gmail.com:465` এ সরাসরি TLS ডায়াল করে ১০ সেকেন্ডের বাউন্ডেড কন্টেক্সটে মেসেজ পাঠায়।
+  * `context.AfterFunc` দিয়ে ক্লায়েন্ট ক্যানসেলেশনের সাথে সাথে TCP সকেট ক্লোজ নিশ্চিত করা হয়।
+  * কোনো ক্রেডেনশিয়াল বা এড্রেস এররে লগ করে না।
+
+#### [`backend/internal/emailotp/repository.go`](file:///E:/Eyewear-mvp/backend/internal/emailotp/repository.go)
+* [`PostgresStore.Reserve(ctx, emailKey, ipKey, codeHash)`](file:///E:/Eyewear-mvp/backend/internal/emailotp/repository.go#L15-L72):
+  * একটি অ্যাটমিক ট্রানজ্যাকশনে ১ দিনের পুরোনো লগ ক্লিন করে।
+  * আইপি প্রতি ঘণ্টায় সর্বোচ্চ ১০টি রিকোয়েস্টের বেশি এলে `ErrLimited` (429) দেয়।
+  * ইমেইল প্রতি ঘণ্টায় সর্বোচ্চ ৩টি এবং প্রতি ১ মিনিটে ১টির বেশি ওটিপি রিকোয়েস্ট এলে আটকে দেয়।
+* [`PostgresStore.Release(ctx, emailKey, codeHash)`](file:///E:/Eyewear-mvp/backend/internal/emailotp/repository.go#L75-L78): জিমেইল ডেলিভারি ব্যর্থ হলে কোডটি সাথে সাথে ইনভ্যালিডেট করে দেয় যাতে অপব্যবহার না হয়।
+* [`PostgresStore.Consume(ctx, emailKey, codeHash)`](file:///E:/Eyewear-mvp/backend/internal/emailotp/repository.go#L81-L94): ওটিপি যাচাই করে অ্যাটেম্পট সংখ্যা বাড়ায় (সর্বোচ্চ ৫ বার চেষ্টা করা যাবে), কোড মিলে গেলে `consumed_at = NOW()` সেট করে কোডটি সিঙ্গেল-ইউজ নিশ্চিত করে।
+
+---
+
+### ২.৮ অর্ডার ও চেকআউট সাবসিস্টেম (Core Checkout Engine)
+
+#### [`backend/internal/orders/checkout.go`](file:///E:/Eyewear-mvp/backend/internal/orders/checkout.go)
+* [`CheckoutService.Place(ctx, request)`](file:///E:/Eyewear-mvp/backend/internal/orders/checkout.go#L88-L184):
+  1. **Idempotency Key ভ্যালিডেশন:** `ValidIdempotencyKey` চেক করে কি-টি ১৬-১২৮ ক্যারেক্টারের কিনা।
+  2. **Deadlock Prevention via Sorted Locking:** কার্টের প্রোডাক্ট আইডিগুলোকে `sort.Ints(productIDs)` দিয়ে ক্রমানুসারে সাজায়, যাতে দুই জন কাস্টমার একই সাথে বিপরীত ক্রমে প্রোডাক্ট কিনলেও রো লক নিয়ে ডাটাবেস ডেডলক না হয়।
+  3. **Request Fingerprinting:** `checkoutRequestHash` দিয়ে ক্লায়েন্টের মূল পেলোডের হ্যাশ বের করে।
+  4. **Advisory Lock & Distributed Idempotency:** ট্রানজ্যাকশনে ঢুকে `pg_advisory_xact_lock` নেয়। পূর্বের একই Idempotency Key দিয়ে অর্ডার থাকলে এবং পেলোড একই হলে সরাসরি পূর্বের রিসিট রিটার্ন করে। পেলোড ভিন্ন হলে `ErrIdempotencyConflict` (409) দেয়।
+  5. **Email Proof Verification:** `security.VerifyEmailProof` দিয়ে যাচাই করে যে ওটিপি ভেরিফিকেশনের ইমেইল এবং অর্ডারের ইমেইল অবিকল এক।
+  6. **Atomic Stock Reservation:** `UPDATE products SET stock_quantity = stock_quantity - $2 ... WHERE stock_quantity >= $2` দিয়ে অ্যাটমিকভাবে স্টক হ্রাস করে। স্টক না থাকলে ট্রানজ্যাকশন রোলব্যাক হয়ে `ErrUnavailable` ফেরত দেয়।
+  7. **Financial Calculations & Overflow Guard:** ৮০ টাকা ফিক্সড ডেলিভারি ফি সহ সাবটোটাল ও টোটাল হিসাব করে (ইনটিজার ওভারফ্লো চেকসহ)।
+  8. **Atomic Insert:** অর্ডার (`ORD-XXXXXX`), অর্ডার আইটেমস, এবং ইনভয়েস (`INV-XXXXXX`) একটিমাত্র ট্রানজ্যাকশনে সেভ করে।
+  9. **Deterministic Guest Token:** `security.IdempotentOrderToken` দিয়ে ক্লায়েন্টকে রিট্রাইয়ের ক্ষেত্রেও একই `guest_access_token` ফেরত দেয়।
+
+#### [`backend/internal/orders/access.go`](file:///E:/Eyewear-mvp/backend/internal/orders/access.go)
+* [`AccessService.Guest(ctx, id, token)`](file:///E:/Eyewear-mvp/backend/internal/orders/access.go#L48-L63):
+  * টোকেনটি ডেটাবেসের `guest_token_hash`-এর সাথে `MatchesOrderToken` দিয়ে কনস্ট্যান্ট-টাইমে চেক করে।
+  * যদি না মিলে, তবে টোকেনটি একটি ভ্যালিড `EmailProof` কিনা এবং অর্ডারের ভেরিফায়েড ইমেইলের সাথে মিলে কিনা যাচাই করে।
+  * অনুমতি না থাকলে নিরাপদ `ErrNotFound` (404) দেয় (যাতে হ্যাকাররা আইডি এনুমারেট করতে না পারে)।
+
+---
+
+### ২.৯ হ্যান্ডলার তালিকা (Transport Layer)
+
+| হ্যান্ডলার ফাইল | রেসপন্সিবিলিটি ও আচরণ |
+| :--- | :--- |
+| [`health_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/health_handler.go) | `GET /health` এন্ডপয়েন্টে `{"status":"ok"}` রিটার্ন করে। |
+| [`admin_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/admin_handler.go) | অ্যাডমিন লগইন (`POST /api/admin/login`) ও সেশন চেক (`GET /api/admin/me`)। রেসপন্সে `Cache-Control: no-store` নিশ্চিত করে। |
+| [`category_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/category_handler.go) | পাবলিক ও অ্যাডমিন ক্যাটাগরি লিস্ট ও CRUD। বডি সাইজ ৬৪KB বাউন্ডেড। |
+| [`product_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/product_handler.go) | প্রোডাক্ট ডিসপ্লে (`GET /api/products`, `GET /api/products/:slug`) এবং অ্যাডমিন ম্যানেজমেন্ট। স্টেল স্টকে `409 Conflict` দেয়। |
+| [`upload_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/upload_handler.go) | সর্বোচ্চ ৫MB ইমেজ আপলোড নেয়। ম্যাজিক বাইট দিয়ে MIME ভ্যালিডেশন (JPG, PNG, WebP) করে ইউনিক হেক্স নামে `backend/uploads/` এ রাখে। |
+| [`email_otp_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/email_otp_handler.go) | ওটিপি সেন্ড (`POST /api/email-otp/request`) ও ওটিপি ভেরিফাই (`POST /api/email-otp/verify`)। ২KB বাউন্ডেড বডি ও পিয়ার আইপি এক্সট্র্যাকশন। |
+| [`order_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/order_handler.go) | চেকআউট (`POST /api/orders`)। `Idempotency-Key` পড়ে `CheckoutService.Place` চালায়। |
+| [`order_access_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/order_access_handler.go) | গেস্ট ও অ্যাডমিন প্রাইভেট অর্ডার রিডার (`GET /api/orders/:id`)। |
+| [`order_list_handler.go`](file:///E:/Eyewear-mvp/backend/internal/handlers/order_list_handler.go) | অ্যাডমিন অর্ডার লিস্ট হ্যান্ডলার (`GET /api/admin/orders`)। |
+
+---
+
+### ২.১০ রাউটিং রেজিস্ট্রি
+
+#### [`backend/internal/routes/routes.go`](file:///E:/Eyewear-mvp/backend/internal/routes/routes.go)
+* [`SetupRouter(cfg config.Config) *gin.Engine`](file:///E:/Eyewear-mvp/backend/internal/routes/routes.go#L17-L74):
+  * **কী করে:** সমস্ত সার্ভিস ও হ্যান্ডলারকে তাদের প্রয়োজনীয় ডিপেন্ডেন্সি (PostgreSQL কানেকশন পুল, সিক্রেট কি) দিয়ে ইনস্ট্যানশিয়েট করে এবং জিন ইঞ্জিনে রুট হিসেবে তার করে।
+  * পাবলিক রাউটস এবং অ্যাডমিন রাউট গ্রুপ (যা `middleware.AdminAuth` দ্বারা আবৃত) আলাদা রাখে।
+
+---
+
+## ৩. গুরুত্বপূর্ণ রিকোয়েস্ট কল ফ্লো (Call Flow Examples)
+
+### ফ্লো ১: অর্ডার প্লেসমেন্ট ও চেকআউট (`POST /api/orders`)
+```
+[Frontend Client]
+       │
+       │  POST /api/orders (Header: Idempotency-Key: "uuid-xxxx", Body: customer data + items)
+       ▼
+routes.SetupRouter ──> routes.go:50
+       │
+       ▼
+handlers.CheckoutHandler.CreateOrder ──> order_handler.go:37
+       │ (Body size 64KB bound, Idempotency-Key validation)
+       ▼
+orders.CheckoutService.Place ──> checkout.go:88
+       │
+       ├─► sort.Ints(productIDs)  [Deadlock Prevention]
+       ├─► checkoutRequestHash()  [Payload Fingerprint]
+       ├─► security.IdempotentOrderToken()  [Deterministic Guest Token]
+       │
+       ▼
+orders.PostgresCheckoutStore.InTransaction ──> checkout_repository.go:20
+       │
+       ├─► BEGIN TX
+       ├─► SELECT pg_advisory_xact_lock(keyHash)  [Distributed Idempotency Lock]
+       ├─► tx.FindIdempotentOrder(keyHash)  [Duplicate Check]
+       │     └─► যদি ইতোমধ্যে অর্ডারটি থাকে ও পেলোড মিলে:
+       │           COMMIT TX এবং সরাসরি পূর্বের রিসিট রিটার্ন (200 OK)
+       │
+       ├─► security.VerifyEmailProof()  [Verified Email Match Check]
+       │
+       ├─► loop Product IDs:
+       │     └─► tx.ReserveProduct(id, qty)  [UPDATE products SET stock = stock - qty WHERE stock >= qty]
+       │           └─► যদি স্টক কম থাকে: ROLLBACK TX এবং 409 Conflict রিটার্ন
+       │
+       ├─► tx.InsertOrder(ORD-XXXXXX)
+       ├─► tx.InsertItem(order_items)
+       ├─► tx.InsertInvoice(INV-XXXXXX)
+       └─► COMMIT TX
+       │
+       ▼
+handlers.CheckoutHandler
+       │ (JSON Response: ID, OrderNumber, InvoiceNumber, Total, guest_access_token)
+       ▼
+[Frontend Client] ── 200 OK
+```
+
+### ফ্লো ২: প্রাইভেট অর্ডার ভিউ (`GET /api/orders/:id`)
+```
+[Client] ── GET /api/orders/ORD-000001 (Header: Authorization: Bearer <TOKEN>)
+   │
+   ▼
+handlers.OrderAccessHandler.GetOrder ──> order_access_handler.go:18
+   │
+   ▼
+orders.AccessService.Guest(ctx, id, token) ──> access.go:48
+   │
+   ├─► reader.Find(id)  [PostgreSQL থেকে অর্ডার ও guest_token_hash পড়ে]
+   │
+   ├─► Branch A: security.MatchesOrderToken(token, record.GuestTokenHash)?
+   │     └─► True হলে: Authorized! Summary রিটার্ন করে।
+   │
+   ├─► Branch B: security.VerifyEmailProof(token) == record.CustomerEmail && record.EmailVerified?
+   │     └─► True হলে: Authorized! Summary রিটার্ন করে।
+   │
+   └─► Branch C: কোনোটিই না মিললে:
+         └─► রিটার্ন করে ErrNotFound (404 Not Found)। 
+             (ক্লায়েন্টকে 403 না দিয়ে 404 দেওয়া হয় যাতে আইডি এনুমারেট করা না যায়)।
+```
+
+---
+
+## ৪. ব্যাকএন্ড ইঞ্জিনিয়ার হিসেবে আপনার জন্য ৫টি প্রধান টেকঅ্যাওয়ে (Key Takeaways)
+
+1. **Deadlock Prevention (সর্টেড রো লকিং):** মাল্টিপল আইটেম চেকআউটে আইটেমের আইডিগুলো ক্রমানুসারে সাজিয়ে লক করা হয় (`sort.Ints`)। এটি রিয়েল-ওয়ার্ল্ড হাই-কনকারেন্সি ব্যাকএন্ডের একটি স্ট্যান্ডার্ড প্যাটার্ন।
+2. **Distributed Idempotency via Advisory Locks:** একাধিক ব্যাকএন্ড কনটেইনার রান করলেও `pg_advisory_xact_lock` ব্যবহার করায় নেটওয়ার্ক ফ্লিকার বা ডাবল ক্লিকের কারণে কখনোই ডুপ্লিকেট অর্ডার বা একাধিকবার স্টক কাটা সম্ভব নয়।
+3. **Optimistic Concurrency Control (OCC):** প্রোডাক্ট এডিটের সময় ডাটাবেসে `stock_quantity` মিলিয়ে আপডেট করা হয়। ফলে লাইভ কাস্টমার সেলসের স্টক অ্যাডমিন ভুলে মুছে ফেলতে পারবেন না।
+4. **Zero Information Leakage:** ওটিপি এরর, অর্ডার নট ফাউন্ড, বা ডাটাবেস এররে কখনো কাঁচা ক্রেডেনশিয়াল বা ডাটাবেস এরর মেসেজ ক্লায়েন্টকে দেখানো হয় না।
+5. **Context Propagation:** Gin কন্টেক্সট থেকে `c.Request.Context()` নিয়ে সব ডাটাবেস কোয়ারি ও SMTP নেটওয়ার্ক কলে পাস করা হয়েছে। ফলে ক্লায়েন্ট ব্রাউজার ট্যাব কেটে দিলে সাথে সাথে ব্যাকএন্ডের রিসোর্স ড্রেন হওয়া বন্ধ হয়ে যায়।

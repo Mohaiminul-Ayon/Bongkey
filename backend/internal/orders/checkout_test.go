@@ -5,7 +5,26 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"bongkey/backend/internal/security"
 )
+
+const (
+	testOrderTokenSecret = "synthetic-order-token-secret-at-least-32-characters"
+	testEmailProofSecret = "synthetic-email-proof-secret-at-least-32-characters"
+)
+
+// verifiedCheckoutRequest adds a synthetic verified mailbox to a service fixture.
+func verifiedCheckoutRequest(t *testing.T, request CheckoutRequest) CheckoutRequest {
+	t.Helper()
+	request.CustomerEmail = "buyer@example.com"
+	proof, err := security.IssueEmailProof(testEmailProofSecret, request.CustomerEmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.EmailProof = proof
+	return request
+}
 
 type checkoutStoreStub struct {
 	tx        *checkoutTxStub
@@ -24,13 +43,25 @@ func (s *checkoutStoreStub) InTransaction(ctx context.Context, work func(Checkou
 }
 
 type checkoutTxStub struct {
-	products     map[int]ReservedProduct
-	stock        map[int]int
-	reservedIDs  []int
-	reservedQtys []int
-	orderSaved   bool
-	itemsSaved   int
-	invoiceSaved bool
+	products                     map[int]ReservedProduct
+	stock                        map[int]int
+	reservedIDs                  []int
+	reservedQtys                 []int
+	orderSaved                   bool
+	itemsSaved                   int
+	invoiceSaved                 bool
+	request                      CheckoutRequest
+	idempotencyKeyHash           string
+	idempotencyRequestHash       string
+	subtotal, deliveryFee, total int
+}
+
+// FindIdempotentOrder returns the first completed stub order for matching retries.
+func (tx *checkoutTxStub) FindIdempotentOrder(_ context.Context, keyHash string) (CheckoutReceipt, string, bool, error) {
+	if !tx.invoiceSaved || tx.idempotencyKeyHash != keyHash {
+		return CheckoutReceipt{}, "", false, nil
+	}
+	return CheckoutReceipt{ID: 7, OrderNumber: "ORD-000007", InvoiceNumber: "INV-000009", Subtotal: tx.subtotal, DeliveryFee: tx.deliveryFee, Total: tx.total}, tx.idempotencyRequestHash, true, nil
 }
 
 // ReserveProduct simulates an atomic availability check for service tests.
@@ -44,9 +75,45 @@ func (tx *checkoutTxStub) ReserveProduct(_ context.Context, id, quantity int) (R
 }
 
 // InsertOrder notes when all stock checks allowed order persistence.
-func (tx *checkoutTxStub) InsertOrder(_ context.Context, _ CheckoutRequest, _, _, _ int, _ string) (int, string, error) {
+func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, _ string, keyHash, requestHash string) (int, string, error) {
 	tx.orderSaved = true
+	tx.request = request
+	tx.idempotencyKeyHash = keyHash
+	tx.idempotencyRequestHash = requestHash
+	tx.subtotal, tx.deliveryFee, tx.total = subtotal, deliveryFee, total
 	return 7, "ORD-000007", nil
+}
+
+// TestCheckoutRequiresEmailProof rejects new orders without a matching verified mailbox.
+func TestCheckoutRequiresEmailProof(t *testing.T) {
+	proof, err := security.IssueEmailProof(testEmailProofSecret, "buyer@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := CheckoutRequest{IdempotencyKey: "checkout-email-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka", Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	for _, tc := range []struct{ email, proof string }{
+		{"", ""},
+		{"buyer@example.com", ""},
+		{"buyer@example.com", "expired-proof"},
+		{"other@example.com", proof},
+		{"", proof},
+	} {
+		store := &checkoutStoreStub{tx: &checkoutTxStub{}}
+		input := base
+		input.CustomerEmail, input.EmailProof = tc.email, tc.proof
+		if _, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), input); !errors.Is(err, ErrInvalidCheckout) || store.committed || len(store.tx.reservedIDs) != 0 {
+			t.Fatal("unverified email reached stock reservation")
+		}
+	}
+	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
+	input := base
+	input.CustomerEmail, input.EmailProof = " Buyer@Example.com ", proof
+	if _, err := (CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	if tx.request.CustomerEmail != "buyer@example.com" || !tx.request.EmailVerified {
+		t.Fatal("verified email was not persisted as verified")
+	}
 }
 
 // InsertItem counts saved lines after a successful stock reservation.
@@ -68,10 +135,10 @@ func TestCheckoutReservesCombinedStockInStableOrder(t *testing.T) {
 		stock:    map[int]int{1: 1, 2: 2},
 	}
 	store := &checkoutStoreStub{tx: tx}
-	receipt, err := (CheckoutService{Store: store}).Place(context.Background(), CheckoutRequest{
-		CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+	receipt, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+		IdempotencyKey: "checkout-stock-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 2, Quantity: 1}, {ProductID: 1, Quantity: 1}, {ProductID: 2, Quantity: 1}},
-	})
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +153,83 @@ func TestCheckoutReservesCombinedStockInStableOrder(t *testing.T) {
 	}
 }
 
+// TestCheckoutIdempotencyReturnsOriginalOrder checks retry and conflicting-key behavior before stock work.
+func TestCheckoutIdempotencyReturnsOriginalOrder(t *testing.T) {
+	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 2}}
+	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}
+	request := verifiedCheckoutRequest(t, CheckoutRequest{
+		IdempotencyKey: "checkout-retry-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
+	})
+	first, err := service.Place(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := service.Place(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != retry || len(tx.reservedIDs) != 1 || tx.itemsSaved != 1 {
+		t.Fatalf("retry created new work: first=%+v retry=%+v reservations=%d items=%d", first, retry, len(tx.reservedIDs), tx.itemsSaved)
+	}
+	request.City = "Chattogram"
+	if _, err := service.Place(context.Background(), request); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("changed payload reused checkout key: %v", err)
+	}
+	if len(tx.reservedIDs) != 1 || tx.itemsSaved != 1 {
+		t.Fatal("conflicting retry changed stock or items")
+	}
+}
+
+// TestCheckoutAllowsLegacyGuestRetry preserves the receipt for an accepted no-email order.
+func TestCheckoutAllowsLegacyGuestRetry(t *testing.T) {
+	request := CheckoutRequest{
+		IdempotencyKey: "checkout-legacy-guest-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
+	}
+	requestHash, err := checkoutRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &checkoutTxStub{invoiceSaved: true, idempotencyKeyHash: textHash(request.IdempotencyKey), idempotencyRequestHash: requestHash, subtotal: 100, deliveryFee: 80, total: 180}
+	receipt, err := (CheckoutService{Store: &checkoutStoreStub{tx: tx}, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), request)
+	if err != nil || receipt.ID != 7 || receipt.GuestAccessToken == "" || len(tx.reservedIDs) != 0 {
+		t.Fatalf("accepted legacy guest retry failed: receipt=%+v err=%v", receipt, err)
+	}
+}
+
+// TestCheckoutRetryOutlivesEmailProof allows recovery of an accepted receipt after proof expiry.
+func TestCheckoutRetryOutlivesEmailProof(t *testing.T) {
+	const secret = "synthetic-email-proof-secret-at-least-32-characters"
+	proof, err := security.IssueEmailProof(secret, "buyer@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
+	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: secret, OrderTokenSecret: testOrderTokenSecret}
+	request := CheckoutRequest{
+		IdempotencyKey: "checkout-email-retry-0001", CustomerName: "QA", CustomerPhone: "000", CustomerEmail: "buyer@example.com", EmailProof: proof,
+		ShippingAddress: "Local", City: "Dhaka", Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
+	}
+	first, err := service.Place(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.EmailProof = "expired-proof"
+	retry, err := service.Place(context.Background(), request)
+	if err != nil || retry != first || len(tx.reservedIDs) != 1 {
+		t.Fatalf("accepted checkout could not be retried after email proof expiry: retry=%+v err=%v", retry, err)
+	}
+}
+
 // TestCheckoutRejectsUnavailableStock checks that no order is accepted after stock failure.
 func TestCheckoutRejectsUnavailableStock(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 0}}
 	store := &checkoutStoreStub{tx: tx}
-	_, err := (CheckoutService{Store: store}).Place(context.Background(), CheckoutRequest{
-		CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+	_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+		IdempotencyKey: "checkout-stock-0002", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
-	})
+	}))
 	if !errors.Is(err, ErrUnavailable) || store.committed || tx.orderSaved || tx.invoiceSaved {
 		t.Fatalf("unavailable stock accepted: err=%v committed=%v", err, store.committed)
 	}
@@ -102,8 +238,8 @@ func TestCheckoutRejectsUnavailableStock(t *testing.T) {
 // TestCheckoutRejectsInvalidQuantity checks the request before beginning a transaction.
 func TestCheckoutRejectsInvalidQuantity(t *testing.T) {
 	store := &checkoutStoreStub{tx: &checkoutTxStub{}}
-	_, err := (CheckoutService{Store: store}).Place(context.Background(), CheckoutRequest{
-		CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+	_, err := (CheckoutService{Store: store, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), CheckoutRequest{
+		IdempotencyKey: "checkout-invalid-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 0}},
 	})
 	if !errors.Is(err, ErrInvalidCheckout) || store.started {
@@ -115,10 +251,10 @@ func TestCheckoutRejectsInvalidQuantity(t *testing.T) {
 func TestCheckoutRejectsOversizedTotal(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: maxOrderAmount}}, stock: map[int]int{1: 2}}
 	store := &checkoutStoreStub{tx: tx}
-	_, err := (CheckoutService{Store: store}).Place(context.Background(), CheckoutRequest{
-		CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+	_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+		IdempotencyKey: "checkout-total-00001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 2}},
-	})
+	}))
 	if !errors.Is(err, ErrInvalidCheckout) || store.committed || tx.orderSaved {
 		t.Fatalf("oversized amount accepted: err=%v committed=%v", err, store.committed)
 	}

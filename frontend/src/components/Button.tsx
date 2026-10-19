@@ -10,14 +10,16 @@ type ButtonProps = {
   className?: string;
   type?: "button" | "submit";
   onClick?: () => void;
+  disabled?: boolean;
 };
 
 const variants = {
-  primary: "bg-neutral-950 text-white hover:bg-[#173c34]",
-  secondary: "border border-[#173c34] bg-[#f0f7f4] text-[#173c34] hover:bg-[#e4f1ec]",
-  ghost: "border border-neutral-200 bg-white text-neutral-950 hover:border-[#173c34]",
+  primary: "button-primary",
+  secondary: "button-secondary",
+  ghost: "button-ghost",
 };
 
+/** Button renders the shared shop actions as links or form buttons. */
 export function Button({
   children,
   href,
@@ -25,8 +27,9 @@ export function Button({
   className = "",
   type = "button",
   onClick,
+  disabled = false,
 }: ButtonProps) {
-  const classes = `inline-flex min-h-11 items-center justify-center rounded-md px-5 py-3 text-sm font-black transition ${variants[variant]} ${className}`;
+  const classes = `site-button ${variants[variant]} ${className}`;
 
   if (href) {
     return (
@@ -37,7 +40,7 @@ export function Button({
   }
 
   return (
-    <button className={classes} onClick={onClick} type={type}>
+    <button className={classes} disabled={disabled} onClick={onClick} type={type}>
       {children}
     </button>
   );

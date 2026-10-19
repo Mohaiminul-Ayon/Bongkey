@@ -1,14 +1,12 @@
-type TrustBadgeProps = {
-  title: string;
-  text: string;
-};
+type TrustBadgeProps = { title: string; text: string; index: number };
 
-export function TrustBadge({ title, text }: TrustBadgeProps) {
+/** TrustBadge explains one step of the shopping experience. */
+export function TrustBadge({ title, text, index }: TrustBadgeProps) {
   return (
-    <div className="rounded-lg border border-black/10 bg-white p-5 shadow-sm">
-      <div className="mb-4 h-10 w-10 rounded-full bg-[#f0f7f4]" />
-      <h3 className="font-black text-neutral-950">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-neutral-600">{text}</p>
+    <div className="shop-note">
+      <span>0{index}</span>
+      <h3>{title}</h3>
+      <p>{text}</p>
     </div>
   );
 }

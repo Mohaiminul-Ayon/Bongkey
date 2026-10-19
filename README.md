@@ -129,7 +129,9 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/admin/login -Conte
 
 ## Guest order access (R0)
 
-`POST /api/orders` returns a `guest_access_token` once with the new order. The frontend keeps this token in browser `sessionStorage` under that order's ID and sends it in `Authorization: Bearer <token>` to `GET /api/orders/:id`. Do not put the token in a URL or logs. A missing or wrong token returns `404` without customer details; admin access uses `GET /api/admin/orders/:id` behind admin authentication. Existing orders created before the migration have no guest token and remain admin-only until a verified recovery flow exists. Closing the browser session loses guest access; phone OTP recovery is planned for R1.
+`POST /api/orders` requires a verified `customer_email` with an `email_proof` from the email OTP flow, plus an opaque `Idempotency-Key` header of 16–128 safe characters. New orders without verified email return `400` before stock changes. Retrying the same payload with the same key returns the original order receipt without decrementing stock again; reusing that key for different order data returns `409 Conflict`. The frontend generates and reuses this key for a pending checkout.
+
+The endpoint returns a `guest_access_token` with the order. The frontend keeps it in browser `sessionStorage` under that order's ID and sends it in `Authorization: Bearer <token>` to `GET /api/orders/:id`. Do not put access tokens, OTPs, or idempotency keys in URLs or logs. A missing or wrong token returns `404` without customer details; a fresh proof for the verified order email can also authorize access. Admin access uses `GET /api/admin/orders/:id` behind admin authentication. Existing orders without guest access or a verified email remain admin-only.
 
 ## Current MVP Foundation
 

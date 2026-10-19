@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
-	"bongkey/backend/internal/database"
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
 
-// TestAdminProductEditRejectsStaleStockPostgres protects a sale from an old admin form.
+// TestAdminProductEditRejectsStaleStockPostgres protects a sale and accepts a refreshed edit.
 func TestAdminProductEditRejectsStaleStockPostgres(t *testing.T) {
 	if os.Getenv("RUN_LOCAL_DB_QA") != "1" {
 		t.Skip("set RUN_LOCAL_DB_QA=1 for local PostgreSQL stock QA")
@@ -60,12 +60,10 @@ func TestAdminProductEditRejectsStaleStockPostgres(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `UPDATE products SET stock_quantity = 1 WHERE id = $1`, productID); err != nil {
 		t.Fatal("could not simulate a sale")
 	}
-	previous := database.DB
-	database.DB = db
-	t.Cleanup(func() { database.DB = previous })
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.PUT("/api/admin/products/:id", UpdateProduct)
+	products := ProductHandler{Service: catalog.ProductService{Repository: catalog.PostgresProductRepository{DB: db}}}
+	router.PUT("/api/admin/products/:id", products.UpdateProduct)
 	body := fmt.Sprintf(`{"category_id":%d,"name":"QA admin stock","slug":"%s","price":100,"stock_quantity":5,"expected_stock_quantity":2}`, categoryID, slug)
 	request := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/admin/products/%d", productID), strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -77,5 +75,16 @@ func TestAdminProductEditRejectsStaleStockPostgres(t *testing.T) {
 	}
 	if response.Code != http.StatusConflict || remaining != 1 {
 		t.Fatalf("stale admin edit status=%d remaining=%d", response.Code, remaining)
+	}
+	freshBody := fmt.Sprintf(`{"category_id":%d,"name":"QA admin stock","slug":"%s","price":100,"stock_quantity":5,"expected_stock_quantity":1}`, categoryID, slug)
+	freshRequest := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/admin/products/%d", productID), strings.NewReader(freshBody))
+	freshRequest.Header.Set("Content-Type", "application/json")
+	freshResponse := httptest.NewRecorder()
+	router.ServeHTTP(freshResponse, freshRequest)
+	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, productID).Scan(&remaining); err != nil {
+		t.Fatal("could not read refreshed product stock")
+	}
+	if freshResponse.Code != http.StatusOK || remaining != 5 {
+		t.Fatalf("refreshed edit status=%d remaining=%d", freshResponse.Code, remaining)
 	}
 }

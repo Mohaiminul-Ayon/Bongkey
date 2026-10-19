@@ -1,4 +1,4 @@
-import { products as fallbackProducts, type Product } from "@/lib/products";
+import { type Product } from "@/lib/products";
 
 export type Category = {
   id: number;
@@ -35,7 +35,8 @@ export type ApiProduct = {
 export type OrderPayload = {
   customer_name: string;
   customer_phone: string;
-  customer_email?: string;
+  customer_email: string;
+  email_proof: string;
   shipping_address: string;
   city: string;
   delivery_note: string;
@@ -123,8 +124,8 @@ export async function fetchCategories() {
   return request<Category[]>("/api/categories");
 }
 
-/** createOrder submits checkout details and receives the guest access token once. */
-export async function createOrder(payload: OrderPayload) {
+/** createOrder submits one retry-safe checkout attempt and receives its guest access token. */
+export async function createOrder(payload: OrderPayload, idempotencyKey: string) {
   return request<{
     id: number;
     order_number: string;
@@ -139,7 +140,27 @@ export async function createOrder(payload: OrderPayload) {
     payment_method: string;
     order_status: string;
     guest_access_token: string;
-  }>("/api/orders", { method: "POST", body: JSON.stringify(payload) });
+  }>("/api/orders", {
+    method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify(payload),
+  });
+}
+
+/** requestEmailCode sends a short-lived code without exposing it to the browser. */
+export async function requestEmailCode(email: string) {
+  return request<{ message: string }>("/api/email-otp/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** verifyEmailCode exchanges a single-use code for a short-lived email proof. */
+export async function verifyEmailCode(email: string, code: string) {
+  return request<{ email_proof: string }>("/api/email-otp/verify", {
+    method: "POST",
+    body: JSON.stringify({ email, code }),
+  });
 }
 
 /** fetchOrder uses the order-specific guest token without placing it in the URL. */
@@ -171,13 +192,12 @@ function title(value: string) {
 }
 
 export function toProduct(product: ApiProduct): Product {
-  const fallback = fallbackProducts.find((item) => item.slug === product.slug) ?? fallbackProducts[0];
   return {
     id: product.id,
     categoryId: product.category_id,
     slug: product.slug,
     name: product.name,
-    category: product.category_name || fallback.category,
+    category: product.category_name || "Eyewear",
     gender: title(product.gender) as Product["gender"],
     frameType: title(product.frame_type),
     brandTier: title(product.brand_tier).replace("Mid Range", "Mid-range") as Product["brandTier"],
@@ -191,9 +211,9 @@ export function toProduct(product: ApiProduct): Product {
     lensWidth: product.lens_width,
     bridgeWidth: product.bridge_width,
     templeLength: product.temple_length,
-    finish: fallback.finish,
-    shape: fallback.shape,
-    imageTone: fallback.imageTone,
+    finish: product.material,
+    shape: product.frame_type,
+    imageTone: "from-[#2a2418] to-[#080808]",
     description: product.description,
     imageUrl: product.image_url,
     tryOnImageUrl: product.try_on_image_url,

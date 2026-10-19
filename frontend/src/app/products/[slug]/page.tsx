@@ -6,22 +6,38 @@ import { Button } from "@/components/Button";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductVisual } from "@/components/ProductVisual";
 import { TryOnModal } from "@/components/TryOnModal";
-import { fetchProduct } from "@/lib/api";
+import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { formatPrice, getProduct, products, relatedProducts, type Product } from "@/lib/products";
+import { formatPrice, type Product } from "@/lib/products";
 
 const lensOptions = ["Frame only", "Blue-cut lens", "Prescription lens"];
 
+/** ProductDetailsPage renders only products returned by the live catalog. */
 export default function ProductDetailsPage() {
   const params = useParams<{ slug: string }>();
-  const [product, setProduct] = useState<Product>(() => getProduct(params.slug));
+  const [product, setProduct] = useState<Product | null>(null);
+  const [related, setRelated] = useState<Product[]>([]);
+  const [error, setError] = useState("");
   const [lensOption, setLensOption] = useState("Frame only");
   const [showTryOn, setShowTryOn] = useState(false);
   const { addItem } = useCart();
 
   useEffect(() => {
-    fetchProduct(params.slug).then(setProduct).catch(() => setProduct(getProduct(params.slug)));
+    let active = true;
+    setProduct(null);
+    setRelated([]);
+    setError("");
+    fetchProduct(params.slug)
+      .then((item) => { if (active) setProduct(item); })
+      .catch(() => { if (active) setError("This product is unavailable right now."); });
+    fetchProducts()
+      .then((items) => { if (active) setRelated(items.filter((item) => item.slug !== params.slug).slice(0, 4)); })
+      .catch(() => { if (active) setRelated([]); });
+    return () => { active = false; };
   }, [params.slug]);
+
+  if (error) return <p className="mx-auto max-w-7xl px-4 py-12" role="alert">{error}</p>;
+  if (!product || product.slug !== params.slug) return <p className="mx-auto max-w-7xl px-4 py-12" role="status">Loading product...</p>;
 
   const specs = [
     ["Material", product.material],
@@ -33,15 +49,15 @@ export default function ProductDetailsPage() {
   ];
 
   return (
-    <section className="mx-auto max-w-7xl px-4 py-8 md:px-6">
+    <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
       {showTryOn ? <TryOnModal product={product} onClose={() => setShowTryOn(false)} /> : null}
       <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
         <div>
           <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm"><ProductVisual product={product} /></div>
           <div className="mt-4 grid grid-cols-4 gap-3">
-            {[product.shape, product.color, product.finish, product.size].map((label) => (
-              <div key={label} className="rounded-lg border border-black/10 bg-white p-3 text-center text-xs font-bold text-neutral-600">
-                <div className={`mb-2 aspect-square rounded-md bg-gradient-to-br ${product.imageTone}`} />{label}
+            {[["Shape", product.shape], ["Color", product.color], ["Finish", product.finish], ["Size", product.size]].map(([name, value]) => (
+              <div key={name} className="rounded-lg border border-black/10 bg-white p-3 text-center text-xs font-bold text-neutral-600">
+                <span className="block text-[10px] uppercase tracking-widest text-neutral-500">{name}</span><span className="mt-2 block">{value}</span>
               </div>
             ))}
           </div>
@@ -79,10 +95,11 @@ export default function ProductDetailsPage() {
           </div>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <Button variant="secondary" onClick={() => setShowTryOn(true)}>Try On</Button>
+            <Button variant="secondary" disabled={!product.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try On</Button>
             <Button onClick={() => addItem(product, lensOption)}>Add to Cart</Button>
           </div>
           <div className="mt-6 grid gap-3 text-sm leading-6 text-neutral-700">
+            {!product.tryOnImageUrl ? <div className="rounded-md bg-[#f7f5ef] p-4">Try-on preview will be available when a frame mockup is added.</div> : null}
             <div className="rounded-md bg-[#f0f7f4] p-4 text-[#173c34]">Prescription upload is available at checkout for lens-ready orders.</div>
             <div className="rounded-md bg-amber-50 p-4 text-[#7b531c]">Easy exchange and warranty support are available after order confirmation.</div>
           </div>
@@ -92,8 +109,7 @@ export default function ProductDetailsPage() {
       <div className="mt-14">
         <h2 className="text-2xl font-black text-neutral-950">Related products</h2>
         <div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {relatedProducts(product.slug).map((item) => <ProductCard key={item.slug} product={item} />)}
-          {relatedProducts(product.slug).length === 0 ? products.slice(0, 4).map((item) => <ProductCard key={item.slug} product={item} />) : null}
+          {related.map((item) => <ProductCard key={item.slug} product={item} />)}
         </div>
       </div>
     </section>

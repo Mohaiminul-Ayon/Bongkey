@@ -33,6 +33,28 @@ func (s PostgresCheckoutStore) InTransaction(ctx context.Context, work func(Chec
 	return tx.Commit()
 }
 
+// FindIdempotentOrder serializes one retry key across server instances and returns its committed receipt.
+func (p postgresCheckoutTx) FindIdempotentOrder(ctx context.Context, keyHash string) (CheckoutReceipt, string, bool, error) {
+	if _, err := p.Tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, keyHash); err != nil {
+		return CheckoutReceipt{}, "", false, err
+	}
+	var receipt CheckoutReceipt
+	var requestHash string
+	err := p.Tx.QueryRowContext(ctx, `
+		SELECT o.id, o.order_number, i.invoice_number, o.subtotal, o.delivery_fee, o.total, o.idempotency_request_hash
+		FROM orders o
+		JOIN invoices i ON i.order_id = o.id
+		WHERE o.idempotency_key_hash = $1
+	`, keyHash).Scan(&receipt.ID, &receipt.OrderNumber, &receipt.InvoiceNumber, &receipt.Subtotal, &receipt.DeliveryFee, &receipt.Total, &requestHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CheckoutReceipt{}, "", false, nil
+	}
+	if err != nil {
+		return CheckoutReceipt{}, "", false, err
+	}
+	return receipt, requestHash, true, nil
+}
+
 // ReserveProduct atomically rejects an inactive or insufficiently stocked product.
 func (p postgresCheckoutTx) ReserveProduct(ctx context.Context, id, quantity int) (ReservedProduct, error) {
 	var product ReservedProduct
@@ -49,16 +71,16 @@ func (p postgresCheckoutTx) ReserveProduct(ctx context.Context, id, quantity int
 }
 
 // InsertOrder allocates its final unique number before inserting the order row.
-func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash string) (int, string, error) {
+func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, idempotencyKeyHash, requestHash string) (int, string, error) {
 	var id int
 	if err := p.Tx.QueryRowContext(ctx, `SELECT nextval(pg_get_serial_sequence('orders', 'id'))`).Scan(&id); err != nil {
 		return 0, "", err
 	}
 	number := fmt.Sprintf("ORD-%06d", id)
 	_, err := p.Tx.ExecContext(ctx, `
-		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, shipping_address, city, delivery_note, prescription_file_url, subtotal, delivery_fee, total, guest_token_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.ShippingAddress, request.City, request.DeliveryNote, request.PrescriptionFileURL, subtotal, deliveryFee, total, tokenHash)
+		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, prescription_file_url, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, request.PrescriptionFileURL, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash)
 	return id, number, err
 }
 
