@@ -2,15 +2,31 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getAdminToken } from "@/lib/api";
+import { adminRequest, clearAdminToken, getAdminToken } from "@/lib/api";
 
+// AdminGuard renders owner pages only after the backend accepts the current tab session.
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const [allowed, setAllowed] = useState(false);
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    setAllowed(Boolean(getAdminToken()));
-    setChecked(true);
+    let active = true;
+    if (!getAdminToken()) {
+      setChecked(true);
+      return;
+    }
+    adminRequest<{ authenticated: boolean }>("/api/admin/me")
+      .then(({ authenticated }) => {
+        if (active) setAllowed(authenticated);
+      })
+      .catch(() => {
+        clearAdminToken();
+        if (active) setAllowed(false);
+      })
+      .finally(() => {
+        if (active) setChecked(true);
+      });
+    return () => { active = false; };
   }, []);
 
   if (!checked) return <div className="p-8">Checking admin session...</div>;

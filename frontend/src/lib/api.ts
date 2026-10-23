@@ -106,6 +106,14 @@ export async function loginAdmin(email: string, password: string) {
   });
 }
 
+/** updateAdminOrderStatus applies one backend-validated fulfillment transition. */
+export async function updateAdminOrderStatus(id: number, status: string) {
+  return adminRequest<{ order_status: string }>(`/api/admin/orders/${id}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
 export async function fetchProducts() {
   const data = await request<ApiProduct[]>("/api/products");
   return data.map(toProduct);
