@@ -13,9 +13,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// SetupRouter registers public and admin routes for later HTTP requests.
+// SetupRouter configures direct-client trust and registers routes for later HTTP requests.
 func SetupRouter(cfg config.Config) *gin.Engine {
 	router := gin.Default()
+	// Direct deployments must ignore forwarded client IP headers until an exact reverse proxy is configured.
+	if err := router.SetTrustedProxies(nil); err != nil {
+		panic("disable trusted proxies: " + err.Error())
+	}
 	router.Use(middleware.CORS())
 	router.Static("/uploads", cfg.ProjectRoot+"/backend/uploads")
 	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
