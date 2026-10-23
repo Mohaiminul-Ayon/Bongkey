@@ -39,6 +39,9 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	}}
 	categories := handlers.CategoryHandler{Service: catalog.CategoryService{Repository: catalog.PostgresCategoryRepository{DB: database.DB}}}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
+	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
+		Store: orders.PostgresFulfillmentStore{DB: database.DB},
+	}}
 
 	router.GET("/health", handlers.Health)
 	router.POST("/api/admin/login", adminHandler.Login)
@@ -69,6 +72,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.DELETE("/categories/:id", categories.DeleteCategory)
 	admin.GET("/orders", orderList.ListOrders)
 	admin.GET("/orders/:id", orderAccess.GetAdminOrder)
+	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
 
 	return router
 }
