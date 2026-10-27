@@ -36,7 +36,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		Sender: emailotp.GmailSender{From: cfg.GmailFrom, AppPassword: cfg.GmailAppPassword},
 		Secret: cfg.JWTSecret,
 	}}
-	adminService := auth.Service{Repository: auth.PostgresRepository{DB: database.DB}, JWTSecret: cfg.JWTSecret}
+	adminService := auth.Service{Repository: auth.PostgresRepository{DB: database.DB}, Limiter: auth.PostgresLoginLimiter{DB: database.DB}, JWTSecret: cfg.JWTSecret}
 	adminHandler := handlers.AdminHandler{Service: adminService}
 	products := handlers.ProductHandler{Service: catalog.ProductService{
 		Repository: catalog.PostgresProductRepository{DB: database.DB},

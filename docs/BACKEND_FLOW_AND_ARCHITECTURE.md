@@ -345,3 +345,14 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **কেন snapshot table থেকে:** `order_items.product_name/unit_price` checkout-এর সময়ের মান; পরে product-এর দাম বা নাম বদলালেও পুরনো order বদলায় না।
 * **Test:** `TestGuestOrderResponse` এখন item name-ও private data হিসেবে check করে: শুধু সঠিক token-এ আসে।
 * **নিজে বলে দেখো:** Item কেন `products` table JOIN না করে `order_items` থেকে পড়া হয়?
+
+### Fix 3 — Admin login-এ rate limit ও timing-safe check
+
+* **সমস্যা:** `POST /api/admin/login` যত খুশি password আন্দাজ নিত; body size limit ছিল না; ভুল email-এ bcrypt না চলায় উত্তর দ্রুত আসত, ফলে owner-এর email ধরা যেত।
+* **পরিবর্তন:** [`admin.go`](../backend/internal/auth/admin.go) এ `LoginLimiter` interface ও `PostgresLoginLimiter` (migration [`007_admin_login_limits.sql`](../backend/migrations/007_admin_login_limits.sql))। প্রতি IP প্রতি ১৫ মিনিটে ১০টি চেষ্টা। অজানা email-এ `dummyPasswordHash()` দিয়ে একই bcrypt কাজ হয়। [`admin_handler.go`](../backend/internal/handlers/admin_handler.go) ৪KB body limit আর `RemoteAddr` থেকে IP নেয়।
+* **Success flow:** Login form → `POST /api/admin/login` → `CORS` → `AdminHandler.Login` (MaxBytesReader, JSON bind, `net.SplitHostPort`) → `auth.Service.Login(ctx, email, password, ip)` → `Limiter.Count` (একটি atomic `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`) → attempts ≤ 10 → `ByEmail` → `bcrypt.CompareHashAndPassword` → `security.IssueAdminToken` → 200 `{token}`।
+* **Failure flow:** ১১তম চেষ্টায় `Count` 11 ফেরত দেয় → service `ErrLoginLimited` → handler 429। Password check আর চলেই না। Limiter কনফিগার না থাকলে service error দেয় (fail closed) → 503।
+* **কেন PostgreSQL, mutex না:** Process-local counter একাধিক server instance-এ ভাগ হয় না; database row সব instance-এর জন্য একটাই budget।
+* **কেন IP hash:** `security.EmailKey(secret, "admin-login-ip", ip)` HMAC রাখে; table dump থেকে কাঁচা IP পাওয়া যায় না।
+* **Test:** `TestLoginRateLimitStopsPasswordGuessing` (১০ ভুলের পর সঠিক password-ও 429, অন্য IP চলে, limiter ছাড়া fail closed); `TestPostgresLoginLimiterCountsConcurrentAttempts` আসল PostgreSQL-এ ১০টি একসাথে চেষ্টা গুনে ১১তমে 11 পায়।
+* **নিজে বলে দেখো:** কেন check আর increment আলাদা দুই query হলে race হতো?

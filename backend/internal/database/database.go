@@ -44,7 +44,7 @@ func MigrateAndSeed(cfg config.Config) error {
 	if _, err := DB.Exec(schemaSQL); err != nil {
 		return err
 	}
-	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql"} {
+	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql", "007_admin_login_limits.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
