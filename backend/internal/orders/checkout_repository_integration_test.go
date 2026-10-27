@@ -197,6 +197,12 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if len(order.Items) != 1 || order.Items[0].Quantity != 1 || order.Items[0].LensOption != frameOnlyLens || order.Items[0].TotalPrice != receipt.Subtotal {
 		t.Fatalf("order detail did not include its item snapshot: %+v", order.Items)
 	}
+	if byNumber, err := access.Guest(ctx, receipt.OrderNumber, proof); err != nil || byNumber.ID != receipt.ID {
+		t.Fatal("order number lookup did not find the same order")
+	}
+	if _, err := access.Admin(ctx, "0"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("non-positive order ID must not match")
+	}
 	newest, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0)
 	if err != nil || len(newest) == 0 || len(newest) > AdminOrderPageSize || newest[0].ID != receipt.ID {
 		t.Fatal("newest admin page did not start with the new order")

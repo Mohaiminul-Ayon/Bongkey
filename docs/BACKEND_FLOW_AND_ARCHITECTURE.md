@@ -410,3 +410,11 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Success flow:** Page খোলা → `loadOrders()` → `GET /api/admin/orders` → `AdminAuth` → `ListOrders` (beforeID = 0) → `ListAdmin` → ৫০টি → ৫০টি এলে button দেখায় → click → `GET /api/admin/orders?before=<শেষ id>`।
 * **Failure flow:** `?before=abc`, `0` বা ঋণাত্মক হলে handler database ছোঁয়ার আগেই 400।
 * **Test:** `TestListOrdersRejectsInvalidCursor`; আসল PostgreSQL-এ `TestCheckoutOrderPostgres` নতুন order প্রথম page-এর শুরুতে আর `before=<id>` page-এ পুরনোগুলোই আছে কিনা দেখে (Fix 2-এর item snapshot-ও এখানে DB-তে যাচাই হয়)।
+
+### Fix 11 — Order খোঁজার query index ব্যবহার করে
+
+* **সমস্যা:** `WHERE o.id::text = $1 OR o.order_number = $1` — `id`-কে text বানালে primary key index কাজ করে না, প্রতিবার পুরো `orders` table scan হতো।
+* **পরিবর্তন:** [`repository.go`](../backend/internal/orders/repository.go) এর `PostgresReader.Find` আগে দেখে মানটা সংখ্যা কিনা (`strconv.Atoi`)। সংখ্যা হলে `o.id = $1`, না হলে `o.order_number = $1`। দুটোই index ব্যবহার করে। WHERE অংশ দুটি নির্দিষ্ট constant; user-এর text কখনো SQL-এ জোড়া হয় না, মান সবসময় `$1` parameter।
+* **Flow:** `GET /api/orders/12` → `GetOrder` → `AccessService.Guest` → `Find("12")` → `o.id = 12`। `GET /api/orders/ORD-000012` → `o.order_number = 'ORD-000012'`।
+* **Failure flow:** `0` বা ঋণাত্মক id হলে query না চালিয়েই `ErrNotFound` → 404।
+* **Test:** PostgreSQL `TestCheckoutOrderPostgres` এখন id ও order number দুইভাবেই একই order পায়, আর `"0"` 404 দেয়।
