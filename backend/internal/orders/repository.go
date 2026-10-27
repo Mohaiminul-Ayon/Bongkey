@@ -23,12 +23,19 @@ type AdminOrder struct {
 	CreatedAt     string `json:"created_at"`
 }
 
-// ListAdmin returns recent order summaries without exposing guest access hashes.
-func (r PostgresReader) ListAdmin(ctx context.Context) ([]AdminOrder, error) {
+// AdminOrderPageSize bounds one admin order list response so the page stays fast as orders grow.
+const AdminOrderPageSize = 50
+
+// ListAdmin returns one page of order summaries older than beforeID (0 means newest), without guest access hashes.
+// Keyset paging on the primary key stays stable while new orders arrive, unlike OFFSET.
+func (r PostgresReader) ListAdmin(ctx context.Context, beforeID int) ([]AdminOrder, error) {
 	if r.DB == nil {
 		return nil, errors.New("order storage unavailable")
 	}
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, order_number, customer_name, customer_phone, city, total, order_status, created_at FROM orders ORDER BY id DESC`)
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT id, order_number, customer_name, customer_phone, city, total, order_status, created_at
+		FROM orders WHERE ($1 = 0 OR id < $1) ORDER BY id DESC LIMIT $2
+	`, beforeID, AdminOrderPageSize)
 	if err != nil {
 		return nil, err
 	}

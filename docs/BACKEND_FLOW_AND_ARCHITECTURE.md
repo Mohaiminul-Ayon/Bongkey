@@ -401,3 +401,12 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **ঝুঁকি:** ভুলে কেউ import করলে API fail হলেও নকল দাম ও stock আসল দোকানে দেখাত — PRD এটা নিষেধ করে।
 * **পরিবর্তন:** Array ও তিনটি function মুছে ফেলা; file এখন ৩২ লাইন। সব product এখন শুধু `GET /api/products` থেকে আসে।
 * **Verification:** TypeScript ও production build পাস (কোনো import ভাঙেনি)।
+
+### Fix 10 — Admin order list-এ pagination (keyset)
+
+* **সমস্যা:** `ListAdmin` সব order একবারে পাঠাত; কয়েক হাজার order হলে admin page ধীর হতো।
+* **পরিবর্তন:** [`repository.go`](../backend/internal/orders/repository.go) এ `ListAdmin(ctx, beforeID)` প্রতি page-এ `AdminOrderPageSize` (৫০)টি order দেয়: `WHERE ($1 = 0 OR id < $1) ORDER BY id DESC LIMIT $2`। [`order_list_handler.go`](../backend/internal/handlers/order_list_handler.go) `?before=<id>` পড়ে ও যাচাই করে। Admin page-এ "Load older orders" button।
+* **কেন OFFSET না:** নতুন order আসলে OFFSET সব page এক ঘর সরিয়ে দেয় — একই order দুবার বা একটিও না দেখা যায়। Primary key দিয়ে "এর চেয়ে পুরনো" চাইলে page স্থির থাকে আর index ব্যবহার হয়।
+* **Success flow:** Page খোলা → `loadOrders()` → `GET /api/admin/orders` → `AdminAuth` → `ListOrders` (beforeID = 0) → `ListAdmin` → ৫০টি → ৫০টি এলে button দেখায় → click → `GET /api/admin/orders?before=<শেষ id>`।
+* **Failure flow:** `?before=abc`, `0` বা ঋণাত্মক হলে handler database ছোঁয়ার আগেই 400।
+* **Test:** `TestListOrdersRejectsInvalidCursor`; আসল PostgreSQL-এ `TestCheckoutOrderPostgres` নতুন order প্রথম page-এর শুরুতে আর `before=<id>` page-এ পুরনোগুলোই আছে কিনা দেখে (Fix 2-এর item snapshot-ও এখানে DB-তে যাচাই হয়)।

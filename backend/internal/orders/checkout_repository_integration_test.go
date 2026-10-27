@@ -190,8 +190,25 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	}
 	access := AccessService{Reader: PostgresReader{DB: db}, EmailProofSecret: emailSecret}
 	orderID := fmt.Sprint(receipt.ID)
-	if order, err := access.Guest(ctx, orderID, proof); err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
+	order, err := access.Guest(ctx, orderID, proof)
+	if err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
 		t.Fatal("verified email could not access its stored invoice summary")
+	}
+	if len(order.Items) != 1 || order.Items[0].Quantity != 1 || order.Items[0].LensOption != frameOnlyLens || order.Items[0].TotalPrice != receipt.Subtotal {
+		t.Fatalf("order detail did not include its item snapshot: %+v", order.Items)
+	}
+	newest, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0)
+	if err != nil || len(newest) == 0 || len(newest) > AdminOrderPageSize || newest[0].ID != receipt.ID {
+		t.Fatal("newest admin page did not start with the new order")
+	}
+	older, err := (PostgresReader{DB: db}).ListAdmin(ctx, receipt.ID)
+	if err != nil {
+		t.Fatal("older admin page failed")
+	}
+	for _, listed := range older {
+		if listed.ID >= receipt.ID {
+			t.Fatal("older admin page repeated a newer order")
+		}
 	}
 	otherProof, err := security.IssueEmailProof(emailSecret, "someone-else@example.invalid")
 	if err != nil {
