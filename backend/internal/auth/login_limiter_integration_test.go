@@ -35,7 +35,7 @@ func TestPostgresLoginLimiterCountsConcurrentAttempts(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "007_admin_login_limits.sql"))
+	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "010_admin_login_limits.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
