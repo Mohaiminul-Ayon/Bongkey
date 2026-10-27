@@ -40,7 +40,6 @@ export type OrderPayload = {
   shipping_address: string;
   city: string;
   delivery_note: string;
-  prescription_file_url?: string;
   items: Array<{ product_id: number; quantity: number; lens_option: string }>;
 };
 

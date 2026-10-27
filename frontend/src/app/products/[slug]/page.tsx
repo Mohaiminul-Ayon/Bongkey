@@ -10,15 +10,12 @@ import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { formatPrice, type Product } from "@/lib/products";
 
-const lensOptions = ["Frame only", "Blue-cut lens", "Prescription lens"];
-
 /** ProductDetailsPage renders only products returned by the live catalog. */
 export default function ProductDetailsPage() {
   const params = useParams<{ slug: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [related, setRelated] = useState<Product[]>([]);
   const [error, setError] = useState("");
-  const [lensOption, setLensOption] = useState("Frame only");
   const [showTryOn, setShowTryOn] = useState(false);
   const { addItem } = useCart();
 
@@ -82,25 +79,18 @@ export default function ProductDetailsPage() {
             ))}
           </div>
 
-          <div className="mt-6">
-            <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-black">Lens options</h2><span className="text-sm font-bold text-[#173c34]">Size guide</span></div>
-            <div className="mt-3 grid gap-3">
-              {lensOptions.map((option) => (
-                <button key={option} className={`rounded-md border p-4 text-left ${lensOption === option ? "border-[#173c34] bg-[#f0f7f4]" : "border-neutral-300 bg-white"}`} onClick={() => setLensOption(option)}>
-                  <span className="block font-black text-neutral-950">{option}</span>
-                  <span className="mt-1 block text-sm text-neutral-600">{option === "Prescription lens" ? "Upload your prescription during checkout." : "Ready for Bongkey COD checkout."}</span>
-                </button>
-              ))}
-            </div>
+          {/* Lens packages need server-side pricing and prescription review (R1), so R0 sells frames only. */}
+          <div className="mt-6 rounded-md border border-neutral-300 bg-white p-4">
+            <h2 className="text-lg font-black">Frame only</h2>
+            <p className="mt-1 text-sm text-neutral-600">This frame is sold without lenses for now. Lens packages are not available yet.</p>
           </div>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <Button variant="secondary" disabled={!product.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try On</Button>
-            <Button onClick={() => addItem(product, lensOption)}>Add to Cart</Button>
+            <Button onClick={() => addItem(product)}>Add to Cart</Button>
           </div>
           <div className="mt-6 grid gap-3 text-sm leading-6 text-neutral-700">
             {!product.tryOnImageUrl ? <div className="rounded-md bg-[#f7f5ef] p-4">Try-on preview will be available when a frame mockup is added.</div> : null}
-            <div className="rounded-md bg-[#f0f7f4] p-4 text-[#173c34]">Prescription upload is available at checkout for lens-ready orders.</div>
             <div className="rounded-md bg-amber-50 p-4 text-[#7b531c]">Easy exchange and warranty support are available after order confirmation.</div>
           </div>
         </div>

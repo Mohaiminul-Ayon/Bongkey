@@ -15,6 +15,9 @@ import (
 
 const maxOrderAmount = 1<<31 - 1
 
+// frameOnlyLens is the only lens choice R0 can price; lens packages need server pricing and prescription review first.
+const frameOnlyLens = "Frame only"
+
 var (
 	// ErrInvalidCheckout means the submitted order cannot be accepted as written.
 	ErrInvalidCheckout = errors.New("invalid checkout")
@@ -93,7 +96,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	request.EmailVerified = request.CustomerEmail != ""
 	quantities := make(map[int]int, len(request.Items))
 	for _, item := range request.Items {
-		if item.ProductID <= 0 || item.Quantity <= 0 || item.Quantity > maxOrderAmount-quantities[item.ProductID] {
+		if item.ProductID <= 0 || item.Quantity <= 0 || item.Quantity > maxOrderAmount-quantities[item.ProductID] || (item.LensOption != "" && item.LensOption != frameOnlyLens) {
 			return CheckoutReceipt{}, ErrInvalidCheckout
 		}
 		quantities[item.ProductID] += item.Quantity
@@ -163,7 +166,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		}
 		for _, item := range request.Items {
 			if item.LensOption == "" {
-				item.LensOption = "Frame only"
+				item.LensOption = frameOnlyLens
 			}
 			if err := tx.InsertItem(ctx, orderID, item, products[item.ProductID], products[item.ProductID].Price*item.Quantity); err != nil {
 				return err

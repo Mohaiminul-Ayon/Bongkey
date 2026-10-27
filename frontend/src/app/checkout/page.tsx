@@ -113,7 +113,6 @@ export default function CheckoutPage() {
         shipping_address: String(form.get("address") ?? ""),
         city: String(form.get("city") ?? ""),
         delivery_note: String(form.get("note") ?? ""),
-        prescription_file_url: String(form.get("prescription") ? "Prescription selected for manual review" : ""),
         items: items.map((item) => ({
           product_id: item.product.id!,
           quantity: item.quantity,
@@ -146,7 +145,7 @@ export default function CheckoutPage() {
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
         <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Checkout</p>
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Confirm your COD order</h1>
-        <p className="mt-3 text-neutral-600">Enter delivery details and upload a prescription only if lenses are needed.</p>
+        <p className="mt-3 text-neutral-600">Enter delivery details for your frame-only order.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
@@ -166,10 +165,7 @@ export default function CheckoutPage() {
             </div> : null}
           </div>
           <label className="grid gap-2 text-sm font-black">Address<textarea name="address" required className="min-h-28 rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="House, road, area, landmark" /></label>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-black">District/City<input name="city" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Dhaka, Chattogram, Sylhet" /></label>
-            <label className="grid gap-2 text-sm font-black">Prescription upload optional<input name="prescription" className="rounded-md border border-neutral-300 bg-white px-4 py-3 text-sm font-normal" type="file" /></label>
-          </div>
+          <label className="grid gap-2 text-sm font-black">District/City<input name="city" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Dhaka, Chattogram, Sylhet" /></label>
           <label className="grid gap-2 text-sm font-black">Delivery note<input name="note" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Preferred delivery time or special instruction" /></label>
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
             <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>

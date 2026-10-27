@@ -29,7 +29,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) setItems(JSON.parse(saved));
+    if (saved) setItems(frameOnlyItems(JSON.parse(saved)));
   }, []);
 
   useEffect(() => {
@@ -75,6 +75,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [items]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+}
+
+/** frameOnlyItems merges carts saved before lens options were withdrawn, because checkout now accepts frames only. */
+function frameOnlyItems(saved: CartItem[]) {
+  const merged = new Map<string, CartItem>();
+  for (const item of saved) {
+    const existing = merged.get(item.product.slug);
+    merged.set(item.product.slug, { ...item, lensOption: "Frame only", quantity: (existing?.quantity ?? 0) + item.quantity });
+  }
+  return [...merged.values()];
 }
 
 export function useCart() {

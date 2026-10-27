@@ -196,7 +196,7 @@ Bongkey ব্যাকএন্ডটি Go এবং Gin ফ্রেমওয়
 
 #### [`backend/internal/orders/checkout.go`](file:///E:/Eyewear-mvp/backend/internal/orders/checkout.go)
 * [`CheckoutService.Place(ctx, request)`](file:///E:/Eyewear-mvp/backend/internal/orders/checkout.go#L88-L184):
-  1. **Idempotency Key ভ্যালিডেশন:** `ValidIdempotencyKey` চেক করে কি-টি ১৬-১২৮ ক্যারেক্টারের কিনা।
+  1. **Idempotency Key ও Item ভ্যালিডেশন:** `ValidIdempotencyKey` চেক করে কি-টি ১৬-১২৮ ক্যারেক্টারের কিনা। প্রতিটি item-এর `LensOption` খালি বা `frameOnlyLens` ("Frame only") না হলে transaction শুরুর আগেই `ErrInvalidCheckout` (400) দেয় — কারণ lens-এর দাম ও prescription review এখনো নেই (Audit fix 1)।
   2. **Deadlock Prevention via Sorted Locking:** কার্টের প্রোডাক্ট আইডিগুলোকে `sort.Ints(productIDs)` দিয়ে ক্রমানুসারে সাজায়, যাতে দুই জন কাস্টমার একই সাথে বিপরীত ক্রমে প্রোডাক্ট কিনলেও রো লক নিয়ে ডাটাবেস ডেডলক না হয়।
   3. **Request Fingerprinting:** `checkoutRequestHash` দিয়ে ক্লায়েন্টের মূল পেলোডের হ্যাশ বের করে।
   4. **Advisory Lock & Distributed Idempotency:** ট্রানজ্যাকশনে ঢুকে `pg_advisory_xact_lock` নেয়। পূর্বের একই Idempotency Key দিয়ে অর্ডার থাকলে এবং পেলোড একই হলে সরাসরি পূর্বের রিসিট রিটার্ন করে। পেলোড ভিন্ন হলে `ErrIdempotencyConflict` (409) দেয়।
@@ -253,8 +253,9 @@ routes.SetupRouter ──> routes.go:50
 handlers.CheckoutHandler.CreateOrder ──> order_handler.go:37
        │ (Body size 64KB bound, Idempotency-Key validation)
        ▼
-orders.CheckoutService.Place ──> checkout.go:88
+orders.CheckoutService.Place ──> checkout.go:91
        │
+       ├─► LensOption == "" বা "Frame only"?  [না হলে 400, stock ছোঁয় না]
        ├─► sort.Ints(productIDs)  [Deadlock Prevention]
        ├─► checkoutRequestHash()  [Payload Fingerprint]
        ├─► security.IdempotentOrderToken()  [Deterministic Guest Token]
@@ -318,3 +319,19 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 3. **Optimistic Concurrency Control (OCC):** প্রোডাক্ট এডিটের সময় ডাটাবেসে `stock_quantity` মিলিয়ে আপডেট করা হয়। ফলে লাইভ কাস্টমার সেলসের স্টক অ্যাডমিন ভুলে মুছে ফেলতে পারবেন না।
 4. **Zero Information Leakage:** ওটিপি এরর, অর্ডার নট ফাউন্ড, বা ডাটাবেস এররে কখনো কাঁচা ক্রেডেনশিয়াল বা ডাটাবেস এরর মেসেজ ক্লায়েন্টকে দেখানো হয় না।
 5. **Context Propagation:** Gin কন্টেক্সট থেকে `c.Request.Context()` নিয়ে সব ডাটাবেস কোয়ারি ও SMTP নেটওয়ার্ক কলে পাস করা হয়েছে। ফলে ক্লায়েন্ট ব্রাউজার ট্যাব কেটে দিলে সাথে সাথে ব্যাকএন্ডের রিসোর্স ড্রেন হওয়া বন্ধ হয়ে যায়।
+
+---
+
+## ৫. Audit fix log (প্রতিটি fix-এর workflow ও শেখার নোট)
+
+প্রতিটি audit fix এখানে একই ছাঁচে লেখা হয়: কী সমস্যা ছিল, request এখন কোন পথে যায়, একটি success ও একটি failure path, আর কোন test সেটি প্রমাণ করে।
+
+### Fix 1 — শুধু "Frame only" বিক্রি (lens option বন্ধ)
+
+* **সমস্যা:** Product page-এ "Blue-cut lens" ও "Prescription lens" বাছা যেত, কিন্তু backend শুধু label সেভ করত, দাম যোগ করত না। Prescription upload-এর input ছিল, কিন্তু file কোথাও যেত না।
+* **পরিবর্তন:** Frontend থেকে lens বাছাই ও prescription input সরানো হয়েছে। [`checkout.go`](../backend/internal/orders/checkout.go) এ `frameOnlyLens` rule যোগ হয়েছে। পুরনো cart-এর lens item [`cart.tsx`](../frontend/src/lib/cart.tsx) এর `frameOnlyItems` "Frame only"-তে merge করে।
+* **Success flow:** Product page `addItem(product)` → cart-এ `lensOption: "Frame only"` → checkout `POST /api/orders` body-তে `lens_option: "Frame only"` → `CheckoutHandler.CreateOrder` → `CheckoutService.Place` validation pass → transaction → `InsertItem` lens snapshot সেভ → 200।
+* **Failure flow:** কেউ API-তে সরাসরি `lens_option: "Prescription lens"` পাঠালে `Place`-এর প্রথম validation loop `ErrInvalidCheckout` দেয় → handler 400 `invalid order data`। Transaction শুরুই হয় না, তাই stock কমে না।
+* **Middleware না service?** এটা business rule, তাই service-এ। Handler শুধু JSON parse করে; middleware-এ দাম/stock rule রাখা নিষেধ।
+* **Test:** `TestCheckoutRejectsUnpricedLensOption` — তিনটি অবৈধ মান reject হয় এবং `store.started == false`; "Frame only" সফল হয়।
+* **নিজে বলে দেখো:** কেন frontend থেকে option সরানোই যথেষ্ট না? (উত্তর: API সরাসরি call করা যায়; backend authoritative।)

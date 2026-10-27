@@ -259,3 +259,25 @@ func TestCheckoutRejectsOversizedTotal(t *testing.T) {
 		t.Fatalf("oversized amount accepted: err=%v committed=%v", err, store.committed)
 	}
 }
+
+// TestCheckoutRejectsUnpricedLensOption keeps lens upgrades from being sold at the frame-only price.
+func TestCheckoutRejectsUnpricedLensOption(t *testing.T) {
+	for _, lens := range []string{"Prescription lens", "Blue-cut lens", "frame only"} {
+		store := &checkoutStoreStub{tx: &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}}
+		_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+			IdempotencyKey: "checkout-lens-00001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+			Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: lens}},
+		}))
+		if !errors.Is(err, ErrInvalidCheckout) || store.started {
+			t.Fatalf("lens %q started checkout: err=%v", lens, err)
+		}
+	}
+	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
+	_, err := (CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+		IdempotencyKey: "checkout-lens-00002", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: frameOnlyLens}},
+	}))
+	if err != nil || tx.itemsSaved != 1 {
+		t.Fatalf("frame-only checkout failed: err=%v", err)
+	}
+}
