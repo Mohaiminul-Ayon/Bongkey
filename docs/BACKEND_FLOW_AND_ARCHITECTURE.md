@@ -356,3 +356,14 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **কেন IP hash:** `security.EmailKey(secret, "admin-login-ip", ip)` HMAC রাখে; table dump থেকে কাঁচা IP পাওয়া যায় না।
 * **Test:** `TestLoginRateLimitStopsPasswordGuessing` (১০ ভুলের পর সঠিক password-ও 429, অন্য IP চলে, limiter ছাড়া fail closed); `TestPostgresLoginLimiterCountsConcurrentAttempts` আসল PostgreSQL-এ ১০টি একসাথে চেষ্টা গুনে ১১তমে 11 পায়।
 * **নিজে বলে দেখো:** কেন check আর increment আলাদা দুই query হলে race হতো?
+
+### Fix 4 ও 5 — Checkout-এ বর্তমান দাম, আর নষ্ট cart-এ site বন্ধ না হওয়া
+
+* **সমস্যা (4):** Cart পুরো product দাম সহ `localStorage`-এ রাখত। পরে owner দাম বদলালে checkout পুরনো দাম দেখাত, অথচ server নতুন দাম নিত।
+* **সমস্যা (5):** `JSON.parse` ভাঙা data পেলে error ছুড়ত; `CartProvider` layout-এ থাকায় পুরো site সাদা হয়ে যেত।
+* **পরিবর্তন:** [`cart.tsx`](../frontend/src/lib/cart.tsx) এ `loadSavedItems` (try/catch + shape check), `ready` flag (load শেষ হওয়ার আগে save করে না), আর `refreshProducts(current)`। [`checkout/page.tsx`](../frontend/src/app/checkout/page.tsx) cart load হলে `fetchProducts()` ডাকে, দাম মিলিয়ে cart আপডেট করে, পরিবর্তন থাকলে notice দেখায়; দাম নিশ্চিত না হওয়া পর্যন্ত "Place Order" বন্ধ।
+* **Success flow:** Checkout খোলা → `CartProvider` effect `loadSavedItems()` → `ready = true` → checkout effect `checkCurrentPrices()` → `GET /api/products` → `ProductHandler.ListProducts` → `ProductService.List` → `PostgresProductRepository.List` → 200 → `refreshProducts` নতুন দাম বসায় → summary-তে আসল total → submit → `POST /api/orders` (server আবার নিজেই দাম হিসাব করে)।
+* **Failure flow:** `GET /api/products` fail করলে `priceCheck = "failed"`, "Try again" button দেখায়, submit বন্ধ থাকে। Product বন্ধ বা stock শূন্য হলে item cart থেকে সরে যায় আর customer-কে কারণ দেখায়।
+* **মনে রাখো:** এটা শুধু দেখানোর সঠিকতা। দামের চূড়ান্ত সিদ্ধান্ত এখনো `CheckoutService.Place`-এ `ReserveProduct` থেকে আসা server দাম।
+* **React শেখা:** Child-এর `useEffect` parent-এর আগে চলে, তাই `ready` flag ছাড়া checkout খালি cart-এ দাম মেলাত।
+* **Verification:** TypeScript ও production build পাস। Frontend-এ test runner নেই, তাই এই logic-এর automated test নেই; browser-এ হাতে দেখা বাকি।
