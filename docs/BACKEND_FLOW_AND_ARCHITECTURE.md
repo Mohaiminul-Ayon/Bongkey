@@ -394,3 +394,10 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Flow:** `POST /api/orders` → `CheckoutHandler.CreateOrder` (prescription field আর bind হয় না) → `CheckoutService.Place` → `InsertOrder` (column বাদ দিয়ে ১৫টি parameter) → 200।
 * **R1-এ সঠিক পথ:** Prescription private storage-এ upload, file type/size/signature check, প্রতি order authorization — তারপর আলাদা story।
 * **Test:** `TestCheckoutRequestHashMatchesPrePrescriptionRemoval` পুরনো fingerprint মেলায়; আসল PostgreSQL-এ `TestCheckoutOrderPostgres`, `TestConcurrentIdempotentCheckoutPostgres` সহ checkout integration test পাস।
+
+### Fix 9 — ব্যবহার না হওয়া demo product data মোছা
+
+* **সমস্যা:** [`products.ts`](../frontend/src/lib/products.ts) এ ৪০০+ লাইনের hardcoded `products` array আর `getProduct`, `featuredProducts`, `relatedProducts` ছিল। পুরো repo grep করে দেখা গেছে কেউ import করে না; শুধু `Product` type আর `formatPrice` ব্যবহার হয়।
+* **ঝুঁকি:** ভুলে কেউ import করলে API fail হলেও নকল দাম ও stock আসল দোকানে দেখাত — PRD এটা নিষেধ করে।
+* **পরিবর্তন:** Array ও তিনটি function মুছে ফেলা; file এখন ৩২ লাইন। সব product এখন শুধু `GET /api/products` থেকে আসে।
+* **Verification:** TypeScript ও production build পাস (কোনো import ভাঙেনি)।
