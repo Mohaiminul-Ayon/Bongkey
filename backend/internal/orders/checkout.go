@@ -16,6 +16,9 @@ import (
 
 const maxOrderAmount = 1<<31 - 1
 
+// frameOnlyLens is the only lens choice R0 can price; lens packages need server pricing and prescription review first.
+const frameOnlyLens = "Frame only"
+
 var (
 	// ErrInvalidCheckout means the submitted order cannot be accepted as written.
 	ErrInvalidCheckout = errors.New("invalid checkout")
@@ -48,7 +51,6 @@ type CheckoutRequest struct {
 	City                string
 	DeliveryNote        string
 	ExpectedDeliveryFee *int
-	PrescriptionFileURL string
 	Items               []CheckoutItem
 }
 
@@ -140,11 +142,8 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			return nil
 		}
 		// New orders stay frame-only until lens pricing and private prescriptions are implemented.
-		if request.PrescriptionFileURL != "" {
-			return ErrInvalidCheckout
-		}
 		for _, item := range request.Items {
-			if item.LensOption != "" && item.LensOption != "Frame only" {
+			if item.LensOption != "" && item.LensOption != frameOnlyLens {
 				return ErrInvalidCheckout
 			}
 		}
@@ -200,7 +199,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		}
 		for _, item := range request.Items {
 			if item.LensOption == "" {
-				item.LensOption = "Frame only"
+				item.LensOption = frameOnlyLens
 			}
 			if err := tx.InsertItem(ctx, orderID, item, products[item.ProductID], products[item.ProductID].Price*item.Quantity); err != nil {
 				return err
@@ -235,6 +234,7 @@ func ValidIdempotencyKey(key string) bool {
 
 // checkoutRequestHash excludes proof and expected fee so accepted retries retain the original receipt after either changes.
 func checkoutRequestHash(request CheckoutRequest) (string, error) {
+	// PrescriptionFileURL stays empty in the fingerprint so retries of orders accepted before it was removed still match.
 	payload := struct {
 		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
 		EmailVerified                                                                                        bool
@@ -242,7 +242,7 @@ func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	}{
 		CustomerName: request.CustomerName, CustomerPhone: request.CustomerPhone, CustomerEmail: request.CustomerEmail,
 		ShippingAddress: request.ShippingAddress, City: request.City, DeliveryNote: request.DeliveryNote,
-		PrescriptionFileURL: request.PrescriptionFileURL, EmailVerified: request.EmailVerified, Items: request.Items,
+		EmailVerified: request.EmailVerified, Items: request.Items,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

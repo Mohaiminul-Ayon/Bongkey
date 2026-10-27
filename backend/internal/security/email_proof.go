@@ -33,7 +33,7 @@ func EmailCodeHash(secret, email, code string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// EmailKey hashes an email or IP before it is stored in OTP rate-limit tables.
+// EmailKey hashes an email or IP before it is stored in OTP or login rate-limit tables.
 func EmailKey(secret, kind, value string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte("email-otp-" + kind + ":" + value))

@@ -2,6 +2,7 @@ package orders
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -248,7 +249,7 @@ func TestCheckoutIdempotencyReturnsOriginalOrder(t *testing.T) {
 func TestCheckoutAllowsLegacyGuestRetry(t *testing.T) {
 	request := CheckoutRequest{
 		IdempotencyKey: "checkout-legacy-guest-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
-		PrescriptionFileURL: "legacy-prescription-placeholder", Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: "Blue-cut lens"}},
+		Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: "Blue-cut lens"}},
 	}
 	requestHash, err := checkoutRequestHash(request)
 	if err != nil {
@@ -261,21 +262,21 @@ func TestCheckoutAllowsLegacyGuestRetry(t *testing.T) {
 	}
 }
 
-// TestNewCheckoutRejectsUnpricedLenses rejects lens and prescription data before stock changes.
+// TestNewCheckoutRejectsUnpricedLenses rejects any lens other than the exact frame-only value before stock changes.
 func TestNewCheckoutRejectsUnpricedLenses(t *testing.T) {
 	for _, tc := range []struct {
-		name, lens, prescription string
+		name, lens string
 	}{
-		{"blue-cut", "Blue-cut lens", ""},
-		{"prescription", "Prescription lens", ""},
-		{"file placeholder", "Frame only", "not-a-file"},
+		{"blue-cut", "Blue-cut lens"},
+		{"prescription", "Prescription lens"},
+		{"wrong case", "frame only"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
 			store := &checkoutStoreStub{tx: tx}
 			request := verifiedCheckoutRequest(t, CheckoutRequest{
 				IdempotencyKey: "checkout-unpriced-lens-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
-				PrescriptionFileURL: tc.prescription, Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: tc.lens}},
+				Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: tc.lens}},
 			})
 			_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), request)
 			if !errors.Is(err, ErrInvalidCheckout) || len(tx.reservedIDs) != 0 || tx.orderSaved || tx.invoiceSaved {
@@ -345,5 +346,26 @@ func TestCheckoutRejectsOversizedTotal(t *testing.T) {
 	}))
 	if !errors.Is(err, ErrInvalidCheckout) || store.committed || tx.orderSaved {
 		t.Fatalf("oversized amount accepted: err=%v committed=%v", err, store.committed)
+	}
+}
+
+// TestCheckoutRequestHashMatchesPrePrescriptionRemoval keeps retries of already-accepted orders matching after the field removal.
+func TestCheckoutRequestHashMatchesPrePrescriptionRemoval(t *testing.T) {
+	request := CheckoutRequest{CustomerName: "QA", CustomerPhone: "000", CustomerEmail: "buyer@example.com", ShippingAddress: "Local", City: "Dhaka", EmailVerified: true, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	got, err := checkoutRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This literal is the previous fingerprint shape, which included an always-empty prescription field.
+	old, err := json.Marshal(struct {
+		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
+		EmailVerified                                                                                        bool
+		Items                                                                                                []CheckoutItem
+	}{"QA", "000", "buyer@example.com", "Local", "Dhaka", "", "", true, request.Items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != textHash(string(old)) {
+		t.Fatal("checkout fingerprint changed; existing idempotent retries would conflict")
 	}
 }

@@ -29,11 +29,11 @@ func (r memoryReader) Items(_ context.Context, id int) ([]Item, error) {
 
 // TestGuestOrderAccess denies a different guest and a legacy order without a token.
 func TestGuestOrderAccess(t *testing.T) {
-	firstToken, firstHash, err := security.NewOrderToken()
+	firstToken, firstHash, err := security.IdempotentOrderToken(testOrderTokenSecret, "order-access-first-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondToken, secondHash, err := security.NewOrderToken()
+	secondToken, secondHash, err := security.IdempotentOrderToken(testOrderTokenSecret, "order-access-second-001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestGuestOrderAccess(t *testing.T) {
 		{"1", secondToken}, {"2", firstToken}, {"3", firstToken}, {"1", ""}, {"missing", firstToken},
 	} {
 		order, err := service.Guest(context.Background(), tc.id, tc.token)
-		if !errors.Is(err, ErrNotFound) || order != (Summary{}) {
+		if !errors.Is(err, ErrNotFound) || order.ID != 0 {
 			t.Fatalf("guest must not receive order %s: %+v, %v", tc.id, order, err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestVerifiedEmailAccessRejectsOtherAndLegacyOrders(t *testing.T) {
 		t.Fatal("verified mailbox could not access its order")
 	}
 	for _, id := range []string{"2", "3", "missing"} {
-		if order, err := service.Guest(context.Background(), id, proof); !errors.Is(err, ErrNotFound) || order != (Summary{}) {
+		if order, err := service.Guest(context.Background(), id, proof); !errors.Is(err, ErrNotFound) || order.ID != 0 {
 			t.Fatal("email proof accessed another or unverified order")
 		}
 	}

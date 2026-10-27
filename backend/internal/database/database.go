@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 
 	_ "github.com/lib/pq"
@@ -24,7 +25,14 @@ func Connect(databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	if err := db.Ping(); err != nil {
+	// Bounded pool sizes keep one instance from exhausting PostgreSQL connections; recycling avoids stale sockets.
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return err
 	}
@@ -44,7 +52,7 @@ func MigrateAndSeed(cfg config.Config) error {
 	if _, err := DB.Exec(schemaSQL); err != nil {
 		return err
 	}
-	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql", "007_delivery_settings.sql", "008_product_variants.sql", "009_delivery_zones.sql"} {
+	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql", "007_delivery_settings.sql", "008_product_variants.sql", "009_delivery_zones.sql", "010_admin_login_limits.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
@@ -101,7 +109,7 @@ func seedAdmin(db *sql.DB, email, password string) error {
 
 func seedCategories() error {
 	for _, name := range []string{"Blue-Cut Glasses", "Sunglasses", "Men's Frames", "Women's Frames", "Premium Collection", "Budget Picks", "Prescription-ready"} {
-		_, err := DB.Exec(`INSERT INTO categories (name, slug) VALUES ($1, $2) ON CONFLICT (slug) DO NOTHING`, name, slugify(name))
+		_, err := DB.Exec(`INSERT INTO categories (name, slug) VALUES ($1, $2) ON CONFLICT (slug) DO NOTHING`, name, catalog.Slugify(name))
 		if err != nil {
 			return err
 		}
@@ -142,7 +150,7 @@ func seedProducts() error {
 		{"Bongkey Sylhet Green Sunglass", "Sunglasses", "unisex", "mid_range", "sunglass", 1690, 2190, 13, "Metal", "Forest Green", "Medium", "51 mm", "20 mm", "142 mm", false},
 	}
 	for _, item := range items {
-		slug := slugify(item.Name)
+		slug := catalog.Slugify(item.Name)
 		description := fmt.Sprintf("%s is a comfortable Bongkey frame for everyday use in Bangladesh.", item.Name)
 		_, err := DB.Exec(`
 			INSERT INTO products (
@@ -159,16 +167,6 @@ func seedProducts() error {
 		}
 	}
 	return nil
-}
-
-func slugify(value string) string {
-	slug := strings.ToLower(value)
-	replacer := strings.NewReplacer("'", "", " ", "-", "/", "-", "’", "", "(", "", ")", "")
-	slug = replacer.Replace(slug)
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
-	}
-	return strings.Trim(slug, "-")
 }
 
 const schemaSQL = `

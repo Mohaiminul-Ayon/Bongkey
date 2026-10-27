@@ -33,7 +33,7 @@ func (r orderReader) Items(context.Context, int) ([]orders.Item, error) {
 // TestGuestOrderResponse verifies that missing/wrong tokens never return personal data.
 func TestGuestOrderResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	token, hash, err := security.NewOrderToken()
+	token, hash, err := security.IdempotentOrderToken("synthetic-order-token-secret-at-least-32-characters", "order-access-handler-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestAdminOrderResponse(t *testing.T) {
 // TestGuestInvoiceResponse checks PDF delivery and denial without leaking private details.
 func TestGuestInvoiceResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	token, hash, err := security.NewOrderToken()
+	token, hash, err := security.IdempotentOrderToken("synthetic-order-token-secret-at-least-32-characters", "guest-invoice-handler-01")
 	if err != nil {
 		t.Fatal(err)
 	}

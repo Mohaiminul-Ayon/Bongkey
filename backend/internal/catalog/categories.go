@@ -33,7 +33,7 @@ func (s CategoryService) Save(ctx context.Context, id int, category models.Categ
 		return ErrCategoryNameRequired
 	}
 	if strings.TrimSpace(category.Slug) == "" {
-		category.Slug = slugify(category.Name)
+		category.Slug = Slugify(category.Name)
 	}
 	return s.Repository.Save(ctx, id, category)
 }

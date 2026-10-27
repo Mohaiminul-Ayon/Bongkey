@@ -19,7 +19,6 @@ type orderRequest struct {
 	City                string             `json:"city"`
 	DeliveryNote        string             `json:"delivery_note"`
 	ExpectedDeliveryFee *int               `json:"expected_delivery_fee"`
-	PrescriptionFileURL string             `json:"prescription_file_url"`
 	Items               []orderItemRequest `json:"items"`
 }
 
@@ -65,8 +64,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		CustomerName:   req.CustomerName, CustomerPhone: req.CustomerPhone,
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
-		ExpectedDeliveryFee: req.ExpectedDeliveryFee,
-		PrescriptionFileURL: req.PrescriptionFileURL, Items: items,
+		ExpectedDeliveryFee: req.ExpectedDeliveryFee, Items: items,
 	})
 	if err != nil {
 		switch {

@@ -66,7 +66,7 @@ DATABASE_URL=postgres://bongkey:bongkey_password@localhost:5433/bongkey?sslmode=
 
 ## Database Migrations and Seed Data
 
-The Go backend connects to PostgreSQL at startup, creates the MVP tables, applies the idempotent guest-order-access migration in `backend/migrations/002_guest_order_access.sql`, and seeds local catalog data. On an empty admin table, it creates one owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; later startups never replace that owner's password. Databases previously seeded with the old demo password need an explicit credential change before real use.
+The Go backend connects to PostgreSQL at startup, creates the MVP tables, applies the idempotent migrations in `backend/migrations/` (002–010) in order, and seeds local catalog data. On an empty admin table, it creates one owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; later startups never replace that owner's password. Databases previously seeded with the old demo password need an explicit credential change before real use.
 
 If the database connection fails, the backend exits with a generic message. It does not print the connection URL or driver error because those can contain credentials. Check the PostgreSQL service and local `DATABASE_URL` privately when diagnosing a failure.
 
@@ -133,21 +133,24 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/admin/login -Conte
 
 The endpoint returns a `guest_access_token` with the order. The frontend keeps it in browser `sessionStorage` under that order's ID and sends it in `Authorization: Bearer <token>` to `GET /api/orders/:id`. Do not put access tokens, OTPs, or idempotency keys in URLs or logs. A missing or wrong token returns `404` without customer details; a fresh proof for the verified order email can also authorize access. Admin access uses `GET /api/admin/orders/:id` behind admin authentication. Existing orders without guest access or a verified email remain admin-only.
 
-## Current MVP Foundation
+## Current State
 
-Implemented so far:
+Implemented (unit tests pass; PostgreSQL integration checks for delivery settings and variants are still pending — see `PRD.md` section 16):
 
-- Basic Next.js app shell
-- Basic pages: Home, Products, Cart, Checkout, Admin Login
-- Basic Go/Gin backend
-- `GET /health` API
-- PostgreSQL Docker Compose service
-- Database connection with automatic MVP schema creation and seed data
-- Product catalog APIs, basic COD order creation, database invoice numbers, and token-protected guest order lookup
+- Catalog with categories, product variants (SKU, color, size, stock) and owner product management
+- Frame-only checkout: lens options are disabled until lens pricing and prescription review exist
+- Guest checkout with required email OTP, retry-safe `Idempotency-Key`, atomic stock reservation
+- Delivery charge from admin settings (Dhaka and outside-Dhaka fees), snapshotted on each order
+- Private guest order access (order token or fresh email proof) and owner order detail page
+- Downloadable PDF invoice for the guest and the owner
+- Owner fulfillment status changes and cancellation that restores stock once
+- Admin login with JWT, current-role checks and a per-IP login rate limit
+- HTTP timeouts, graceful shutdown and a bounded database pool
 
-Not implemented yet:
+Not implemented yet (R1 pilot scope):
 
-- Server-side cart persistence
-- Downloadable PDF invoices
-- External migration tooling
-- Virtual try-on
+- Admin-defined delivery zones (the current rule is a fixed Dhaka/outside-Dhaka split)
+- Lens packages, private prescription upload and review
+- Manual bKash/Nagad payments, advance rules and automatic discounts
+- Returns, exchanges, refunds and their deadline queue
+- Email notifications beyond OTP, audit log, backups, CI/CD and deployment

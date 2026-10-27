@@ -110,7 +110,7 @@ func (s ProductService) Save(ctx context.Context, id int, input ProductInput) (m
 		return models.Product{}, ErrExpectedStockMissing
 	}
 	if input.Slug == "" {
-		input.Slug = slugify(input.Name)
+		input.Slug = Slugify(input.Name)
 	}
 	if input.BrandTier == "" {
 		input.BrandTier = "budget"
@@ -147,8 +147,8 @@ func (s ProductService) SetActive(ctx context.Context, id int, active bool) erro
 	return s.Repository.SetActive(ctx, id, active)
 }
 
-// slugify derives the default URL slug from a product name.
-func slugify(value string) string {
+// Slugify derives the default URL slug from a product, category, or seed name.
+func Slugify(value string) string {
 	slug := strings.ToLower(value)
 	replacer := strings.NewReplacer("'", "", " ", "-", "/", "-", "’", "", "(", "", ")", "")
 	slug = replacer.Replace(slug)
