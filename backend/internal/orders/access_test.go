@@ -42,7 +42,7 @@ func TestGuestOrderAccess(t *testing.T) {
 		{"1", secondToken}, {"2", firstToken}, {"3", firstToken}, {"1", ""}, {"missing", firstToken},
 	} {
 		order, err := service.Guest(context.Background(), tc.id, tc.token)
-		if !errors.Is(err, ErrNotFound) || order != (Summary{}) {
+		if !errors.Is(err, ErrNotFound) || order.ID != 0 {
 			t.Fatalf("guest must not receive order %s: %+v, %v", tc.id, order, err)
 		}
 	}
@@ -68,7 +68,7 @@ func TestVerifiedEmailAccessRejectsOtherAndLegacyOrders(t *testing.T) {
 		t.Fatal("verified mailbox could not access its order")
 	}
 	for _, id := range []string{"2", "3", "missing"} {
-		if order, err := service.Guest(context.Background(), id, proof); !errors.Is(err, ErrNotFound) || order != (Summary{}) {
+		if order, err := service.Guest(context.Background(), id, proof); !errors.Is(err, ErrNotFound) || order.ID != 0 {
 			t.Fatal("email proof accessed another or unverified order")
 		}
 	}

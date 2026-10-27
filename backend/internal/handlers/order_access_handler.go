@@ -43,11 +43,18 @@ func respondWithOrder(c *gin.Context, order orders.Summary, err error) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load order"})
 		return
 	}
+	items := make([]gin.H, len(order.Items))
+	for i, item := range order.Items {
+		items[i] = gin.H{
+			"product_name": item.ProductName, "lens_option": item.LensOption, "quantity": item.Quantity,
+			"unit_price": item.UnitPrice, "total_price": item.TotalPrice,
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"id": order.ID, "order_number": order.OrderNumber, "invoice_number": order.InvoiceNumber,
 		"customer_name": order.CustomerName, "customer_phone": order.CustomerPhone,
 		"shipping_address": order.ShippingAddress, "city": order.City,
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee,
-		"total": order.Total, "order_status": order.Status,
+		"total": order.Total, "order_status": order.Status, "items": items,
 	})
 }

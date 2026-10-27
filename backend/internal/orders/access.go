@@ -23,6 +23,16 @@ type Summary struct {
 	DeliveryFee     int
 	Total           int
 	Status          string
+	Items           []Item
+}
+
+// Item is one accepted order line with the name and price snapshotted at checkout.
+type Item struct {
+	ProductName string
+	LensOption  string
+	Quantity    int
+	UnitPrice   int
+	TotalPrice  int
 }
 
 // Record keeps the access hash inside the order boundary.

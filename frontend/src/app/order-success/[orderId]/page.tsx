@@ -3,22 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
-import { fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
+import { fetchOrder, requestEmailCode, verifyEmailCode, type OrderDetail } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
-type Order = {
-  id: number;
-  order_number: string;
-  invoice_number: string;
-  customer_name: string;
-  customer_phone: string;
-  shipping_address: string;
-  city: string;
-  subtotal: number;
-  delivery_fee: number;
-  total: number;
-  order_status: string;
-};
+type Order = OrderDetail;
 
 /** OrderSuccessPage loads private order details using this session's guest token. */
 export default function OrderSuccessPage() {
@@ -90,6 +78,14 @@ export default function OrderSuccessPage() {
             <p><strong>Name:</strong> {order.customer_name}</p>
             <p><strong>Phone:</strong> {order.customer_phone}</p>
             <p><strong>Address:</strong> {order.shipping_address}, {order.city}</p>
+            <ul className="mt-2 grid gap-1 border-t pt-3">
+              {order.items.map((item, index) => (
+                <li key={index} className="flex justify-between gap-3">
+                  <span>{item.quantity} x {item.product_name} · {item.lens_option}</span>
+                  <strong>{formatPrice(item.total_price)}</strong>
+                </li>
+              ))}
+            </ul>
             <div className="mt-3 border-t pt-4">
               <div className="flex justify-between"><span>Subtotal</span><strong>{formatPrice(order.subtotal)}</strong></div>
               <div className="mt-2 flex justify-between"><span>Delivery</span><strong>{formatPrice(order.delivery_fee)}</strong></div>

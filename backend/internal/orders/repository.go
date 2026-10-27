@@ -65,5 +65,30 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	record.Items, err = r.items(ctx, record.ID)
+	if err != nil {
+		return Record{}, err
+	}
 	return record, nil
+}
+
+// items loads the checkout snapshot lines so fulfillment never depends on current product rows.
+func (r PostgresReader) items(ctx context.Context, orderID int) ([]Item, error) {
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT product_name, lens_option, quantity, unit_price, total_price
+		FROM order_items WHERE order_id = $1 ORDER BY id
+	`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Item, 0)
+	for rows.Next() {
+		var item Item
+		if err := rows.Scan(&item.ProductName, &item.LensOption, &item.Quantity, &item.UnitPrice, &item.TotalPrice); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

@@ -335,3 +335,13 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Middleware না service?** এটা business rule, তাই service-এ। Handler শুধু JSON parse করে; middleware-এ দাম/stock rule রাখা নিষেধ।
 * **Test:** `TestCheckoutRejectsUnpricedLensOption` — তিনটি অবৈধ মান reject হয় এবং `store.started == false`; "Frame only" সফল হয়।
 * **নিজে বলে দেখো:** কেন frontend থেকে option সরানোই যথেষ্ট না? (উত্তর: API সরাসরি call করা যায়; backend authoritative।)
+
+### Fix 2 — Owner ও guest order-এর item দেখতে পান
+
+* **সমস্যা:** `GET /api/admin/orders/:id` ও `GET /api/orders/:id` শুধু নাম, ঠিকানা, total দিত। কোন frame কয়টা — এটা কোনো API দিত না, তাই owner pack করতে পারতেন না।
+* **পরিবর্তন:** [`access.go`](../backend/internal/orders/access.go) এ `Summary.Items []Item`; [`repository.go`](../backend/internal/orders/repository.go) এর `PostgresReader.Find` order row পড়ার পর `items()` দিয়ে `order_items` snapshot পড়ে; [`order_access_handler.go`](../backend/internal/handlers/order_access_handler.go) এর `respondWithOrder` JSON-এ `items` দেয়। Admin orders page-এ "View items" button, success page-এ item list।
+* **Success flow (admin):** "View items" click → `fetchAdminOrder(id)` → `GET /api/admin/orders/:id` → `CORS` → `AdminAuth` (token + current owner role, `c.Next()`) → `OrderAccessHandler.GetAdminOrder` → `AccessService.Admin` → `PostgresReader.Find` (order + invoice JOIN, তারপর `items` query) → `respondWithOrder` 200 `{..., items: [...]}` → page-এ `details[order.id]` state।
+* **Failure flow:** Token ছাড়া call করলে `AdminAuth` `AbortWithStatusJSON(401)` করে return করে — handler চলেই না। Guest-এর ভুল token হলে `AccessService.Guest` `ErrNotFound` → 404, item বা ঠিকানা কিছুই যায় না।
+* **কেন snapshot table থেকে:** `order_items.product_name/unit_price` checkout-এর সময়ের মান; পরে product-এর দাম বা নাম বদলালেও পুরনো order বদলায় না।
+* **Test:** `TestGuestOrderResponse` এখন item name-ও private data হিসেবে check করে: শুধু সঠিক token-এ আসে।
+* **নিজে বলে দেখো:** Item কেন `products` table JOIN না করে `order_items` থেকে পড়া হয়?

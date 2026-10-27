@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
-import { adminRequest, updateAdminOrderStatus } from "@/lib/api";
+import { adminRequest, fetchAdminOrder, updateAdminOrderStatus, type OrderDetail } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
 type OrderRow = {
@@ -38,6 +38,7 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [busyOrder, setBusyOrder] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [details, setDetails] = useState<Record<number, OrderDetail>>({});
 
   useEffect(() => {
     adminRequest<OrderRow[]>("/api/admin/orders")
@@ -45,6 +46,24 @@ export default function AdminOrdersPage() {
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load orders."))
       .finally(() => setLoading(false));
   }, []);
+
+  // toggleDetails loads the delivery address and item snapshot the owner needs to pack an order.
+  async function toggleDetails(order: OrderRow) {
+    if (details[order.id]) {
+      setDetails(({ [order.id]: _hidden, ...rest }) => rest);
+      return;
+    }
+    setBusyOrder(order.id);
+    setError("");
+    try {
+      const detail = await fetchAdminOrder(order.id);
+      setDetails((current) => ({ ...current, [order.id]: detail }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load order details.");
+    } finally {
+      setBusyOrder(null);
+    }
+  }
 
   // changeStatus updates only the row accepted by the backend state machine.
   async function changeStatus(order: OrderRow, status: string) {
@@ -85,7 +104,23 @@ export default function AdminOrdersPage() {
                       {statusLabel[order.order_status] ?? order.order_status}
                     </span>
                   </div>
+                  {details[order.id] ? (
+                    <div className="mt-4 rounded-md bg-neutral-50 p-3 text-sm">
+                      <p><strong>Address:</strong> {details[order.id].shipping_address}, {details[order.id].city}</p>
+                      <ul className="mt-2 grid gap-1">
+                        {details[order.id].items.map((item, index) => (
+                          <li key={index} className="flex justify-between gap-3">
+                            <span>{item.quantity} x {item.product_name} · {item.lens_option}</span>
+                            <strong>{formatPrice(item.total_price)}</strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                   <div className="mt-4 flex flex-wrap gap-2">
+                    <button type="button" disabled={busyOrder === order.id} onClick={() => toggleDetails(order)} className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-bold disabled:opacity-50" aria-expanded={Boolean(details[order.id])}>
+                      {details[order.id] ? "Hide items" : "View items"}
+                    </button>
                     {transitions.map((status) => (
                       <button
                         key={status}

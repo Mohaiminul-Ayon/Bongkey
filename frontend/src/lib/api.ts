@@ -105,6 +105,11 @@ export async function loginAdmin(email: string, password: string) {
   });
 }
 
+/** fetchAdminOrder loads one private order with its items for fulfillment. */
+export async function fetchAdminOrder(id: number) {
+  return adminRequest<OrderDetail>(`/api/admin/orders/${id}`, { cache: "no-store" });
+}
+
 /** updateAdminOrderStatus applies one backend-validated fulfillment transition. */
 export async function updateAdminOrderStatus(id: number, status: string) {
   return adminRequest<{ order_status: string }>(`/api/admin/orders/${id}/status`, {
@@ -170,21 +175,28 @@ export async function verifyEmailCode(email: string, code: string) {
   });
 }
 
+/** OrderItem is one checkout line snapshotted on the order. */
+export type OrderItem = { product_name: string; lens_option: string; quantity: number; unit_price: number; total_price: number };
+
+/** OrderDetail is the private order view returned to its guest or the owner. */
+export type OrderDetail = {
+  id: number;
+  order_number: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone: string;
+  shipping_address: string;
+  city: string;
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  order_status: string;
+  items: OrderItem[];
+};
+
 /** fetchOrder uses the order-specific guest token without placing it in the URL. */
 export async function fetchOrder(id: string, token: string) {
-  return request<{
-    id: number;
-    order_number: string;
-    invoice_number: string;
-    customer_name: string;
-    customer_phone: string;
-    shipping_address: string;
-    city: string;
-    subtotal: number;
-    delivery_fee: number;
-    total: number;
-    order_status: string;
-  }>(`/api/orders/${id}`, {
+  return request<OrderDetail>(`/api/orders/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });

@@ -34,7 +34,7 @@ func TestGuestOrderResponse(t *testing.T) {
 	}
 	handler := OrderAccessHandler{Service: orders.AccessService{Reader: orderReader{
 		record: orders.Record{
-			Summary:        orders.Summary{ID: 1, CustomerPhone: "private-phone", ShippingAddress: "private-address"},
+			Summary:        orders.Summary{ID: 1, CustomerPhone: "private-phone", ShippingAddress: "private-address", Items: []orders.Item{{ProductName: "private-frame", LensOption: "Frame only", Quantity: 2, UnitPrice: 100, TotalPrice: 200}}},
 			GuestTokenHash: hash,
 		},
 	}}}
@@ -62,7 +62,7 @@ func TestGuestOrderResponse(t *testing.T) {
 			if response.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal("private responses must not be cached")
 			}
-			containsPrivateData := strings.Contains(response.Body.String(), "private-phone") || strings.Contains(response.Body.String(), "private-address")
+			containsPrivateData := strings.Contains(response.Body.String(), "private-phone") || strings.Contains(response.Body.String(), "private-address") || strings.Contains(response.Body.String(), "private-frame")
 			if containsPrivateData != (tc.status == http.StatusOK) {
 				t.Fatalf("unexpected private data in response: %s", response.Body.String())
 			}
