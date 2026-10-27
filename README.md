@@ -135,7 +135,7 @@ The endpoint returns a `guest_access_token` with the order. The frontend keeps i
 
 ## Current State
 
-Implemented (unit tests pass; PostgreSQL integration checks for delivery settings and variants are still pending — see `PRD.md` section 16):
+Implemented (unit, race and local PostgreSQL integration tests pass — see `PRD.md` section 16):
 
 - Catalog with categories, product variants (SKU, color, size, stock) and owner product management
 - Frame-only checkout: lens options are disabled until lens pricing and prescription review exist

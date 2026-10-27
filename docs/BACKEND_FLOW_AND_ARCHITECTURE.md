@@ -457,4 +457,4 @@ Main checkout-এ commit না করা delivery settings ও zones, product v
 
 **খোলা বিষয় (PRD-র সাথে অমিল):** Main-এর delivery zone এখন "Dhaka বনাম বাকি সব" দুটি নির্দিষ্ট fee। PRD section 7 বলে hardcoded Dhaka/outside-Dhaka নিয়ম থাকবে না, admin zone বানাবেন ও district map করবেন। R0-তে এটা চলতে পারে, কিন্তু R1-এর আগে S4-এ আসল zone model লাগবে।
 
-**Verification:** `go vet`, পুরো `go test`, `go test -race` (UCRT64 GCC), TypeScript আর production build পাস। PostgreSQL integration test বাকি — local database-এ `009` ও `010` migration এখনো চালানো হয়নি।
+**Verification:** `go vet`, পুরো `go test`, `go test -race` (UCRT64 GCC), TypeScript আর production build পাস। Owner merged branch থেকে backend চালিয়ে `009` ও `010` migration লাগিয়েছেন এবং Ctrl+C-তে graceful shutdown (`shutdown signal received; draining requests`) দেখেছেন। এরপর সব PostgreSQL integration test পাস: variant stock, delivery settings, login limit, checkout, idempotency, cancellation ও OTP। `TestLiveOrderAccessQA` চলমান server লাগে বলে skip হয়েছে।
