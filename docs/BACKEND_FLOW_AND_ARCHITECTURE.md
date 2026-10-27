@@ -418,3 +418,11 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Flow:** `GET /api/orders/12` → `GetOrder` → `AccessService.Guest` → `Find("12")` → `o.id = 12`। `GET /api/orders/ORD-000012` → `o.order_number = 'ORD-000012'`।
 * **Failure flow:** `0` বা ঋণাত্মক id হলে query না চালিয়েই `ErrNotFound` → 404।
 * **Test:** PostgreSQL `TestCheckoutOrderPostgres` এখন id ও order number দুইভাবেই একই order পায়, আর `"0"` 404 দেয়।
+
+### Fix 12 — Cancel ও checkout একই ক্রমে lock নেয় (deadlock প্রতিরোধ)
+
+* **সমস্যা:** Checkout product row-গুলো id-র ছোট থেকে বড় ক্রমে lock করে (`sort.Ints`)। কিন্তু cancel-এর `RestoreStock` একটি `UPDATE ... FROM` দিয়ে যে ক্রমে PostgreSQL চায় সেই ক্রমে lock নিত। একই দুটি product-এ একসাথে checkout (A তারপর B) আর cancel (B তারপর A) হলে deadlock — PostgreSQL একটি transaction বাতিল করে 500 দিত।
+* **পরিবর্তন:** [`fulfillment_repository.go`](../backend/internal/orders/fulfillment_repository.go) এর `RestoreStock` আগে `SELECT id FROM products WHERE id IN (...) ORDER BY id FOR UPDATE` দিয়ে একই ক্রমে lock নেয়, তারপর stock ফেরত দেয়।
+* **Flow:** Admin "Cancel order" → `PATCH /api/admin/orders/:id/status` → `AdminAuth` → `OrderFulfillmentHandler.ChangeStatus` → `FulfillmentService.ChangeStatus` → `InTransaction` → `LockOrder` (`FOR UPDATE`) → transition check → `RestoreStock` (sorted lock → update) → `UpdateStatus` → COMMIT।
+* **নিয়মটা মনে রাখো:** একাধিক row lock করতে হলে সব জায়গায় একই ক্রম — তাহলে কেউ একে অপরের জন্য গোল হয়ে অপেক্ষা করে না।
+* **Test:** আসল PostgreSQL-এ `TestConcurrentCancellationPostgres` সহ সব order integration test পাস। Deadlock-এর জন্য আলাদা নির্ভরযোগ্য test নেই, কারণ timing ছাড়া deadlock তৈরি করা কঠিন; এটা জানা সীমাবদ্ধতা।
