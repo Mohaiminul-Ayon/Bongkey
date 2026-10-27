@@ -426,3 +426,9 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Flow:** Admin "Cancel order" → `PATCH /api/admin/orders/:id/status` → `AdminAuth` → `OrderFulfillmentHandler.ChangeStatus` → `FulfillmentService.ChangeStatus` → `InTransaction` → `LockOrder` (`FOR UPDATE`) → transition check → `RestoreStock` (sorted lock → update) → `UpdateStatus` → COMMIT।
 * **নিয়মটা মনে রাখো:** একাধিক row lock করতে হলে সব জায়গায় একই ক্রম — তাহলে কেউ একে অপরের জন্য গোল হয়ে অপেক্ষা করে না।
 * **Test:** আসল PostgreSQL-এ `TestConcurrentCancellationPostgres` সহ সব order integration test পাস। Deadlock-এর জন্য আলাদা নির্ভরযোগ্য test নেই, কারণ timing ছাড়া deadlock তৈরি করা কঠিন; এটা জানা সীমাবদ্ধতা।
+
+### Fix 13 — একটি মাত্র `Slugify`
+
+* **সমস্যা:** [`products.go`](../backend/internal/catalog/products.go) আর [`database.go`](../backend/internal/database/database.go) এ হুবহু একই `slugify` ছিল। একটায় নিয়ম বদলালে seed আর admin-তৈরি product আলাদা slug পেত।
+* **পরিবর্তন:** `catalog.Slugify` export করা হয়েছে; seed code (`seedCategories`, `seedProducts`) সেটাই ডাকে। Dependency দিক: `database` → `catalog` (catalog database-কে import করে না, তাই cycle নেই)।
+* **Verification:** `go vet` ও পুরো backend test পাস।

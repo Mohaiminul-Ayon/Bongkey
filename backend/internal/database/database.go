@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 
 	_ "github.com/lib/pq"
@@ -108,7 +109,7 @@ func seedAdmin(db *sql.DB, email, password string) error {
 
 func seedCategories() error {
 	for _, name := range []string{"Blue-Cut Glasses", "Sunglasses", "Men's Frames", "Women's Frames", "Premium Collection", "Budget Picks", "Prescription-ready"} {
-		_, err := DB.Exec(`INSERT INTO categories (name, slug) VALUES ($1, $2) ON CONFLICT (slug) DO NOTHING`, name, slugify(name))
+		_, err := DB.Exec(`INSERT INTO categories (name, slug) VALUES ($1, $2) ON CONFLICT (slug) DO NOTHING`, name, catalog.Slugify(name))
 		if err != nil {
 			return err
 		}
@@ -149,7 +150,7 @@ func seedProducts() error {
 		{"Bongkey Sylhet Green Sunglass", "Sunglasses", "unisex", "mid_range", "sunglass", 1690, 2190, 13, "Metal", "Forest Green", "Medium", "51 mm", "20 mm", "142 mm", false},
 	}
 	for _, item := range items {
-		slug := slugify(item.Name)
+		slug := catalog.Slugify(item.Name)
 		description := fmt.Sprintf("%s is a comfortable Bongkey frame for everyday use in Bangladesh.", item.Name)
 		_, err := DB.Exec(`
 			INSERT INTO products (
@@ -166,16 +167,6 @@ func seedProducts() error {
 		}
 	}
 	return nil
-}
-
-func slugify(value string) string {
-	slug := strings.ToLower(value)
-	replacer := strings.NewReplacer("'", "", " ", "-", "/", "-", "’", "", "(", "", ")", "")
-	slug = replacer.Replace(slug)
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
-	}
-	return strings.Trim(slug, "-")
 }
 
 const schemaSQL = `
