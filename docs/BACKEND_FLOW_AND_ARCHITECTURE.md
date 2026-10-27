@@ -39,7 +39,7 @@ Bongkey ব্যাকএন্ডটি Go এবং Gin ফ্রেমওয়
 +----------------------------------------------------+    +------------------------------------------+
 |            SECURITY LAYER (Isolated Primitives)    |    |     REPOSITORY LAYER (Persistence / SQL) |
 |  - security.IssueAdminToken / VerifyAdminToken     |    |  - catalog.PostgresProductRepository     |
-|  - security.NewOrderToken / IdempotentOrderToken   |    |  - catalog.PostgresCategoryRepository    |
+|  - security.IdempotentOrderToken                   |    |  - catalog.PostgresCategoryRepository    |
 |  - security.IssueEmailProof / VerifyEmailProof     |    |  - emailotp.PostgresStore                |
 |  - security.EmailCodeHash / EmailKey               |    |  - orders.PostgresCheckoutStore (Tx)     |
 |  - security.MatchesOrderToken (Constant Time)      |    |  - orders.PostgresReader                 |
@@ -106,7 +106,7 @@ Bongkey ব্যাকএন্ডটি Go এবং Gin ফ্রেমওয়
   * **Concurrency Protection:** ট্রানজ্যাকশনের শুরুতে `LOCK TABLE admins IN EXCLUSIVE MODE` এক্সিকিউট করে যাতে একাধিক ব্যাকএন্ড ইনস্ট্যান্স একসাথে বুট করলেও একের অধিক ওনার অ্যাকাউন্ট তৈরি হতে না পারে।
   * ওনার একাউন্ট না থাকলে bcrypt দিয়ে পাসওয়ার্ড হ্যাশ করে `role = 'owner'` হিসেবে ইনসার্ট করে।
 * [`seedCategories()`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L102-L110) ও [`seedProducts()`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L121-L162): ডেমো ফ্রেম ও সানগ্লাস প্রোডাক্টগুলো স্পেসিফিকেশনসহ ইনসার্ট করে।
-* [`slugify(value string)`](file:///E:/Eyewear-mvp/backend/internal/database/database.go#L164-L172): নাম থেকে স্পেশাল ক্যারেক্টার ও স্পেস সরিয়ে ক্লিন URL স্লাগ তৈরি করে।
+* Seed code slug বানাতে [`catalog.Slugify`](../backend/internal/catalog/products.go) ব্যবহার করে — নাম থেকে স্পেশাল ক্যারেক্টার ও স্পেস সরিয়ে ক্লিন URL স্লাগ (Audit fix 13-এ duplicate সরানো)।
 
 ---
 
@@ -117,7 +117,7 @@ Bongkey ব্যাকএন্ডটি Go এবং Gin ফ্রেমওয়
 * [`VerifyAdminToken(secret, raw string) (int64, error)`](file:///E:/Eyewear-mvp/backend/internal/security/admin_token.go#L42-L59): ইনকামিং JWT যাচাই করে। সিগনেচার, এক্সপায়ারি, অডিয়েন্স এবং রোল চেক করে অ্যাডমিন আইডি রিটার্ন করে।
 
 #### [`backend/internal/security/order_token.go`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go)
-* [`NewOrderToken() (string, string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L14-L21): গেস্ট অর্ডারের জন্য ৩২-বাইটের ক্রিপ্টোগ্রাফিক র্যান্ডম টোকেন ও তার SHA-256 হেক্স ডাইজেস্ট (স্টোরেজ হ্যাশ) রিটার্ন করে। ডেটাবেসে শুধু হ্যাশ থাকে, কাঁচা টোকেন নয়।
+* (আগের `NewOrderToken` শুধু test-এ ব্যবহার হতো, Audit fix 14-এ মুছে ফেলা হয়েছে। এখন সব guest token `IdempotentOrderToken` থেকে আসে; ডেটাবেসে শুধু SHA-256 হ্যাশ থাকে, কাঁচা টোকেন নয়।)
 * [`IdempotentOrderToken(secret, idempotencyKey string) (string, string, error)`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L24-L33): একই Idempotency Key দিয়ে রিট্রাই আসলে HMAC ব্যবহার করে ক্লায়েন্টকে অবিকল একই গেস্ট টোকেন ফেরত দেয়।
 * [`MatchesOrderToken(token, storedHash string) bool`](file:///E:/Eyewear-mvp/backend/internal/security/order_token.go#L36-L46): ইনপুট টোকেনটিকে হ্যাশ করে `subtle.ConstantTimeCompare` দিয়ে ডেটাবেস হ্যাশের সাথে তুলনা করে। **এটি ক্রিপ্টোগ্রাফিক টাইমিং সাইড-চ্যানেল অ্যাটাক প্রতিরোধ করে।**
 
@@ -431,4 +431,11 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 
 * **সমস্যা:** [`products.go`](../backend/internal/catalog/products.go) আর [`database.go`](../backend/internal/database/database.go) এ হুবহু একই `slugify` ছিল। একটায় নিয়ম বদলালে seed আর admin-তৈরি product আলাদা slug পেত।
 * **পরিবর্তন:** `catalog.Slugify` export করা হয়েছে; seed code (`seedCategories`, `seedProducts`) সেটাই ডাকে। Dependency দিক: `database` → `catalog` (catalog database-কে import করে না, তাই cycle নেই)।
+* **Verification:** `go vet` ও পুরো backend test পাস।
+
+### Fix 14 — Dead code ও পুরনো doc মোছা
+
+* **মোছা হয়েছে:** `security.NewOrderToken` (production code-এ কোথাও ব্যবহার হতো না; test fixture এখন `IdempotentOrderToken` ব্যবহার করে), খালি `backend/internal/models/placeholder.go`, আর পুরোপুরি পুরনো `docs/FOUNDATION.md`।
+* **Coverage রাখা:** `TestOrderToken`-এর ভুল token ও খালি legacy hash-এর negative check `TestIdempotentOrderToken`-এ সরানো হয়েছে।
+* **এই doc-এর উপরের অংশ:** Security layer diagram, `order_token.go` ও seed `Slugify` লাইন নতুন code অনুযায়ী ঠিক করা হয়েছে।
 * **Verification:** `go vet` ও পুরো backend test পাস।

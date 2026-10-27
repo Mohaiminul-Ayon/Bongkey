@@ -28,7 +28,7 @@ func (r orderReader) Find(_ context.Context, id string) (orders.Record, error) {
 // TestGuestOrderResponse verifies that missing/wrong tokens never return personal data.
 func TestGuestOrderResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	token, hash, err := security.NewOrderToken()
+	token, hash, err := security.IdempotentOrderToken("synthetic-order-token-secret-at-least-32-characters", "order-access-handler-0001")
 	if err != nil {
 		t.Fatal(err)
 	}

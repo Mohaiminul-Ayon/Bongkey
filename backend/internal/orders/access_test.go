@@ -21,11 +21,11 @@ func (r memoryReader) Find(_ context.Context, id string) (Record, error) {
 
 // TestGuestOrderAccess denies a different guest and a legacy order without a token.
 func TestGuestOrderAccess(t *testing.T) {
-	firstToken, firstHash, err := security.NewOrderToken()
+	firstToken, firstHash, err := security.IdempotentOrderToken(testOrderTokenSecret, "order-access-first-0001")
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondToken, secondHash, err := security.NewOrderToken()
+	secondToken, secondHash, err := security.IdempotentOrderToken(testOrderTokenSecret, "order-access-second-001")
 	if err != nil {
 		t.Fatal(err)
 	}
