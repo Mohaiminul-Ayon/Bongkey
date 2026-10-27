@@ -24,7 +24,14 @@ func Connect(databaseURL string) error {
 	if err != nil {
 		return err
 	}
-	if err := db.Ping(); err != nil {
+	// Bounded pool sizes keep one instance from exhausting PostgreSQL connections; recycling avoids stale sockets.
+	db.SetMaxOpenConns(20)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return err
 	}

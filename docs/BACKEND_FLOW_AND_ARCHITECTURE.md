@@ -367,3 +367,13 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **মনে রাখো:** এটা শুধু দেখানোর সঠিকতা। দামের চূড়ান্ত সিদ্ধান্ত এখনো `CheckoutService.Place`-এ `ReserveProduct` থেকে আসা server দাম।
 * **React শেখা:** Child-এর `useEffect` parent-এর আগে চলে, তাই `ready` flag ছাড়া checkout খালি cart-এ দাম মেলাত।
 * **Verification:** TypeScript ও production build পাস। Frontend-এ test runner নেই, তাই এই logic-এর automated test নেই; browser-এ হাতে দেখা বাকি।
+
+### Fix 6 — HTTP timeout, graceful shutdown ও database pool
+
+* **সমস্যা:** `router.Run()` Go-র default server চালাত — কোনো read/write timeout নেই, তাই খুব ধীরে data পাঠানো কিছু connection (slowloris) server আটকে রাখতে পারত। Ctrl+C বা deploy restart-এ চলমান checkout মাঝপথে কেটে যেত। Database pool-এর সীমা ছিল না।
+* **পরিবর্তন:** [`server.go`](../backend/cmd/server/server.go) এ `newHTTPServer` (ReadHeader 5s, Read/Write 30s, Idle 60s) আর `runHTTP`। `signal.NotifyContext` Ctrl+C/SIGTERM পেলে `server.Shutdown` নতুন connection বন্ধ করে, চলমান request ১৫ সেকেন্ড পর্যন্ত শেষ হতে দেয়। [`database.go`](../backend/internal/database/database.go) এর `Connect` এ pool সীমা (২০ open, ১০ idle) আর ১০ সেকেন্ডের `PingContext`।
+* **Startup flow:** `main` → `config.Load` → `serve` → `database.Connect` → `MigrateAndSeed` → `routes.SetupRouter` (শুধু route **register** করে; handler এখন চলে না) → `runHTTP` → goroutine-এ `ListenAndServe` → `select` অপেক্ষা করে।
+* **Shutdown flow:** Ctrl+C → `ctx.Done()` → `server.Shutdown(15s)` → চলমান request শেষ → `ListenAndServe` `http.ErrServerClosed` দেয় → `runHTTP` nil → `serve`-এর `defer database.DB.Close()` — pool শেষে বন্ধ হয়, যাতে drain হওয়া request তখনো database পায়।
+* **Failure flow:** Port আগে থেকেই ব্যস্ত হলে `ListenAndServe` সাথে সাথে error দেয় → `select` প্রথম case → `listen on :8080: ...` → `main` `log.Fatalf`।
+* **Goroutine-এর মালিকানা:** `runHTTP` goroutine-টির মালিক; buffered channel (size 1) তাই goroutine কখনো আটকে থাকে না; `Shutdown`-এর পর তার result পড়ে নিশ্চিত করা হয় যে সেটি শেষ হয়েছে।
+* **Test:** `TestRunHTTPDrainsInFlightRequestOnShutdown` — একটি request চলার সময় shutdown দিলে request 204 পায় আর `runHTTP` nil ফেরত দেয়। `go test -race` (UCRT64 GCC) পাস।
