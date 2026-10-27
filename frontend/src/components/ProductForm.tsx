@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, adminRequest, adminUpload, fetchCategories, type Category } from "@/lib/api";
+import { assetUrl, adminRequest, adminUpload, fetchCategories, type Category } from "@/lib/api";
 import type { Product } from "@/lib/products";
 
 type ProductFormProps = {
@@ -173,7 +173,7 @@ function ImageUpload({
       </div>
       <div className="flex min-h-44 items-center justify-center overflow-hidden rounded-md border border-dashed border-neutral-300 bg-white">
         {url ? (
-          <img alt={`${label} preview`} className="max-h-56 w-full object-contain p-3" src={toImageSrc(url)} />
+          <img alt={`${label} preview`} className="max-h-56 w-full object-contain p-3" src={assetUrl(url)} />
         ) : (
           <span className="px-4 text-center text-sm font-bold text-neutral-400">No image uploaded</span>
         )}
@@ -190,11 +190,6 @@ function ImageUpload({
   );
 }
 
-function toImageSrc(url: string) {
-  if (!url) return "";
-  if (url.startsWith("http")) return url;
-  return `${API_URL}${url}`;
-}
 
 function Field({ name, label, value, type = "text" }: { name: string; label: string; value?: string | number; type?: string }) {
   return <label className="grid gap-2 text-sm font-black">{label}<input name={name} type={type} className="rounded-md border px-4 py-3 font-normal" defaultValue={value} /></label>;

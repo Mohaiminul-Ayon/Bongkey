@@ -241,4 +241,11 @@ export function toProduct(product: ApiProduct): Product {
   };
 }
 
+/** assetUrl resolves backend-served upload paths and keeps older absolute image URLs working. */
+export function assetUrl(url?: string) {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${API_URL}${url}`;
+}
+
 export { API_URL };

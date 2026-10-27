@@ -377,3 +377,11 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Failure flow:** Port আগে থেকেই ব্যস্ত হলে `ListenAndServe` সাথে সাথে error দেয় → `select` প্রথম case → `listen on :8080: ...` → `main` `log.Fatalf`।
 * **Goroutine-এর মালিকানা:** `runHTTP` goroutine-টির মালিক; buffered channel (size 1) তাই goroutine কখনো আটকে থাকে না; `Shutdown`-এর পর তার result পড়ে নিশ্চিত করা হয় যে সেটি শেষ হয়েছে।
 * **Test:** `TestRunHTTPDrainsInFlightRequestOnShutdown` — একটি request চলার সময় shutdown দিলে request 204 পায় আর `runHTTP` nil ফেরত দেয়। `go test -race` (UCRT64 GCC) পাস।
+
+### Fix 7 — Upload করা ছবির URL host ছাড়া (relative path)
+
+* **সমস্যা:** Upload শেষে server `http://<Host>/uploads/...` বানিয়ে দিত আর সেটাই product-এ সেভ হতো। Local-এ upload করলে DB-তে `localhost:8080` থেকে যেত, deploy-এর পর সব ছবি ভাঙত। Code `X-Forwarded-Proto` header-ও বিশ্বাস করত, যা PROXY-01 নীতির উল্টো।
+* **পরিবর্তন:** [`upload_handler.go`](../backend/internal/handlers/upload_handler.go) এখন শুধু `/uploads/<folder>/<file>` দেয়; `absoluteUploadURL` মুছে ফেলা হয়েছে। Frontend-এ তিনটি একই রকম `toImageSrc` ([`ProductForm.tsx`](../frontend/src/components/ProductForm.tsx), `ProductVisual.tsx`, `TryOnModal.tsx`) একটি `assetUrl` ([`api.ts`](../frontend/src/lib/api.ts)) দিয়ে বদলানো — এটা path-এর আগে `NEXT_PUBLIC_API_URL` বসায়, পুরনো absolute URL-ও চালিয়ে যায়।
+* **Success flow:** Admin ছবি বাছে → `adminUpload` → `POST /api/admin/uploads/product-image` → `CORS` → `AdminAuth` → `UploadHandler.ProductImage` → `uploadImage` (5MB limit, extension ও magic-byte check, random নাম) → 200 `{url: "/uploads/products/..."}` → form-এ সেভ → storefront `assetUrl` দিয়ে দেখায়।
+* **Failure flow:** `.png` নামে text file দিলে `http.DetectContentType` PNG চেনে না → 400; disk-এ কিছু লেখা হয় না।
+* **Test:** `TestProductImageUploadReturnsHostFreePath` — নকল Host ও `X-Forwarded-Proto` থাকলেও URL host-free, file disk-এ আছে; নকল image 400।

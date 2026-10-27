@@ -1,5 +1,5 @@
 import type { Product } from "@/lib/products";
-import { API_URL } from "@/lib/api";
+import { assetUrl } from "@/lib/api";
 
 type ProductVisualProps = {
   product: Product;
@@ -8,7 +8,7 @@ type ProductVisualProps = {
 
 /** ProductVisual shows a real catalog image or clearly marks the photo as unavailable. */
 export function ProductVisual({ product, compact = false }: ProductVisualProps) {
-  const imageSrc = toImageSrc(product.imageUrl);
+  const imageSrc = assetUrl(product.imageUrl);
 
   return (
     <div
@@ -23,9 +23,3 @@ export function ProductVisual({ product, compact = false }: ProductVisualProps) 
   );
 }
 
-/** toImageSrc resolves images served by the backend while preserving absolute URLs. */
-function toImageSrc(url?: string) {
-  if (!url) return "";
-  if (url.startsWith("http")) return url;
-  return `${API_URL}${url}`;
-}

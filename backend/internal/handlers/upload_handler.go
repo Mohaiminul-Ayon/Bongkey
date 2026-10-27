@@ -102,7 +102,8 @@ func (h UploadHandler) uploadImage(c *gin.Context, folder string) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"url": absoluteUploadURL(c, folder, filename)})
+	// A host-free path keeps stored product images valid after the API moves to another domain.
+	c.JSON(http.StatusOK, gin.H{"url": "/uploads/" + folder + "/" + filename})
 }
 
 func uniqueFilename(originalName string, extension string) string {
@@ -141,15 +142,4 @@ func safeFilename(value string) string {
 
 func isWebP(header []byte) bool {
 	return len(header) >= 12 && string(header[0:4]) == "RIFF" && string(header[8:12]) == "WEBP"
-}
-
-func absoluteUploadURL(c *gin.Context, folder string, filename string) string {
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	if forwardedProto := c.GetHeader("X-Forwarded-Proto"); forwardedProto != "" {
-		scheme = forwardedProto
-	}
-	return fmt.Sprintf("%s://%s/uploads/%s/%s", scheme, c.Request.Host, folder, filename)
 }

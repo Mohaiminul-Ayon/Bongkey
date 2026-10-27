@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
-import { API_URL } from "@/lib/api";
+import { assetUrl } from "@/lib/api";
 import type { Product } from "@/lib/products";
 
 type TryOnModalProps = {
@@ -29,7 +29,7 @@ export function TryOnModal({ product, onClose }: TryOnModalProps) {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [placement, setPlacement] = useState<Placement>(defaultPlacement);
-  const mockupSrc = toImageSrc(product.tryOnImageUrl);
+  const mockupSrc = assetUrl(product.tryOnImageUrl);
 
   useEffect(() => {
     return () => stream?.getTracks().forEach((track) => track.stop());
@@ -221,11 +221,6 @@ function GlassesOverlay({ placement, src }: { placement: Placement; src: string 
   );
 }
 
-function toImageSrc(url?: string) {
-  if (!url) return "";
-  if (url.startsWith("http")) return url;
-  return `${API_URL}${url}`;
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
