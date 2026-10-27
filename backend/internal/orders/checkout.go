@@ -36,17 +36,16 @@ type CheckoutItem struct {
 
 // CheckoutRequest contains the customer details and items needed to place a COD order.
 type CheckoutRequest struct {
-	IdempotencyKey      string
-	CustomerName        string
-	CustomerPhone       string
-	CustomerEmail       string
-	EmailProof          string
-	EmailVerified       bool
-	ShippingAddress     string
-	City                string
-	DeliveryNote        string
-	PrescriptionFileURL string
-	Items               []CheckoutItem
+	IdempotencyKey  string
+	CustomerName    string
+	CustomerPhone   string
+	CustomerEmail   string
+	EmailProof      string
+	EmailVerified   bool
+	ShippingAddress string
+	City            string
+	DeliveryNote    string
+	Items           []CheckoutItem
 }
 
 // CheckoutReceipt contains the accepted order totals and one-time guest token.
@@ -201,6 +200,7 @@ func ValidIdempotencyKey(key string) bool {
 
 // checkoutRequestHash fingerprints accepted business input while excluding the expiring email proof.
 func checkoutRequestHash(request CheckoutRequest) (string, error) {
+	// PrescriptionFileURL stays empty in the fingerprint so retries of orders accepted before it was removed still match.
 	payload := struct {
 		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
 		EmailVerified                                                                                        bool
@@ -208,7 +208,7 @@ func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	}{
 		CustomerName: request.CustomerName, CustomerPhone: request.CustomerPhone, CustomerEmail: request.CustomerEmail,
 		ShippingAddress: request.ShippingAddress, City: request.City, DeliveryNote: request.DeliveryNote,
-		PrescriptionFileURL: request.PrescriptionFileURL, EmailVerified: request.EmailVerified, Items: request.Items,
+		EmailVerified: request.EmailVerified, Items: request.Items,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

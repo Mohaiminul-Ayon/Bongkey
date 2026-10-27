@@ -78,9 +78,9 @@ func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutReq
 	}
 	number := fmt.Sprintf("ORD-%06d", id)
 	_, err := p.Tx.ExecContext(ctx, `
-		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, prescription_file_url, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, request.PrescriptionFileURL, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash)
+		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash)
 	return id, number, err
 }
 

@@ -11,15 +11,14 @@ import (
 )
 
 type orderRequest struct {
-	CustomerName        string             `json:"customer_name"`
-	CustomerPhone       string             `json:"customer_phone"`
-	CustomerEmail       string             `json:"customer_email"`
-	EmailProof          string             `json:"email_proof"`
-	ShippingAddress     string             `json:"shipping_address"`
-	City                string             `json:"city"`
-	DeliveryNote        string             `json:"delivery_note"`
-	PrescriptionFileURL string             `json:"prescription_file_url"`
-	Items               []orderItemRequest `json:"items"`
+	CustomerName    string             `json:"customer_name"`
+	CustomerPhone   string             `json:"customer_phone"`
+	CustomerEmail   string             `json:"customer_email"`
+	EmailProof      string             `json:"email_proof"`
+	ShippingAddress string             `json:"shipping_address"`
+	City            string             `json:"city"`
+	DeliveryNote    string             `json:"delivery_note"`
+	Items           []orderItemRequest `json:"items"`
 }
 
 type orderItemRequest struct {
@@ -64,7 +63,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		CustomerName:   req.CustomerName, CustomerPhone: req.CustomerPhone,
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
-		PrescriptionFileURL: req.PrescriptionFileURL, Items: items,
+		Items: items,
 	})
 	if err != nil {
 		switch {

@@ -385,3 +385,12 @@ orders.AccessService.Guest(ctx, id, token) ──> access.go:48
 * **Success flow:** Admin ছবি বাছে → `adminUpload` → `POST /api/admin/uploads/product-image` → `CORS` → `AdminAuth` → `UploadHandler.ProductImage` → `uploadImage` (5MB limit, extension ও magic-byte check, random নাম) → 200 `{url: "/uploads/products/..."}` → form-এ সেভ → storefront `assetUrl` দিয়ে দেখায়।
 * **Failure flow:** `.png` নামে text file দিলে `http.DetectContentType` PNG চেনে না → 400; disk-এ কিছু লেখা হয় না।
 * **Test:** `TestProductImageUploadReturnsHostFreePath` — নকল Host ও `X-Forwarded-Proto` থাকলেও URL host-free, file disk-এ আছে; নকল image 400।
+
+### Fix 8 — যাচাইহীন `prescription_file_url` সরানো
+
+* **সমস্যা:** Checkout request যেকোনো string `prescription_file_url` হিসেবে নিত আর order-এ সেভ করত। কোনো যাচাই নেই, কোথাও দেখানোও হতো না। পরে admin page-এ দেখালে বাইরের phishing link বা `javascript:` URL ঢুকে যেত।
+* **পরিবর্তন:** [`order_handler.go`](../backend/internal/handlers/order_handler.go), [`checkout.go`](../backend/internal/orders/checkout.go) আর [`checkout_repository.go`](../backend/internal/orders/checkout_repository.go) থেকে field সরানো। Gin JSON bind অজানা field উপেক্ষা করে, তাই পুরনো client পাঠালেও কিছু সেভ হয় না। DB column থাকছে (default `''`), কারণ column মুছে ফেলা destructive migration।
+* **Idempotency সতর্কতা:** `checkoutRequestHash` এ field-টি খালি রেখে দেওয়া হয়েছে, যাতে আগে accepted order-এর retry-র fingerprint একই থাকে; না হলে retry 409 পেত।
+* **Flow:** `POST /api/orders` → `CheckoutHandler.CreateOrder` (prescription field আর bind হয় না) → `CheckoutService.Place` → `InsertOrder` (column বাদ দিয়ে ১৫টি parameter) → 200।
+* **R1-এ সঠিক পথ:** Prescription private storage-এ upload, file type/size/signature check, প্রতি order authorization — তারপর আলাদা story।
+* **Test:** `TestCheckoutRequestHashMatchesPrePrescriptionRemoval` পুরনো fingerprint মেলায়; আসল PostgreSQL-এ `TestCheckoutOrderPostgres`, `TestConcurrentIdempotentCheckoutPostgres` সহ checkout integration test পাস।

@@ -2,6 +2,7 @@ package orders
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -279,5 +280,26 @@ func TestCheckoutRejectsUnpricedLensOption(t *testing.T) {
 	}))
 	if err != nil || tx.itemsSaved != 1 {
 		t.Fatalf("frame-only checkout failed: err=%v", err)
+	}
+}
+
+// TestCheckoutRequestHashMatchesPrePrescriptionRemoval keeps retries of already-accepted orders matching after the field removal.
+func TestCheckoutRequestHashMatchesPrePrescriptionRemoval(t *testing.T) {
+	request := CheckoutRequest{CustomerName: "QA", CustomerPhone: "000", CustomerEmail: "buyer@example.com", ShippingAddress: "Local", City: "Dhaka", EmailVerified: true, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	got, err := checkoutRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This literal is the previous fingerprint shape, which included an always-empty prescription field.
+	old, err := json.Marshal(struct {
+		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
+		EmailVerified                                                                                        bool
+		Items                                                                                                []CheckoutItem
+	}{"QA", "000", "buyer@example.com", "Local", "Dhaka", "", "", true, request.Items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != textHash(string(old)) {
+		t.Fatal("checkout fingerprint changed; existing idempotent retries would conflict")
 	}
 }
