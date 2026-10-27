@@ -62,6 +62,7 @@ export function ProductForm({ product }: ProductFormProps) {
     const body = {
       category_id: categoryId,
       name: formString(form, "name"),
+      sku: formString(form, "sku"),
       slug: formString(form, "slug"),
       description: formString(form, "description"),
       price: formNumber(form, "price"),
@@ -98,6 +99,7 @@ export function ProductForm({ product }: ProductFormProps) {
       {error ? <p className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="grid gap-4 md:grid-cols-2">
         <Field name="name" label="Product name" value={product?.name} />
+        <Field name="sku" label="SKU (optional for new product)" value={product?.sku} />
         <Field name="slug" label="Slug" value={product?.slug} />
         <Field name="price" label="Price" type="number" value={product?.price} />
         <Field name="old_price" label="Old price" type="number" value={product?.oldPrice ?? 0} />

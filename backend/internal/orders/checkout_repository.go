@@ -59,11 +59,12 @@ func (p postgresCheckoutTx) FindIdempotentOrder(ctx context.Context, keyHash str
 func (p postgresCheckoutTx) ReserveProduct(ctx context.Context, id, quantity int) (ReservedProduct, error) {
 	var product ReservedProduct
 	err := p.Tx.QueryRowContext(ctx, `
-		UPDATE products
+		UPDATE products AS p
 		SET stock_quantity = stock_quantity - $2, updated_at = NOW()
-		WHERE id = $1 AND is_active = true AND stock_quantity >= $2
-		RETURNING name, price
-	`, id, quantity).Scan(&product.Name, &product.Price)
+		WHERE p.id = $1 AND p.is_active = true AND p.stock_quantity >= $2
+			AND (p.parent_product_id IS NULL OR EXISTS (SELECT 1 FROM products root WHERE root.id = p.parent_product_id AND root.is_active = true))
+		RETURNING p.name, p.price, p.sku
+	`, id, quantity).Scan(&product.Name, &product.Price, &product.SKU)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ReservedProduct{}, ErrUnavailable
 	}
@@ -87,9 +88,9 @@ func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutReq
 // InsertItem snapshots the accepted product name, price, lens choice, and quantity.
 func (p postgresCheckoutTx) InsertItem(ctx context.Context, orderID int, item CheckoutItem, product ReservedProduct, lineTotal int) error {
 	_, err := p.Tx.ExecContext(ctx, `
-		INSERT INTO order_items (order_id, product_id, product_name, lens_option, quantity, unit_price, total_price)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-	`, orderID, item.ProductID, product.Name, item.LensOption, item.Quantity, product.Price, lineTotal)
+		INSERT INTO order_items (order_id, product_id, product_name, sku, lens_option, quantity, unit_price, total_price)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, orderID, item.ProductID, product.Name, product.SKU, item.LensOption, item.Quantity, product.Price, lineTotal)
 	return err
 }
 

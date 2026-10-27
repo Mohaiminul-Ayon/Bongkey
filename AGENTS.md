@@ -43,6 +43,7 @@
 - When relevant, explain that route registration stores a handler for later HTTP requests; registering a handler is not the same as executing it at startup. Explain Gin's Next/Abort/return behavior using the actual middleware chain.
 - Keep call flow readable in short conversational Bangla with real code identifiers; use a compact arrow trace or a small Mermaid diagram only when helpful. Do not flood the owner with a full application graph.
 - Keep source comments focused on purpose and non-obvious decisions. Do not put every caller name in source comments: caller lists become stale. Reuse existing documentation for stable flow notes; do not create a separate MD file per function/request.
+- After each implemented story or substantive fix, update its entry in `docs/Story_Workflows.md` with the actual success/failure flow, source links, and verification status. Keep its backend-from-scratch build-order section accurate when startup/wiring changes. Keep one ongoing document rather than separate files or repeated full explanations; keep `PRD.md` for scope and status.
 - During feature handoff, give one safe request/example to trace and ask the owner to identify a meaningful step when helpful. Never claim the owner understands until they demonstrate it; respect guided execution rules for infrastructure tasks.
 
 ## Mandatory useful comments

@@ -31,3 +31,23 @@ func TestProductServiceRejectsInvalidEdits(t *testing.T) {
 		})
 	}
 }
+
+// TestCreateVariantRejectsInvalidOptions keeps malformed SKUs and impossible stock out of persistence.
+func TestCreateVariantRejectsInvalidOptions(t *testing.T) {
+	service := ProductService{Repository: PostgresProductRepository{}}
+	for _, input := range []VariantInput{
+		{SKU: "", Color: "Black", Size: "M", Price: 100, StockQuantity: 1},
+		{SKU: "bad space", Color: "Black", Size: "M", Price: 100, StockQuantity: 1},
+		{SKU: "BK-BLK-M", Color: "", Size: "M", Price: 100, StockQuantity: 1},
+		{SKU: "BK-BLK-M", Color: "Black", Size: "M", Price: 0, StockQuantity: 1},
+		{SKU: "BK-BLK-M", Color: "Black", Size: "M", Price: 100, StockQuantity: -1},
+		{SKU: "BK-BLK-M", Color: "Black", Size: "M", Price: 1 << 31, StockQuantity: 1},
+	} {
+		if _, err := service.CreateVariant(context.Background(), 1, input); !errors.Is(err, ErrInvalidVariant) {
+			t.Fatalf("CreateVariant(%+v) error = %v", input, err)
+		}
+	}
+	if _, err := service.CreateVariant(context.Background(), 1, VariantInput{SKU: "BK-BLK-M", Color: "Black", Size: "M", Price: 100, StockQuantity: 1}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("valid variant error = %v; want repository call", err)
+	}
+}

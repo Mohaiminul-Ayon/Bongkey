@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Product } from "@/lib/products";
+import { fetchDeliverySettings, type DeliverySettings } from "@/lib/api";
 
 export type CartItem = {
   product: Product;
@@ -13,8 +14,8 @@ type CartContextValue = {
   items: CartItem[];
   count: number;
   subtotal: number;
-  deliveryFee: number;
-  total: number;
+  deliverySettings: DeliverySettings | null;
+  refreshDeliverySettings: () => Promise<void>;
   addItem: (product: Product, lensOption?: string) => void;
   updateQuantity: (slug: string, lensOption: string, quantity: number) => void;
   removeItem: (slug: string, lensOption: string) => void;
@@ -24,8 +25,22 @@ type CartContextValue = {
 const CartContext = createContext<CartContextValue | null>(null);
 const STORAGE_KEY = "bongkey_cart";
 
+// CartProvider keeps cart items and current delivery settings available to shopping pages.
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [deliverySettings, setDeliverySettings] = useState<DeliverySettings | null>(null);
+
+  // refreshDeliverySettings invalidates estimates if either server price cannot be read.
+  const refreshDeliverySettings = useCallback(async () => {
+    try {
+      const settings = await fetchDeliverySettings();
+      if (![settings.delivery_fee, settings.outside_dhaka_fee].every((fee) => Number.isSafeInteger(fee) && fee >= 0) || settings.districts.length !== 64) throw new Error("Invalid delivery settings");
+      setDeliverySettings(settings);
+    } catch (error) {
+      setDeliverySettings(null);
+      throw error;
+    }
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -36,15 +51,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   }, [items]);
 
+  useEffect(() => {
+    void refreshDeliverySettings().catch(() => undefined);
+  }, [refreshDeliverySettings]);
+
   const value = useMemo<CartContextValue>(() => {
     const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-    const deliveryFee = items.length > 0 ? 80 : 0;
     return {
       items,
       count: items.reduce((sum, item) => sum + item.quantity, 0),
       subtotal,
-      deliveryFee,
-      total: subtotal + deliveryFee,
+      deliverySettings,
+      refreshDeliverySettings,
       addItem(product, lensOption = "Frame only") {
         setItems((current) => {
           const existing = current.find((item) => item.product.slug === product.slug && item.lensOption === lensOption);
@@ -72,7 +90,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setItems([]);
       },
     };
-  }, [items]);
+  }, [items, deliverySettings, refreshDeliverySettings]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

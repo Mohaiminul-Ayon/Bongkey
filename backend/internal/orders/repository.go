@@ -50,14 +50,17 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 	err := r.DB.QueryRowContext(ctx, `
 		SELECT o.id, o.order_number, o.customer_name, o.customer_phone, o.shipping_address,
 			o.city, o.subtotal, o.delivery_fee, o.total, o.order_status,
-			COALESCE(i.invoice_number, ''), o.guest_token_hash, o.customer_email, o.email_verified
+			COALESCE(i.invoice_number, ''), o.guest_token_hash, o.customer_email, o.email_verified,
+			o.delivery_note, o.payment_method, o.payment_status, o.created_at,
+			COALESCE(i.issued_at::text, '')
 		FROM orders o LEFT JOIN invoices i ON i.order_id = o.id
 		WHERE o.id::text = $1 OR o.order_number = $1
 	`, id).Scan(
 		&record.ID, &record.OrderNumber, &record.CustomerName, &record.CustomerPhone,
 		&record.ShippingAddress, &record.City, &record.Subtotal, &record.DeliveryFee,
 		&record.Total, &record.Status, &record.InvoiceNumber, &record.GuestTokenHash,
-		&record.CustomerEmail, &record.EmailVerified,
+		&record.CustomerEmail, &record.EmailVerified, &record.DeliveryNote,
+		&record.PaymentMethod, &record.PaymentStatus, &record.CreatedAt, &record.InvoiceIssuedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound
@@ -66,4 +69,25 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 		return Record{}, err
 	}
 	return record, nil
+}
+
+// Items loads immutable line snapshots for a previously authorized admin order.
+func (r PostgresReader) Items(ctx context.Context, orderID int) ([]Item, error) {
+	rows, err := r.DB.QueryContext(ctx, `
+		SELECT product_name, sku, lens_option, quantity, unit_price, total_price
+		FROM order_items WHERE order_id = $1 ORDER BY id
+	`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Item, 0)
+	for rows.Next() {
+		var item Item
+		if err := rows.Scan(&item.ProductName, &item.SKU, &item.LensOption, &item.Quantity, &item.UnitPrice, &item.TotalPrice); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

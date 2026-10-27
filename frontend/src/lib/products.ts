@@ -1,5 +1,8 @@
 export type Product = {
   id?: number;
+  parentProductId?: number;
+  sku?: string;
+  variants?: Product[];
   categoryId?: number;
   slug: string;
   name: string;

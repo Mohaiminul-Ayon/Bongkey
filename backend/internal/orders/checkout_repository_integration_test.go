@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"bongkey/backend/internal/config"
+	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/security"
 	"github.com/lib/pq"
 )
@@ -146,10 +147,15 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret}
+	settings := delivery.Service{Store: delivery.PostgresRepository{DB: db}}
+	fee, err := settings.DeliveryFee(ctx, "Dhaka")
+	if err != nil {
+		t.Fatal("could not load the saved local delivery setting")
+	}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings}
 	request := CheckoutRequest{
 		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
-		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof,
+		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
 	}
 	receipt, err := service.Place(ctx, request)
@@ -164,6 +170,7 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 		}
 	})
 	var remaining, itemCount, invoiceCount int
+	var orderFee, orderTotal, invoiceFee, invoiceTotal int
 	var tokenHash string
 	var emailVerified bool
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil {
@@ -178,9 +185,20 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoices WHERE order_id = $1`, receipt.ID).Scan(&invoiceCount); err != nil {
 		t.Fatal("could not read local invoice")
 	}
-	if remaining != 1 || itemCount != 1 || invoiceCount != 1 || receipt.Total != 180 || !security.MatchesOrderToken(receipt.GuestAccessToken, tokenHash) || !emailVerified {
+	if err := db.QueryRowContext(ctx, `SELECT o.delivery_fee, o.total, i.delivery_fee, i.total FROM orders o JOIN invoices i ON i.order_id = o.id WHERE o.id = $1`, receipt.ID).Scan(&orderFee, &orderTotal, &invoiceFee, &invoiceTotal); err != nil {
+		t.Fatal("could not read accepted delivery snapshots")
+	}
+	if remaining != 1 || itemCount != 1 || invoiceCount != 1 || receipt.Total != 100+fee || orderFee != fee || invoiceFee != fee || orderTotal != receipt.Total || invoiceTotal != receipt.Total || !security.MatchesOrderToken(receipt.GuestAccessToken, tokenHash) || !emailVerified {
 		t.Fatal("accepted checkout did not persist stock, order, invoice, and private access together")
 	}
+	changedFee := fee + 1
+	request.IdempotencyKey = "checkout-postgres-stale-delivery"
+	request.ExpectedDeliveryFee = &changedFee
+	if _, err := service.Place(ctx, request); !errors.Is(err, ErrDeliveryFeeChanged) {
+		t.Fatal("checkout did not reject a stale delivery estimate")
+	}
+	request.IdempotencyKey = "checkout-postgres-0001"
+	request.ExpectedDeliveryFee = &fee
 	retry, err := service.Place(ctx, request)
 	if err != nil || retry != receipt {
 		t.Fatalf("identical retry did not return the original receipt: retry=%+v err=%v", retry, err)
@@ -200,6 +218,17 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if _, err := access.Guest(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
 		t.Fatal("another email accessed the invoice summary")
 	}
+	guestInvoice, err := access.GuestInvoice(ctx, orderID, proof)
+	if err != nil || guestInvoice.InvoiceNumber != receipt.InvoiceNumber || guestInvoice.InvoiceIssuedAt == "" || len(guestInvoice.Items) != 1 || guestInvoice.Items[0].UnitPrice != 100 {
+		t.Fatalf("verified guest could not read saved invoice lines: %+v, %v", guestInvoice, err)
+	}
+	if _, err := access.GuestInvoice(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
+		t.Fatal("another email accessed saved invoice lines")
+	}
+	adminDetail, err := access.Admin(ctx, orderID)
+	if err != nil || len(adminDetail.Items) != 1 || adminDetail.Items[0].ProductName != "QA stock fixture" || adminDetail.Items[0].UnitPrice != 100 {
+		t.Fatalf("admin did not receive saved item snapshots: detail=%+v err=%v", adminDetail, err)
+	}
 	request.Items[0].Quantity = 2
 	request.IdempotencyKey = "checkout-postgres-0002"
 	if _, err := service.Place(ctx, request); !errors.Is(err, ErrUnavailable) {
@@ -207,6 +236,33 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	}
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil || remaining != 1 {
 		t.Fatal("rejected checkout changed stock")
+	}
+	outsideFee, err := settings.DeliveryFee(ctx, "Chattogram")
+	if err != nil {
+		t.Fatal("could not load outside-Dhaka fee")
+	}
+	request.City = "Chattogram"
+	request.IdempotencyKey = "checkout-postgres-outside-dhaka"
+	request.Items[0].Quantity = 1
+	wrongOutsideFee := outsideFee + 1
+	request.ExpectedDeliveryFee = &wrongOutsideFee
+	if _, err := service.Place(ctx, request); !errors.Is(err, ErrDeliveryFeeChanged) {
+		t.Fatal("outside-Dhaka checkout accepted a stale fee")
+	}
+	request.ExpectedDeliveryFee = &outsideFee
+	outsideReceipt, err := service.Place(ctx, request)
+	if err != nil || outsideReceipt.DeliveryFee != outsideFee || outsideReceipt.Total != 100+outsideFee {
+		t.Fatalf("outside-Dhaka checkout receipt=%+v err=%v", outsideReceipt, err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		if _, err := db.ExecContext(cleanupCtx, `DELETE FROM orders WHERE id = $1`, outsideReceipt.ID); err != nil {
+			t.Error("could not remove outside-Dhaka checkout fixture")
+		}
+	})
+	if err := db.QueryRowContext(ctx, `SELECT o.delivery_fee, i.delivery_fee FROM orders o JOIN invoices i ON i.order_id = o.id WHERE o.id = $1`, outsideReceipt.ID).Scan(&orderFee, &invoiceFee); err != nil || orderFee != outsideFee || invoiceFee != outsideFee {
+		t.Fatalf("outside-Dhaka order/invoice fee=%d/%d err=%v", orderFee, invoiceFee, err)
 	}
 }
 
@@ -220,10 +276,11 @@ func TestConcurrentIdempotentCheckoutPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}
+	fee := 80
 	request := CheckoutRequest{
 		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
-		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof,
+		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: productID, Quantity: 1}},
 	}
 	t.Cleanup(func() {

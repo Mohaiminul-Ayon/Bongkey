@@ -19,6 +19,14 @@ func (r memoryReader) Find(_ context.Context, id string) (Record, error) {
 	return record, nil
 }
 
+// Items returns a saved line only for the synthetic legacy order.
+func (r memoryReader) Items(_ context.Context, id int) ([]Item, error) {
+	if id == 3 {
+		return []Item{{ProductName: "Saved frame", Quantity: 1, UnitPrice: 100, TotalPrice: 100}}, nil
+	}
+	return []Item{}, nil
+}
+
 // TestGuestOrderAccess denies a different guest and a legacy order without a token.
 func TestGuestOrderAccess(t *testing.T) {
 	firstToken, firstHash, err := security.NewOrderToken()
@@ -47,7 +55,7 @@ func TestGuestOrderAccess(t *testing.T) {
 		}
 	}
 	legacy, err := service.Admin(context.Background(), "3")
-	if err != nil || legacy.CustomerPhone != "legacy-phone" {
+	if err != nil || legacy.CustomerPhone != "legacy-phone" || len(legacy.Items) != 1 {
 		t.Fatalf("admin should still access a legacy order: %+v, %v", legacy, err)
 	}
 }

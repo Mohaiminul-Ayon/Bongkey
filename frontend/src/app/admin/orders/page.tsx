@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { adminRequest, updateAdminOrderStatus } from "@/lib/api";
@@ -80,6 +81,7 @@ export default function AdminOrdersPage() {
                       <strong>{order.order_number}</strong>
                       <p className="mt-1 text-sm text-neutral-600">{order.customer_name} · {order.customer_phone} · {order.city}</p>
                       <p className="mt-1 font-bold">{formatPrice(order.total)}</p>
+                      <Link className="mt-2 inline-block text-sm font-black text-[#173c34] underline" href={`/admin/orders/${order.id}`}>View details</Link>
                     </div>
                     <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black uppercase tracking-wide">
                       {statusLabel[order.order_status] ?? order.order_status}

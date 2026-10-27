@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/security"
 )
 
@@ -22,6 +23,10 @@ var (
 	ErrUnavailable = errors.New("product unavailable")
 	// ErrIdempotencyConflict means one retry key was reused for different order data.
 	ErrIdempotencyConflict = errors.New("idempotency key reused with different checkout")
+	// ErrDeliveryUnavailable means the configured delivery charge could not be read safely.
+	ErrDeliveryUnavailable = errors.New("delivery fee unavailable")
+	// ErrDeliveryFeeChanged requires customer consent to a changed delivery charge.
+	ErrDeliveryFeeChanged = errors.New("delivery fee changed")
 )
 
 // CheckoutItem is one requested product and lens choice.
@@ -42,6 +47,7 @@ type CheckoutRequest struct {
 	ShippingAddress     string
 	City                string
 	DeliveryNote        string
+	ExpectedDeliveryFee *int
 	PrescriptionFileURL string
 	Items               []CheckoutItem
 }
@@ -61,6 +67,7 @@ type CheckoutReceipt struct {
 type ReservedProduct struct {
 	Name  string
 	Price int
+	SKU   string
 }
 
 // CheckoutTx persists all pieces of an order inside one transaction.
@@ -77,11 +84,17 @@ type CheckoutStore interface {
 	InTransaction(context.Context, func(CheckoutTx) error) error
 }
 
+// DeliveryFeeProvider supplies the server-authoritative delivery charge.
+type DeliveryFeeProvider interface {
+	DeliveryFee(context.Context, string) (int, error)
+}
+
 // CheckoutService enforces verified email, retry, stock, and total rules.
 type CheckoutService struct {
-	Store            CheckoutStore
-	EmailProofSecret string
-	OrderTokenSecret string
+	Store               CheckoutStore
+	EmailProofSecret    string
+	OrderTokenSecret    string
+	DeliveryFeeProvider DeliveryFeeProvider
 }
 
 // Place reserves products in a stable order and commits the order and invoice together.
@@ -126,6 +139,18 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			receipt = existing
 			return nil
 		}
+		// New orders stay frame-only until lens pricing and private prescriptions are implemented.
+		if request.PrescriptionFileURL != "" {
+			return ErrInvalidCheckout
+		}
+		for _, item := range request.Items {
+			if item.LensOption != "" && item.LensOption != "Frame only" {
+				return ErrInvalidCheckout
+			}
+		}
+		if request.ExpectedDeliveryFee == nil || *request.ExpectedDeliveryFee < 0 {
+			return ErrInvalidCheckout
+		}
 		// Existing guest orders may retry their accepted key; new orders require verified email.
 		if !request.EmailVerified {
 			return ErrInvalidCheckout
@@ -133,6 +158,19 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		verifiedEmail, err := security.VerifyEmailProof(s.EmailProofSecret, request.EmailProof)
 		if err != nil || verifiedEmail != request.CustomerEmail {
 			return ErrInvalidCheckout
+		}
+		if s.DeliveryFeeProvider == nil {
+			return ErrDeliveryUnavailable
+		}
+		deliveryFee, err := s.DeliveryFeeProvider.DeliveryFee(ctx, request.City)
+		if errors.Is(err, delivery.ErrInvalidDistrict) {
+			return ErrInvalidCheckout
+		}
+		if err != nil || deliveryFee < 0 || deliveryFee > maxOrderAmount {
+			return ErrDeliveryUnavailable
+		}
+		if deliveryFee != *request.ExpectedDeliveryFee {
+			return ErrDeliveryFeeChanged
 		}
 
 		products := make(map[int]ReservedProduct, len(productIDs))
@@ -147,11 +185,10 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			products[id] = product
 		}
 
-		const deliveryFee = 80
 		subtotal := 0
 		for _, item := range request.Items {
 			lineTotal := int64(products[item.ProductID].Price) * int64(item.Quantity)
-			if lineTotal > maxOrderAmount-deliveryFee-int64(subtotal) {
+			if lineTotal > int64(maxOrderAmount)-int64(deliveryFee)-int64(subtotal) {
 				return ErrInvalidCheckout
 			}
 			subtotal += int(lineTotal)
@@ -196,7 +233,7 @@ func ValidIdempotencyKey(key string) bool {
 	return true
 }
 
-// checkoutRequestHash fingerprints accepted business input while excluding the expiring email proof.
+// checkoutRequestHash excludes proof and expected fee so accepted retries retain the original receipt after either changes.
 func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	payload := struct {
 		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
