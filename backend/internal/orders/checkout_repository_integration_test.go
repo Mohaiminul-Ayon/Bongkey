@@ -206,6 +206,14 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil || remaining != 1 {
 		t.Fatal("identical retry changed stock")
 	}
+	// A later admin fee change applies to new orders only; the accepted replay keeps its saved snapshot.
+	changedService := service
+	changedService.DeliveryFeeProvider = fixedDeliveryFee(fee + 50)
+	request.ExpectedDeliveryFee = &changedFee
+	if replay, err := changedService.Place(ctx, request); err != nil || replay != receipt {
+		t.Fatalf("replay after fee change altered the order: replay=%+v err=%v", replay, err)
+	}
+	request.ExpectedDeliveryFee = &fee
 	access := AccessService{Reader: PostgresReader{DB: db}, EmailProofSecret: emailSecret}
 	orderID := fmt.Sprint(receipt.ID)
 	order, err := access.GuestInvoice(ctx, orderID, proof)
