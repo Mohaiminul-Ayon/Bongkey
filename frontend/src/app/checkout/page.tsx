@@ -3,12 +3,22 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
-import { createOrder, fetchProducts, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
-import { useCart } from "@/lib/cart";
-import { formatPrice } from "@/lib/products";
+import { createOrder, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
+import { useCart, type CartItem } from "@/lib/cart";
+import { formatPrice, type Product } from "@/lib/products";
 
 const checkoutAttemptStorageKey = "bongkey_checkout_attempt";
 let volatileCheckoutAttempt: { key: string; signature: string } | null = null;
+
+/** fetchCartVariants reads live rows for variant cart lines, which the root-only catalog list omits; a missing variant counts as removed. */
+async function fetchCartVariants(items: CartItem[]) {
+  const found = await Promise.all(items.filter((item) => item.product.parentProductId).map((item) =>
+    fetchProduct(item.product.slug).catch((error: unknown) => {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    })));
+  return found.filter((product): product is Product => product !== null);
+}
 
 /** checkoutIdempotencyKey reuses a pending key only while the business payload is unchanged. */
 function checkoutIdempotencyKey(payload: OrderPayload) {
@@ -65,8 +75,8 @@ export default function CheckoutPage() {
     setPriceCheck("checking");
     try {
       // Prices and delivery charges are confirmed together so the summary matches what the server will accept.
-      const [products] = await Promise.all([fetchProducts(), refreshDeliverySettings()]);
-      setPriceChanges(refreshProducts(products));
+      const [products, variants] = await Promise.all([fetchProducts(), fetchCartVariants(items), refreshDeliverySettings()]);
+      setPriceChanges(refreshProducts([...products, ...variants]));
       setPriceCheck("ready");
     } catch {
       setPriceCheck("failed");

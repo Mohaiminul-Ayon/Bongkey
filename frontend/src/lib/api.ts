@@ -96,7 +96,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error || "Request failed");
+    // status lets callers treat a missing resource differently from an outage.
+    throw Object.assign(new Error(data.error || "Request failed"), { status: response.status });
   }
   return data as T;
 }
