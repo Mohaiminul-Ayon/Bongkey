@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, adminRequest, adminUpload, fetchCategories, type Category } from "@/lib/api";
+import { assetUrl, adminRequest, adminUpload, fetchCategories, type Category } from "@/lib/api";
 import type { Product } from "@/lib/products";
 
 type ProductFormProps = {
@@ -62,6 +62,7 @@ export function ProductForm({ product }: ProductFormProps) {
     const body = {
       category_id: categoryId,
       name: formString(form, "name"),
+      sku: formString(form, "sku"),
       slug: formString(form, "slug"),
       description: formString(form, "description"),
       price: formNumber(form, "price"),
@@ -98,6 +99,7 @@ export function ProductForm({ product }: ProductFormProps) {
       {error ? <p className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
       <div className="grid gap-4 md:grid-cols-2">
         <Field name="name" label="Product name" value={product?.name} />
+        <Field name="sku" label="SKU (optional for new product)" value={product?.sku} />
         <Field name="slug" label="Slug" value={product?.slug} />
         <Field name="price" label="Price" type="number" value={product?.price} />
         <Field name="old_price" label="Old price" type="number" value={product?.oldPrice ?? 0} />
@@ -173,7 +175,7 @@ function ImageUpload({
       </div>
       <div className="flex min-h-44 items-center justify-center overflow-hidden rounded-md border border-dashed border-neutral-300 bg-white">
         {url ? (
-          <img alt={`${label} preview`} className="max-h-56 w-full object-contain p-3" src={toImageSrc(url)} />
+          <img alt={`${label} preview`} className="max-h-56 w-full object-contain p-3" src={assetUrl(url)} />
         ) : (
           <span className="px-4 text-center text-sm font-bold text-neutral-400">No image uploaded</span>
         )}
@@ -190,11 +192,6 @@ function ImageUpload({
   );
 }
 
-function toImageSrc(url: string) {
-  if (!url) return "";
-  if (url.startsWith("http")) return url;
-  return `${API_URL}${url}`;
-}
 
 function Field({ name, label, value, type = "text" }: { name: string; label: string; value?: string | number; type?: string }) {
   return <label className="grid gap-2 text-sm font-black">{label}<input name={name} type={type} className="rounded-md border px-4 py-3 font-normal" defaultValue={value} /></label>;

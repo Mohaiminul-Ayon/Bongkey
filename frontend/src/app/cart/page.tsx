@@ -7,14 +7,15 @@ import { useCart } from "@/lib/cart";
 import { formatPrice } from "@/lib/products";
 
 export default function CartPage() {
-  const { items, subtotal, deliveryFee, total, updateQuantity, removeItem } = useCart();
+  const { items, subtotal, deliverySettings, updateQuantity, removeItem } = useCart();
+  const hasUnsupportedLens = items.some((item) => item.lensOption !== "Frame only");
 
   return (
     <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
         <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Cart</p>
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Your selected frames</h1>
-        <p className="mt-3 text-neutral-600">Review quantity, delivery charge, and Cash on Delivery total.</p>
+        <p className="mt-3 text-neutral-600">Review quantity. Delivery and final total depend on your district at checkout.</p>
       </div>
 
       {items.length === 0 ? (
@@ -51,11 +52,11 @@ export default function CartPage() {
             <h2 className="text-xl font-black">Order summary</h2>
             <div className="mt-5 grid gap-3 text-sm">
               <div className="flex justify-between"><span className="text-neutral-600">Subtotal</span><span className="font-black">{formatPrice(subtotal)}</span></div>
-              <div className="flex justify-between"><span className="text-neutral-600">Delivery charge</span><span className="font-black">{formatPrice(deliveryFee)}</span></div>
+              <div className="flex justify-between"><span className="text-neutral-600">Delivery charge</span><span className="font-black">{deliverySettings ? `Dhaka ${formatPrice(deliverySettings.delivery_fee)} · Outside ${formatPrice(deliverySettings.outside_dhaka_fee)}` : "Unavailable — reload to retry"}</span></div>
               <div className="border-t border-black/10 pt-3" />
-              <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">{formatPrice(total)}</span></div>
+              <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">Calculated at checkout</span></div>
             </div>
-            <Button className="mt-6 w-full" href="/checkout">Proceed to Checkout</Button>
+            {hasUnsupportedLens ? <p role="alert" className="mt-5 rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Lens packages are not available yet. Remove those items and add the frame-only option.</p> : <Button className="mt-6 w-full" href="/checkout">Proceed to Checkout</Button>}
             <p className="mt-4 rounded-md bg-[#f0f7f4] p-4 text-sm font-semibold leading-6 text-[#173c34]">Pay in cash when your order arrives. Your invoice will be available after confirmation.</p>
           </aside>
         </div>

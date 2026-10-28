@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { adminRequest, updateAdminOrderStatus } from "@/lib/api";
@@ -15,6 +16,9 @@ type OrderRow = {
   total: number;
   order_status: string;
 };
+
+// orderPageSize matches the backend AdminOrderPageSize so a full page means older orders may exist.
+const orderPageSize = 50;
 
 const nextStatuses: Record<string, string[]> = {
   pending: ["confirmed", "cancelled"],
@@ -38,12 +42,25 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [busyOrder, setBusyOrder] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+
+  // loadOrders fetches the newest page, or the page older than the given order ID.
+  async function loadOrders(beforeID?: number) {
+    setLoading(true);
+    setError("");
+    try {
+      const page = await adminRequest<OrderRow[]>(beforeID ? `/api/admin/orders?before=${beforeID}` : "/api/admin/orders");
+      setOrders((current) => (beforeID ? [...current, ...page] : page));
+      setHasMore(page.length === orderPageSize);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load orders.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    adminRequest<OrderRow[]>("/api/admin/orders")
-      .then(setOrders)
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load orders."))
-      .finally(() => setLoading(false));
+    void loadOrders();
   }, []);
 
   // changeStatus updates only the row accepted by the backend state machine.
@@ -80,6 +97,7 @@ export default function AdminOrdersPage() {
                       <strong>{order.order_number}</strong>
                       <p className="mt-1 text-sm text-neutral-600">{order.customer_name} · {order.customer_phone} · {order.city}</p>
                       <p className="mt-1 font-bold">{formatPrice(order.total)}</p>
+                      <Link className="mt-2 inline-block text-sm font-black text-[#173c34] underline" href={`/admin/orders/${order.id}`}>View details</Link>
                     </div>
                     <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black uppercase tracking-wide">
                       {statusLabel[order.order_status] ?? order.order_status}
@@ -103,6 +121,11 @@ export default function AdminOrdersPage() {
               );
             })}
           </div>
+          {hasMore ? (
+            <button type="button" disabled={loading} onClick={() => void loadOrders(orders[orders.length - 1]?.id)} className="mt-4 rounded-md border border-neutral-300 px-4 py-2 text-sm font-bold disabled:opacity-50">
+              {loading ? "Loading..." : "Load older orders"}
+            </button>
+          ) : null}
         </div>
       </section>
     </AdminGuard>

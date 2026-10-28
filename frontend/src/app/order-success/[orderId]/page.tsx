@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
-import { fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
+import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
 type Order = {
@@ -29,6 +29,20 @@ export default function OrderSuccessPage() {
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [accessToken, setAccessToken] = useState("");
+
+  /** saveInvoice downloads the authorized PDF without navigating to a token URL. */
+  async function saveInvoice() {
+    setBusy(true);
+    setError("");
+    try {
+      await downloadInvoice(params.orderId, accessToken);
+    } catch {
+      setError("Could not download invoice. Please verify the order email again.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   /** sendRecoveryCode starts a fresh email check without exposing the order. */
   async function sendRecoveryCode() {
@@ -51,6 +65,7 @@ export default function OrderSuccessPage() {
     try {
       const { email_proof } = await verifyEmailCode(email.trim(), code.trim());
       setOrder(await fetchOrder(params.orderId, email_proof));
+      setAccessToken(email_proof);
     } catch {
       setError("Email verification failed or this email does not belong to this order.");
     } finally {
@@ -71,6 +86,7 @@ export default function OrderSuccessPage() {
       setError("Order access is unavailable in this browser session. Please contact support.");
       return;
     }
+    setAccessToken(token);
     fetchOrder(params.orderId, token)
       .then(setOrder)
       .catch(() => setError("Could not load this order. Please contact support if the problem continues."));
@@ -96,6 +112,8 @@ export default function OrderSuccessPage() {
               <div className="mt-2 flex justify-between text-xl"><span className="font-black">Total</span><strong>{formatPrice(order.total)}</strong></div>
             </div>
             <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p>
+            <button type="button" disabled={busy || !accessToken} onClick={saveInvoice} className="site-button button-primary w-fit disabled:opacity-50">Download invoice PDF</button>
+            {error ? <p role="alert" className="text-red-700">{error}</p> : null}
           </div>
         ) : error || codeSent ? (
           <div className="mt-5 space-y-3">

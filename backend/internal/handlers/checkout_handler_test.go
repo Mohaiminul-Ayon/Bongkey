@@ -42,7 +42,7 @@ func TestCheckoutHTTPRejectsBadQuantityAndStock(t *testing.T) {
 		{"out of stock", "1", "checkout-handler-stock-0001", http.StatusConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := `{"customer_name":"QA","customer_phone":"000","customer_email":"buyer@example.com","email_proof":"` + proof + `","shipping_address":"Local","city":"Dhaka","items":[{"product_id":1,"quantity":` + tc.quantity + `}]}`
+			body := `{"customer_name":"QA","customer_phone":"000","customer_email":"buyer@example.com","email_proof":"` + proof + `","shipping_address":"Local","city":"Dhaka","expected_delivery_fee":80,"items":[{"product_id":1,"quantity":` + tc.quantity + `}]}`
 			request := httptest.NewRequest(http.MethodPost, "/api/orders", strings.NewReader(body))
 			request.Header.Set("Content-Type", "application/json")
 			if tc.key != "" {

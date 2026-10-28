@@ -45,6 +45,15 @@ func (p postgresFulfillmentTx) LockOrder(ctx context.Context, orderID int) (stri
 
 // RestoreStock returns each surviving product's aggregated order quantity once inside the locked transaction.
 func (p postgresFulfillmentTx) RestoreStock(ctx context.Context, orderID int) error {
+	// Lock product rows in ascending ID order, the same order checkout reserves them, so a cancel
+	// racing a checkout of the same products waits instead of deadlocking.
+	if _, err := p.Tx.ExecContext(ctx, `
+		SELECT id FROM products
+		WHERE id IN (SELECT product_id FROM order_items WHERE order_id = $1 AND product_id IS NOT NULL)
+		ORDER BY id FOR UPDATE
+	`, orderID); err != nil {
+		return err
+	}
 	_, err := p.Tx.ExecContext(ctx, `
 		WITH restored AS (
 			SELECT product_id, SUM(quantity)::INTEGER AS quantity

@@ -8,7 +8,7 @@ import { formatPrice, type Product } from "@/lib/products";
 
 type ProductCardProps = { product: Product };
 
-/** ProductCard shows a catalog item and adds its current server-priced variant to the bag. */
+/** ProductCard offers direct cart entry for stocked base SKUs and opens options otherwise. */
 export function ProductCard({ product }: ProductCardProps) {
   const { addItem } = useCart();
 
@@ -25,7 +25,7 @@ export function ProductCard({ product }: ProductCardProps) {
         <p className="product-card-detail">{product.material} · {product.color}</p>
         <div className="product-card-actions">
           <Button href={`/products/${product.slug}`} variant="secondary">View details</Button>
-          <Button disabled={!product.id || product.stockQuantity === 0} onClick={() => addItem(product)}>Add to bag</Button>
+          {product.stockQuantity === 0 ? <Button href={`/products/${product.slug}`}>Check available options</Button> : <Button disabled={!product.id} onClick={() => addItem(product)}>Add to bag</Button>}
         </div>
       </div>
     </article>

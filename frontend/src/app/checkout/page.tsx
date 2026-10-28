@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
-import { createOrder, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
+import { createOrder, fetchProducts, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { formatPrice } from "@/lib/products";
 
@@ -44,7 +44,12 @@ function clearCheckoutAttempt() {
 /** CheckoutPage submits the cart and keeps guest order access in this browser session. */
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, subtotal, deliveryFee, total, clearCart } = useCart();
+  const { items, ready, subtotal, deliverySettings, refreshDeliverySettings, clearCart, refreshProducts } = useCart();
+  const [district, setDistrict] = useState("");
+  const deliveryFee = deliverySettings && district ? (district === "Dhaka" ? deliverySettings.delivery_fee : deliverySettings.outside_dhaka_fee) : null;
+  const total = deliveryFee === null ? null : subtotal + deliveryFee;
+  const [priceCheck, setPriceCheck] = useState<"checking" | "ready" | "failed">("checking");
+  const [priceChanges, setPriceChanges] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [placedOrderNumber, setPlacedOrderNumber] = useState("");
   const [placedOrderId, setPlacedOrderId] = useState<number | null>(null);
@@ -54,6 +59,24 @@ export default function CheckoutPage() {
   const [emailProof, setEmailProof] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+
+  /** checkCurrentPrices replaces saved cart prices with the live catalog so the shown total matches what the server charges. */
+  async function checkCurrentPrices() {
+    setPriceCheck("checking");
+    try {
+      // Prices and delivery charges are confirmed together so the summary matches what the server will accept.
+      const [products] = await Promise.all([fetchProducts(), refreshDeliverySettings()]);
+      setPriceChanges(refreshProducts(products));
+      setPriceCheck("ready");
+    } catch {
+      setPriceCheck("failed");
+    }
+  }
+
+  useEffect(() => {
+    if (ready) void checkCurrentPrices();
+    // Run once after the saved cart loads; later cart edits already use refreshed products.
+  }, [ready]);
 
   /** sendCode requests verification for the currently entered mailbox. */
   async function sendCode() {
@@ -93,13 +116,25 @@ export default function CheckoutPage() {
       setError("Your cart is empty.");
       return;
     }
+    if (priceCheck !== "ready") {
+      setError("Current prices are not confirmed yet. Please wait or retry the price check.");
+      return;
+    }
     if (items.some((item) => !Number.isSafeInteger(item.product.id) || (item.product.id ?? 0) <= 0)) {
       setError("An item in your cart is no longer available. Remove it and add it again from the shop.");
+      return;
+    }
+    if (items.some((item) => item.lensOption !== "Frame only")) {
+      setError("Lens packages are not available yet. Remove those items and add the frame-only option.");
       return;
     }
     if (!email.trim() || !emailProof) {
       setEmailProof("");
       setError("Verify your email code before placing the order.");
+      return;
+    }
+    if (deliveryFee === null || !deliverySettings?.districts.includes(district)) {
+      setError("Select a Bangladesh district and confirm the delivery charge before ordering.");
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -111,9 +146,9 @@ export default function CheckoutPage() {
         customer_email: email.trim(),
         email_proof: emailProof,
         shipping_address: String(form.get("address") ?? ""),
-        city: String(form.get("city") ?? ""),
+        city: district,
         delivery_note: String(form.get("note") ?? ""),
-        prescription_file_url: String(form.get("prescription") ? "Prescription selected for manual review" : ""),
+        expected_delivery_fee: deliveryFee,
         items: items.map((item) => ({
           product_id: item.product.id!,
           quantity: item.quantity,
@@ -135,6 +170,7 @@ export default function CheckoutPage() {
       clearCart();
       router.push(`/order-success/${order.id}`);
     } catch (err) {
+      void refreshDeliverySettings().catch(() => undefined);
       setError(err instanceof Error ? err.message : "Could not place order. Please check backend/database.");
     } finally {
       setLoading(false);
@@ -146,7 +182,7 @@ export default function CheckoutPage() {
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
         <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Checkout</p>
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Confirm your COD order</h1>
-        <p className="mt-3 text-neutral-600">Enter delivery details and upload a prescription only if lenses are needed.</p>
+        <p className="mt-3 text-neutral-600">Enter delivery details for your frame-only order.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
@@ -167,31 +203,38 @@ export default function CheckoutPage() {
           </div>
           <label className="grid gap-2 text-sm font-black">Address<textarea name="address" required className="min-h-28 rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="House, road, area, landmark" /></label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-black">District/City<input name="city" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Dhaka, Chattogram, Sylhet" /></label>
-            <label className="grid gap-2 text-sm font-black">Prescription upload optional<input name="prescription" className="rounded-md border border-neutral-300 bg-white px-4 py-3 text-sm font-normal" type="file" /></label>
+            <label className="grid gap-2 text-sm font-black">District<select name="city" required value={district} onChange={(event) => setDistrict(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]"><option value="">Select district</option>{deliverySettings?.districts.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
           <label className="grid gap-2 text-sm font-black">Delivery note<input name="note" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Preferred delivery time or special instruction" /></label>
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
             <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
             <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
           </div>
-          {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading}>{loading ? "Placing Order..." : "Place Order"}</Button> : null}
+          {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing Order..." : "Place Order"}</Button> : null}
         </form>
 
         <aside className="rounded-xl border border-black/10 bg-white p-5 shadow-sm lg:self-start">
           <h2 className="text-xl font-black">Order summary</h2>
+          {priceCheck === "checking" ? <p role="status" className="mt-3 text-sm text-neutral-600">Checking current prices...</p> : null}
+          {priceCheck === "failed" ? <div role="alert" className="mt-3 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">Could not confirm current prices. <button type="button" onClick={() => void checkCurrentPrices()} className="underline">Try again</button></div> : null}
+          {priceChanges.length > 0 ? (
+            <div role="alert" className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-semibold text-[#7b531c]">
+              <p>Your cart was updated. Please review the new total before placing the order.</p>
+              <ul className="mt-1 list-disc pl-5">{priceChanges.map((change) => <li key={change}>{change}</li>)}</ul>
+            </div>
+          ) : null}
           <div className="mt-5 grid gap-4">
             {items.length === 0 ? <p className="text-sm text-neutral-600">Your cart is empty.</p> : items.map((item) => (
               <div key={`${item.product.slug}-${item.lensOption}`} className="flex justify-between gap-4 text-sm">
-                <div><p className="font-black text-neutral-950">{item.product.name}</p><p className="mt-1 text-neutral-500">{item.quantity} x {item.lensOption}</p></div>
+                <div><p className="font-black text-neutral-950">{item.product.name}</p><p className="mt-1 text-neutral-500">{item.product.color} · {item.product.size}{item.product.sku ? ` · ${item.product.sku}` : ""} · {item.quantity} x {item.lensOption}</p></div>
                 <p className="font-black">{formatPrice(item.product.price * item.quantity)}</p>
               </div>
             ))}
           </div>
           <div className="mt-5 grid gap-3 border-t border-black/10 pt-4 text-sm">
             <div className="flex justify-between"><span className="text-neutral-600">Subtotal</span><span className="font-black">{formatPrice(subtotal)}</span></div>
-            <div className="flex justify-between"><span className="text-neutral-600">Delivery</span><span className="font-black">{formatPrice(deliveryFee)}</span></div>
-            <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">{formatPrice(total)}</span></div>
+            <div className="flex justify-between"><span className="text-neutral-600">Delivery</span><span className="font-black">{deliveryFee === null ? "Select district to calculate" : formatPrice(deliveryFee)}</span></div>
+            <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">{total === null ? "—" : formatPrice(total)}</span></div>
           </div>
           <p className="mt-5 rounded-md bg-amber-50 p-4 text-sm font-semibold leading-6 text-[#7b531c]">Bongkey support may call to confirm your order before dispatch.</p>
         </aside>

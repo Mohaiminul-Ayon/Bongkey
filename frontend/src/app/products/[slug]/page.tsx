@@ -10,16 +10,14 @@ import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { formatPrice, type Product } from "@/lib/products";
 
-const lensOptions = ["Frame only", "Blue-cut lens", "Prescription lens"];
-
 /** ProductDetailsPage renders only products returned by the live catalog. */
 export default function ProductDetailsPage() {
   const params = useParams<{ slug: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [related, setRelated] = useState<Product[]>([]);
   const [error, setError] = useState("");
-  const [lensOption, setLensOption] = useState("Frame only");
   const [showTryOn, setShowTryOn] = useState(false);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const { addItem } = useCart();
 
   useEffect(() => {
@@ -27,6 +25,7 @@ export default function ProductDetailsPage() {
     setProduct(null);
     setRelated([]);
     setError("");
+    setSelectedVariantId(null);
     fetchProduct(params.slug)
       .then((item) => { if (active) setProduct(item); })
       .catch(() => { if (active) setError("This product is unavailable right now."); });
@@ -39,10 +38,12 @@ export default function ProductDetailsPage() {
   if (error) return <p className="mx-auto max-w-7xl px-4 py-12" role="alert">{error}</p>;
   if (!product || product.slug !== params.slug) return <p className="mx-auto max-w-7xl px-4 py-12" role="status">Loading product...</p>;
 
+  const variant = product.variants?.find((item) => item.id === selectedVariantId) ?? ((product.stockQuantity ?? 0) > 0 ? product : product.variants?.find((item) => (item.stockQuantity ?? 0) > 0) ?? product);
+
   const specs = [
     ["Material", product.material],
-    ["Color", product.color],
-    ["Frame size", product.size],
+    ["Color", variant.color],
+    ["Frame size", variant.size],
     ["Lens width", product.lensWidth],
     ["Bridge width", product.bridgeWidth],
     ["Temple length", product.templeLength],
@@ -50,12 +51,12 @@ export default function ProductDetailsPage() {
 
   return (
     <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
-      {showTryOn ? <TryOnModal product={product} onClose={() => setShowTryOn(false)} /> : null}
+      {showTryOn ? <TryOnModal product={variant} onClose={() => setShowTryOn(false)} /> : null}
       <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
         <div>
-          <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm"><ProductVisual product={product} /></div>
+          <div className="rounded-xl border border-black/10 bg-white p-4 shadow-sm"><ProductVisual product={variant} /></div>
           <div className="mt-4 grid grid-cols-4 gap-3">
-            {[["Shape", product.shape], ["Color", product.color], ["Finish", product.finish], ["Size", product.size]].map(([name, value]) => (
+            {[["Shape", variant.shape], ["Color", variant.color], ["Finish", variant.finish], ["Size", variant.size]].map(([name, value]) => (
               <div key={name} className="rounded-lg border border-black/10 bg-white p-3 text-center text-xs font-bold text-neutral-600">
                 <span className="block text-[10px] uppercase tracking-widest text-neutral-500">{name}</span><span className="mt-2 block">{value}</span>
               </div>
@@ -68,8 +69,8 @@ export default function ProductDetailsPage() {
           <h1 className="mt-2 text-4xl font-black leading-tight text-neutral-950">{product.name}</h1>
           <p className="mt-3 text-sm font-bold text-neutral-500">{product.gender} · {product.frameType} · {product.brandTier}</p>
           <div className="mt-5 flex flex-wrap items-end gap-3">
-            <span className="text-4xl font-black">{formatPrice(product.price)}</span>
-            {product.oldPrice ? <span className="text-lg font-bold text-neutral-400 line-through">{formatPrice(product.oldPrice)}</span> : null}
+            <span className="text-4xl font-black">{formatPrice(variant.price)}</span>
+            {variant.oldPrice ? <span className="text-lg font-bold text-neutral-400 line-through">{formatPrice(variant.oldPrice)}</span> : null}
             <span className="rounded-full bg-[#f0f7f4] px-3 py-1 text-xs font-black text-[#173c34]">COD available</span>
           </div>
 
@@ -83,24 +84,26 @@ export default function ProductDetailsPage() {
           </div>
 
           <div className="mt-6">
-            <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-black">Lens options</h2><span className="text-sm font-bold text-[#173c34]">Size guide</span></div>
-            <div className="mt-3 grid gap-3">
-              {lensOptions.map((option) => (
-                <button key={option} className={`rounded-md border p-4 text-left ${lensOption === option ? "border-[#173c34] bg-[#f0f7f4]" : "border-neutral-300 bg-white"}`} onClick={() => setLensOption(option)}>
-                  <span className="block font-black text-neutral-950">{option}</span>
-                  <span className="mt-1 block text-sm text-neutral-600">{option === "Prescription lens" ? "Upload your prescription during checkout." : "Ready for Bongkey COD checkout."}</span>
-                </button>
-              ))}
+            <h2 className="text-lg font-black">Available option</h2>
+            <div className="mt-3 rounded-md border border-[#173c34] bg-[#f0f7f4] p-4">
+              <span className="block font-black text-neutral-950">Frame only</span>
+              <span className="mt-1 block text-sm text-neutral-600">Lens packages are not available for checkout yet.</span>
             </div>
           </div>
 
+          {(product.variants?.length ?? 0) > 1 ? <label className="mt-6 grid gap-2 text-sm font-black">Choose color and size
+            <select className="rounded-md border border-neutral-300 bg-white px-4 py-3" value={variant.id} onChange={(event) => setSelectedVariantId(Number(event.target.value))}>
+              {product.variants?.map((option) => <option key={option.id} value={option.id} disabled={(option.stockQuantity ?? 0) < 1}>{option.color} · {option.size} · {formatPrice(option.price)}{(option.stockQuantity ?? 0) < 1 ? " (out of stock)" : ""}</option>)}
+            </select>
+            <span className="text-xs font-normal text-neutral-600">SKU: {variant.sku} · {variant.stockStatus}</span>
+          </label> : null}
+
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <Button variant="secondary" disabled={!product.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try On</Button>
-            <Button onClick={() => addItem(product, lensOption)}>Add to Cart</Button>
+            <Button variant="secondary" disabled={!variant.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try On</Button>
+            <Button disabled={(variant.stockQuantity ?? 0) < 1} onClick={() => addItem(variant, "Frame only")}>Add to Cart</Button>
           </div>
           <div className="mt-6 grid gap-3 text-sm leading-6 text-neutral-700">
-            {!product.tryOnImageUrl ? <div className="rounded-md bg-[#f7f5ef] p-4">Try-on preview will be available when a frame mockup is added.</div> : null}
-            <div className="rounded-md bg-[#f0f7f4] p-4 text-[#173c34]">Prescription upload is available at checkout for lens-ready orders.</div>
+            {!variant.tryOnImageUrl ? <div className="rounded-md bg-[#f7f5ef] p-4">Try-on preview will be available when a frame mockup is added.</div> : null}
             <div className="rounded-md bg-amber-50 p-4 text-[#7b531c]">Easy exchange and warranty support are available after order confirmation.</div>
           </div>
         </div>

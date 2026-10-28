@@ -18,7 +18,7 @@ type orderRequest struct {
 	ShippingAddress     string             `json:"shipping_address"`
 	City                string             `json:"city"`
 	DeliveryNote        string             `json:"delivery_note"`
-	PrescriptionFileURL string             `json:"prescription_file_url"`
+	ExpectedDeliveryFee *int               `json:"expected_delivery_fee"`
 	Items               []orderItemRequest `json:"items"`
 }
 
@@ -64,7 +64,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		CustomerName:   req.CustomerName, CustomerPhone: req.CustomerPhone,
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
-		PrescriptionFileURL: req.PrescriptionFileURL, Items: items,
+		ExpectedDeliveryFee: req.ExpectedDeliveryFee, Items: items,
 	})
 	if err != nil {
 		switch {
@@ -74,6 +74,10 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "item unavailable or out of stock"})
 		case errors.Is(err, orders.ErrIdempotencyConflict):
 			c.JSON(http.StatusConflict, gin.H{"error": "idempotency key was reused with different order data"})
+		case errors.Is(err, orders.ErrDeliveryUnavailable):
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "delivery settings unavailable"})
+		case errors.Is(err, orders.ErrDeliveryFeeChanged):
+			c.JSON(http.StatusConflict, gin.H{"error": "delivery charge changed; review the updated total and submit again"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create order"})
 		}

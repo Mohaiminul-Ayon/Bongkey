@@ -38,10 +38,10 @@ export default function AdminProductsPage() {
             <tbody>
               {products.map((product) => (
                 <tr key={product.slug} className="border-b">
-                  <td className="p-4 font-black">{product.name}</td>
+                  <td className="p-4 font-black">{product.name}<span className="mt-1 block text-xs font-normal text-neutral-600">{product.parentProductId ? "Variant · " : "Base SKU · "}{product.sku} · {product.color} · {product.size}</span></td>
                   <td>{formatPrice(product.price)}</td>
                   <td>{product.category}</td>
-                  <td>{product.stockStatus}</td>
+                  <td>{product.stockQuantity} · {product.stockStatus}</td>
                   <td>{product.isActive ? "Active" : "Inactive"}</td>
                   <td className="space-x-3">
                     <Link className="font-black text-[#173c34]" href={`/admin/products/${product.id}/edit`}>Edit</Link>

@@ -9,6 +9,9 @@ export type Category = {
 
 export type ApiProduct = {
   id: number;
+  parent_product_id: number;
+  sku: string;
+  variants?: ApiProduct[];
   category_id: number;
   category_name: string;
   name: string;
@@ -40,8 +43,30 @@ export type OrderPayload = {
   shipping_address: string;
   city: string;
   delivery_note: string;
-  prescription_file_url?: string;
+  expected_delivery_fee: number;
   items: Array<{ product_id: number; quantity: number; lens_option: string }>;
+};
+
+export type DeliverySettings = { delivery_fee: number; outside_dhaka_fee: number; districts: string[] };
+
+export type AdminOrderDetail = {
+  id: number;
+  order_number: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  shipping_address: string;
+  city: string;
+  delivery_note: string;
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  order_status: string;
+  payment_method: string;
+  payment_status: string;
+  created_at: string;
+  items: Array<{ product_name: string; sku: string; lens_option: string; quantity: number; unit_price: number; total_price: number }>;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -114,6 +139,11 @@ export async function updateAdminOrderStatus(id: number, status: string) {
   });
 }
 
+/** fetchAdminOrder returns private order details only through the owner endpoint. */
+export async function fetchAdminOrder(id: string) {
+  return adminRequest<AdminOrderDetail>(`/api/admin/orders/${encodeURIComponent(id)}`, { cache: "no-store" });
+}
+
 export async function fetchProducts() {
   const data = await request<ApiProduct[]>("/api/products");
   return data.map(toProduct);
@@ -130,6 +160,19 @@ export async function fetchProduct(slug: string) {
 
 export async function fetchCategories() {
   return request<Category[]>("/api/categories");
+}
+
+/** fetchDeliverySettings keeps the cart estimate aligned with the server setting. */
+export async function fetchDeliverySettings() {
+  return request<DeliverySettings>("/api/delivery-settings", { cache: "no-store" });
+}
+
+/** updateDeliverySettings saves both district-derived charges from the protected admin panel. */
+export async function updateDeliverySettings(deliveryFee: number, outsideDhakaFee: number) {
+  return adminRequest<DeliverySettings>("/api/admin/delivery-settings", {
+    method: "PUT",
+    body: JSON.stringify({ delivery_fee: deliveryFee, outside_dhaka_fee: outsideDhakaFee }),
+  });
 }
 
 /** createOrder submits one retry-safe checkout attempt and receives its guest access token. */
@@ -191,6 +234,24 @@ export async function fetchOrder(id: string, token: string) {
   });
 }
 
+/** downloadInvoice keeps guest and admin bearer proofs out of URLs. */
+export async function downloadInvoice(id: string, token: string, admin = false) {
+  const path = admin ? `/api/admin/orders/${encodeURIComponent(id)}` : `/api/orders/${encodeURIComponent(id)}`;
+  const response = await fetch(`${API_URL}${path}/invoice.pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error("Could not download invoice.");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `bongkey-invoice-${id}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function title(value: string) {
   return value
     .replaceAll("_", " ")
@@ -199,9 +260,13 @@ function title(value: string) {
     .join(" ");
 }
 
+/** toProduct converts server catalog rows, including sellable variants, for storefront views. */
 export function toProduct(product: ApiProduct): Product {
   return {
     id: product.id,
+    parentProductId: product.parent_product_id,
+    sku: product.sku,
+    variants: product.variants?.map(toProduct),
     categoryId: product.category_id,
     slug: product.slug,
     name: product.name,
@@ -228,6 +293,13 @@ export function toProduct(product: ApiProduct): Product {
     isFeatured: product.is_featured,
     isActive: product.is_active,
   };
+}
+
+/** assetUrl resolves backend-served upload paths and keeps older absolute image URLs working. */
+export function assetUrl(url?: string) {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${API_URL}${url}`;
 }
 
 export { API_URL };

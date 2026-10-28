@@ -13,6 +13,7 @@ import (
 type productRequest struct {
 	CategoryID            int    `json:"category_id"`
 	Name                  string `json:"name"`
+	SKU                   string `json:"sku"`
 	Slug                  string `json:"slug"`
 	Description           string `json:"description"`
 	Price                 int    `json:"price"`
@@ -36,6 +37,48 @@ type productRequest struct {
 
 // ProductHandler maps product HTTP requests to catalog decisions.
 type ProductHandler struct{ Service catalog.ProductService }
+
+type variantRequest struct {
+	SKU           string `json:"sku"`
+	Color         string `json:"color"`
+	Size          string `json:"size"`
+	Price         int    `json:"price"`
+	StockQuantity int    `json:"stock_quantity"`
+}
+
+// ListVariants returns owner-visible sizes and colors for one product group.
+func (h ProductHandler) ListVariants(c *gin.Context) {
+	id, ok := productID(c)
+	if !ok {
+		return
+	}
+	variants, err := h.Service.ListVariants(c.Request.Context(), id, true)
+	if err != nil {
+		productError(c, err, "could not load variants")
+		return
+	}
+	c.JSON(http.StatusOK, variants)
+}
+
+// CreateVariant accepts one independent SKU under an existing root product.
+func (h ProductHandler) CreateVariant(c *gin.Context) {
+	id, ok := productID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+	var req variantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid variant data"})
+		return
+	}
+	variant, err := h.Service.CreateVariant(c.Request.Context(), id, catalog.VariantInput{SKU: req.SKU, Color: req.Color, Size: req.Size, Price: req.Price, StockQuantity: req.StockQuantity})
+	if err != nil {
+		productError(c, err, "could not create variant")
+		return
+	}
+	c.JSON(http.StatusCreated, variant)
+}
 
 // ListProducts returns published catalog products.
 func (h ProductHandler) ListProducts(c *gin.Context) {
@@ -95,7 +138,7 @@ func (h ProductHandler) saveProduct(c *gin.Context, id int) {
 		return
 	}
 	product, err := h.Service.Save(c.Request.Context(), id, catalog.ProductInput{
-		CategoryID: req.CategoryID, Name: req.Name, Slug: req.Slug, Description: req.Description,
+		CategoryID: req.CategoryID, Name: req.Name, Slug: req.Slug, Description: req.Description, SKU: req.SKU,
 		Price: req.Price, OldPrice: req.OldPrice, StockQuantity: req.StockQuantity,
 		ExpectedStockQuantity: req.ExpectedStockQuantity,
 		BrandTier:             req.BrandTier, FrameType: req.FrameType, Gender: req.Gender,
@@ -172,6 +215,12 @@ func productError(c *gin.Context, err error, fallback string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "stock quantity cannot be negative"})
 	case errors.Is(err, catalog.ErrExpectedStockMissing):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "expected stock quantity is required"})
+	case errors.Is(err, catalog.ErrInvalidVariant):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid SKU, color, size, price and stock are required"})
+	case errors.Is(err, catalog.ErrDuplicateVariant):
+		c.JSON(http.StatusConflict, gin.H{"error": "SKU or color/size is already in use"})
+	case errors.Is(err, catalog.ErrHasVariants):
+		c.JSON(http.StatusConflict, gin.H{"error": "remove variants before deleting this product"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fallback})
 	}

@@ -5,6 +5,7 @@ import (
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 	"bongkey/backend/internal/database"
+	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/emailotp"
 	"bongkey/backend/internal/handlers"
 	"bongkey/backend/internal/middleware"
@@ -27,16 +28,18 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		EmailProofSecret: cfg.JWTSecret,
 	}}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
-		Store:            orders.PostgresCheckoutStore{DB: database.DB},
-		EmailProofSecret: cfg.JWTSecret,
-		OrderTokenSecret: cfg.JWTSecret,
+		Store:               orders.PostgresCheckoutStore{DB: database.DB},
+		EmailProofSecret:    cfg.JWTSecret,
+		OrderTokenSecret:    cfg.JWTSecret,
+		DeliveryFeeProvider: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}},
 	}}
+	deliverySettings := handlers.DeliverySettingsHandler{Service: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}}}
 	emailCodes := handlers.EmailOTPHandler{Service: emailotp.Service{
 		Store:  emailotp.PostgresStore{DB: database.DB},
 		Sender: emailotp.GmailSender{From: cfg.GmailFrom, AppPassword: cfg.GmailAppPassword},
 		Secret: cfg.JWTSecret,
 	}}
-	adminService := auth.Service{Repository: auth.PostgresRepository{DB: database.DB}, JWTSecret: cfg.JWTSecret}
+	adminService := auth.Service{Repository: auth.PostgresRepository{DB: database.DB}, Limiter: auth.PostgresLoginLimiter{DB: database.DB}, JWTSecret: cfg.JWTSecret}
 	adminHandler := handlers.AdminHandler{Service: adminService}
 	products := handlers.ProductHandler{Service: catalog.ProductService{
 		Repository: catalog.PostgresProductRepository{DB: database.DB},
@@ -54,8 +57,10 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.GET("/api/products/featured", products.ListFeaturedProducts)
 	router.GET("/api/products/:slug", products.GetProduct)
 	router.GET("/api/categories", categories.ListCategories)
+	router.GET("/api/delivery-settings", deliverySettings.Get)
 	router.POST("/api/orders", checkout.CreateOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
+	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
 	router.POST("/api/email-otp/request", emailCodes.Request)
 	router.POST("/api/email-otp/verify", emailCodes.Verify)
 
@@ -67,6 +72,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.POST("/uploads/try-on-mockup", uploads.TryOnMockup)
 	admin.GET("/products", products.AdminListProducts)
 	admin.POST("/products", products.CreateProduct)
+	admin.GET("/products/:id/variants", products.ListVariants)
+	admin.POST("/products/:id/variants", products.CreateVariant)
 	admin.PUT("/products/:id", products.UpdateProduct)
 	admin.DELETE("/products/:id", products.DeleteProduct)
 	admin.PATCH("/products/:id/status", products.PatchProductStatus)
@@ -76,7 +83,9 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.DELETE("/categories/:id", categories.DeleteCategory)
 	admin.GET("/orders", orderList.ListOrders)
 	admin.GET("/orders/:id", orderAccess.GetAdminOrder)
+	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
+	admin.PUT("/delivery-settings", deliverySettings.Update)
 
 	return router
 }
