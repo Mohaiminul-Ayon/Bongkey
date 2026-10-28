@@ -9,3 +9,10 @@
 !/backend/uploads/
 !/backend/uploads/**/
 !/backend/uploads/**/.gitkeep
+
+# Owner's personal learning notes (kept locally, not in the repo)
+/docs/BACKEND_FLOW_AND_ARCHITECTURE.md
+/docs/backend_architecture_and_flow.html
+/docs/backend_architecture_and_flow.pdf
+/docs/Bongkey_Technical_Learning_Guide.docx
+/docs/Bongkey_Project_Progress_Report.docx
