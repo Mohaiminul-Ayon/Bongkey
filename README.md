@@ -2,12 +2,17 @@
 
 Bongkey is an MVP e-commerce foundation for a Bangladesh-focused eyewear brand. This repository is split into a Next.js frontend, a Go/Gin backend, and PostgreSQL via Docker Compose.
 
+- Scope, stories and status: [`PRD.md`](PRD.md)
+- Coding rules for contributors and AI agents: [`AGENTS.md`](AGENTS.md)
+- Request flows for each implemented story: [`docs/Story_Workflows.md`](docs/Story_Workflows.md)
+
 ## Project Structure
 
 ```txt
 frontend/          Next.js, TypeScript, Tailwind CSS
 backend/           Go backend using Gin
-docs/              Project notes and planning docs
+backend/migrations SQL migrations applied at backend startup
+docs/              Story request flows
 docker-compose.yml PostgreSQL service
 .env.example       Example environment variables
 ```
@@ -21,15 +26,7 @@ docker-compose.yml PostgreSQL service
 
 ## Environment Setup
 
-Copy `.env.example` to `.env` in the project root when you are ready to run services locally.
-
-Expected local path:
-
-```txt
-E:\Eyewear-mvp\.env
-```
-
-The Go backend loads this file automatically at startup. If `.env` is missing, the backend prints the exact path it expected and uses the local development defaults from the code.
+Copy `.env.example` to `.env` in the project root (the folder that holds `docker-compose.yml`):
 
 ```bash
 cp .env.example .env
@@ -41,6 +38,20 @@ On Windows PowerShell:
 Copy-Item .env.example .env
 ```
 
+The Go backend finds the project root by walking up from its working directory, then loads `.env` from there. Values already set in the shell win over `.env`.
+
+Before the first backend start, fill in these values in `.env`:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `JWT_SECRET` | Yes | Random, at least 32 characters. The backend refuses to start without it. |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First start | Creates the one owner account when the admin table is empty. Password at least 12 characters. Later starts never change it. |
+| `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
+| `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
+| `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
+
+Keep `.env` out of source control and out of shared output.
+
 ## Start PostgreSQL
 
 From the project root:
@@ -49,28 +60,16 @@ From the project root:
 docker compose up -d
 ```
 
-PostgreSQL will be available on:
+PostgreSQL will be available on `localhost:5432`. The database name, user and password are set in `docker-compose.yml` and match the default `DATABASE_URL`. Only `POSTGRES_PORT` is read from `.env`.
 
-```txt
-localhost:5432
-```
-
-Default database credentials are defined in `.env.example`.
-
-If another local PostgreSQL service is already using port `5432`, set these values in `E:\Eyewear-mvp\.env` before starting Docker:
+If another local PostgreSQL service is already using port `5432`, set these values in `.env` before starting Docker:
 
 ```txt
 POSTGRES_PORT=5433
 DATABASE_URL=postgres://bongkey:bongkey_password@localhost:5433/bongkey?sslmode=disable
 ```
 
-## Database Migrations and Seed Data
-
-The Go backend connects to PostgreSQL at startup, creates the MVP tables, applies the idempotent migrations in `backend/migrations/` (002–010) in order, and seeds local catalog data. On an empty admin table, it creates one owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; later startups never replace that owner's password. Databases previously seeded with the old demo password need an explicit credential change before real use.
-
-If the database connection fails, the backend exits with a generic message. It does not print the connection URL or driver error because those can contain credentials. Check the PostgreSQL service and local `DATABASE_URL` privately when diagnosing a failure.
-
-If an old Docker volume was created with different PostgreSQL credentials, either reset it:
+If an old Docker volume was created with different PostgreSQL credentials, either reset it (this **deletes all local data**):
 
 ```powershell
 docker compose down -v
@@ -83,6 +82,49 @@ or update the role password inside the running container:
 docker compose exec postgres psql -U bongkey -d bongkey -c "ALTER USER bongkey WITH PASSWORD 'bongkey_password';"
 ```
 
+## Database Migrations and Seed Data
+
+There is no separate migration command. Every time the backend starts, `MigrateAndSeed` in `backend/internal/database/database.go`:
+
+1. Creates the base tables (admins, categories, products, product images, orders, order items, invoices) with `CREATE TABLE IF NOT EXISTS`.
+2. Applies these files from `backend/migrations/` in order. Each one is idempotent, so running it again is safe:
+
+   | File | Adds |
+   |---|---|
+   | `001_init.sql` | Placeholder only; the base tables live in `database.go` |
+   | `002_guest_order_access.sql` | Guest order access tokens |
+   | `003_stock_quantity_nonnegative.sql` | Stock can never go below zero |
+   | `004_email_otp.sql` | Email OTP codes and proofs |
+   | `005_checkout_idempotency.sql` | Retry-safe checkout keys |
+   | `006_order_fulfillment.sql` | Order status changes and stock restore |
+   | `007_delivery_settings.sql` | Store delivery settings |
+   | `008_product_variants.sql` | Product variants (SKU, color, size, stock) |
+   | `009_delivery_zones.sql` | Separate outside-Dhaka delivery fee |
+   | `010_admin_login_limits.sql` | Admin login rate limits |
+
+3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
+
+A new migration file must also be added to the list in `MigrateAndSeed`, or it will not run.
+
+If the database connection fails, the backend exits with a generic message. It does not print the connection URL or driver error because those can contain credentials. Check the PostgreSQL service and local `DATABASE_URL` privately when diagnosing a failure.
+
+## Run the Backend
+
+```bash
+cd backend
+go run ./cmd/server
+```
+
+The backend runs at `http://localhost:8080`. Health check: `GET http://localhost:8080/health`.
+
+Admin bearer sessions expire after 24 hours and have no refresh token. The browser keeps the token in tab-scoped `sessionStorage`; Sign out removes it from that tab. The backend checks the current owner role on each admin request. Individual issued tokens cannot yet be revoked; rotate `JWT_SECRET` to invalidate all sessions, and use HTTPS before any real admin use.
+
+Admin login test (replace the placeholders locally):
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/admin/login -ContentType 'application/json' -Body '{"email":"<owner-email>","password":"<owner-password>"}'
+```
+
 ## Run the Frontend
 
 ```bash
@@ -91,40 +133,37 @@ npm install
 npm run dev
 ```
 
-The frontend runs at:
+The frontend runs at `http://localhost:3000`. The admin pages start at `http://localhost:3000/admin/login`.
 
-```txt
-http://localhost:3000
-```
+## Tests and Checks
 
-## Run the Backend
+Backend, from `backend/`:
 
 ```bash
-cd backend
-go mod tidy
-go run ./cmd/server
+gofmt -l .
+go vet ./...
+go test ./...
 ```
 
-The backend runs at:
+`go test -race ./...` also works where the Go race detector is supported (it needs cgo and a C compiler on Windows).
 
-```txt
-http://localhost:8080
-```
-
-Health check:
-
-```txt
-GET http://localhost:8080/health
-```
-
-For the first startup, set `ADMIN_EMAIL`, a unique `ADMIN_PASSWORD` of at least 12 characters, and a random `JWT_SECRET` of at least 32 characters in your local environment. Existing admin credentials are not changed by later startups. The backend rejects missing/template JWT secrets. Keep these values out of source control and shared output.
-
-Admin bearer sessions expire after 24 hours and have no refresh token. The browser keeps the token in tab-scoped `sessionStorage`; Sign out removes it from that tab. The backend checks the current owner role on each admin request. Individual issued tokens cannot yet be revoked; rotate `JWT_SECRET` to invalidate all sessions, and use HTTPS before any real admin use.
-
-Admin login test (replace the placeholders locally):
+Database integration tests are skipped unless you opt in. They need PostgreSQL running and a valid local `.env`, and they only accept a database on `localhost`:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/admin/login -ContentType 'application/json' -Body '{"email":"<owner-email>","password":"<owner-password>"}'
+$env:RUN_LOCAL_DB_QA = "1"; go test ./...
+```
+
+The live order access test also needs the backend running in another terminal:
+
+```powershell
+$env:RUN_LOCAL_ORDER_HTTP_QA = "1"; go test ./cmd/server -run TestLiveOrderAccessQA
+```
+
+Frontend, from `frontend/`:
+
+```bash
+npx tsc --noEmit
+npm run build
 ```
 
 ## Guest order access (R0)
