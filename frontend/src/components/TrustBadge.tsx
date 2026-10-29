@@ -4,7 +4,7 @@ type TrustBadgeProps = { title: string; text: string; index: number };
 export function TrustBadge({ title, text, index }: TrustBadgeProps) {
   return (
     <div className="shop-note">
-      <span>0{index}</span>
+      <span>{index}</span>
       <h3>{title}</h3>
       <p>{text}</p>
     </div>

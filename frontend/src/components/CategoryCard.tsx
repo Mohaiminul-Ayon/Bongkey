@@ -1,14 +1,13 @@
 import Link from "next/link";
 
-type CategoryCardProps = { title: string; text: string; index: number };
+type CategoryCardProps = { title: string; text: string; href: string };
 
-/** CategoryCard sends shoppers to the available catalog. */
-export function CategoryCard({ title, text, index }: CategoryCardProps) {
+/** CategoryCard sends shoppers to one slice of the catalog. */
+export function CategoryCard({ title, text, href }: CategoryCardProps) {
   return (
-    <Link className="category-card" href="/products">
-      <span className="category-index">0{index} / Collection</span>
+    <Link className="category-card" href={href}>
       <div><h3>{title}</h3><p>{text}</p></div>
-      <span aria-hidden="true" className="category-arrow">↗</span>
+      <span aria-hidden="true" className="category-arrow">→</span>
     </Link>
   );
 }

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
-import { FloatingCart } from "@/components/FloatingCart";
 import { CartProvider } from "@/lib/cart";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "Bongkey Eyewear",
@@ -16,7 +18,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: "try{document.documentElement.dataset.theme=localStorage.getItem('bongkey-theme')==='dark'?'dark':'light'}catch{document.documentElement.dataset.theme='light'}" }} />
       </head>
@@ -24,7 +26,6 @@ export default function RootLayout({
         <CartProvider>
           <Header />
           <main className="min-h-screen">{children}</main>
-          <FloatingCart />
           <Footer />
         </CartProvider>
       </body>
