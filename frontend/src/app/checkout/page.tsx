@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
+import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { createOrder, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
 import { formatPrice, type Product } from "@/lib/products";
@@ -181,7 +182,7 @@ export default function CheckoutPage() {
       router.push(`/order-success/${order.id}`);
     } catch (err) {
       void refreshDeliverySettings().catch(() => undefined);
-      setError(err instanceof Error ? err.message : "Could not place order. Please check backend/database.");
+      setError(err instanceof Error ? err.message : "Could not place your order. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -190,8 +191,8 @@ export default function CheckoutPage() {
   return (
     <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-        <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Checkout</p>
-        <h1 className="mt-2 text-4xl font-black text-neutral-950">Confirm your COD order</h1>
+        <CheckoutSteps current={2} />
+        <h1 className="mt-2 text-4xl font-black text-neutral-950">Delivery details</h1>
         <p className="mt-3 text-neutral-600">Enter delivery details for your frame-only order.</p>
       </div>
 
@@ -220,7 +221,7 @@ export default function CheckoutPage() {
             <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
             <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
           </div>
-          {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing Order..." : "Place Order"}</Button> : null}
+          {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : "Place order"}</Button> : null}
         </form>
 
         <aside className="rounded-xl border border-black/10 bg-white p-5 shadow-sm lg:self-start">
