@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
+import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
@@ -95,7 +96,7 @@ export default function OrderSuccessPage() {
   return (
     <section className="store-flow mx-auto max-w-3xl px-4 py-10 md:px-6">
       <div className="rounded-xl bg-white p-6 shadow-sm">
-        <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Order received</p>
+        <CheckoutSteps current={3} />
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Thank you for ordering from Bongkey.</h1>
         {order ? (
           <div className="mt-6 grid gap-3 text-sm">
@@ -126,7 +127,7 @@ export default function OrderSuccessPage() {
         ) : (
           <p className="mt-5 text-neutral-600">Loading invoice summary...</p>
         )}
-        <Button className="mt-6" href="/products">Continue Shopping</Button>
+        <Button className="mt-6" href="/products">Continue shopping</Button>
       </div>
     </section>
   );
