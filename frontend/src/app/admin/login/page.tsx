@@ -34,7 +34,7 @@ export default function AdminLoginPage() {
     <section className="grid min-h-[calc(100vh-230px)] place-items-center px-4 py-12">
       <div className="grid w-full max-w-4xl overflow-hidden rounded-xl border border-black/10 bg-white shadow-sm md:grid-cols-[0.95fr_1.05fr]">
         <div className="hidden bg-neutral-950 p-8 text-white md:block">
-          <BrandLogo size="lg" />
+          <span className="brand-on-dark"><BrandLogo size="lg" /></span>
           <p className="mt-8 text-sm font-black uppercase tracking-[0.22em] text-neutral-300">Bongkey Admin</p>
           <h1 className="mt-4 text-4xl font-black leading-tight">Manage eyewear orders with confidence.</h1>
           <div className="mt-8 grid gap-3 text-sm font-semibold text-white/80">
