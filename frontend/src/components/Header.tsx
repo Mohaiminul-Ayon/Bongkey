@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCart } from "@/lib/cart";
 
-/** Header keeps the frame types, the bag, and the theme choice visible on every screen size. */
+/** Header keeps the frame types, the bag, and the theme choice visible on every shop page; admin pages use their own sidebar. */
 export function Header() {
   const { count } = useCart();
+  if (usePathname().startsWith("/admin")) return null;
 
   return (
     <>

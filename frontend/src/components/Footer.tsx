@@ -1,8 +1,12 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BrandLogo } from "@/components/BrandLogo";
 
-/** Footer provides the brand and working store destinations. */
+/** Footer provides the brand and working store destinations on shop pages only. */
 export function Footer() {
+  if (usePathname().startsWith("/admin")) return null;
   return (
     <footer className="site-footer">
       <div className="footer-inner">
