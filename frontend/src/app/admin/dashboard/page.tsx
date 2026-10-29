@@ -2,8 +2,16 @@
 
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
-import { fetchDeliverySettings, updateDeliverySettings } from "@/lib/api";
+import Link from "next/link";
+import { adminRequest, fetchCategories, fetchDeliverySettings, updateDeliverySettings, type ApiProduct } from "@/lib/api";
 import { useEffect, useState } from "react";
+
+// lowStockLimit flags active frames the owner should restock soon.
+const lowStockLimit = 3;
+// recentOrderPage matches the backend's first admin order page, so pending counts cover the latest 50 orders.
+const recentOrderPage = 50;
+
+type Counts = { pending: number; recentOrders: number; products: number; lowStock: number; categories: number };
 
 // AdminDashboardPage loads and saves both district-derived delivery charges for new orders.
 export default function AdminDashboardPage() {
@@ -11,6 +19,23 @@ export default function AdminDashboardPage() {
   const [outsideDhakaFee, setOutsideDhakaFee] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [counts, setCounts] = useState<Counts | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      adminRequest<{ order_status: string }[]>("/api/admin/orders"),
+      adminRequest<ApiProduct[]>("/api/admin/products"),
+      fetchCategories(),
+    ])
+      .then(([orders, products, categories]) => setCounts({
+        pending: orders.filter((order) => order.order_status === "pending").length,
+        recentOrders: orders.length,
+        products: products.length,
+        lowStock: products.filter((product) => product.is_active && product.stock_quantity <= lowStockLimit).length,
+        categories: categories.length,
+      }))
+      .catch(() => setCounts(null));
+  }, []);
 
   useEffect(() => {
     fetchDeliverySettings()
@@ -44,12 +69,11 @@ export default function AdminDashboardPage() {
       <section className="mx-auto max-w-7xl px-4 py-8 md:px-6">
         <AdminNav />
         <div className="rounded-xl bg-white p-6 shadow-sm">
-          <p className="text-sm font-black uppercase tracking-[0.2em] text-[#9a6a24]">Owner dashboard</p>
-          <h1 className="mt-2 text-4xl font-black">Bongkey admin dashboard</h1>
-          <div className="mt-6 grid gap-4 sm:grid-cols-3">
-            {["Manage products", "Review COD orders", "Maintain categories"].map((item) => (
-              <div key={item} className="rounded-lg border border-black/10 p-5 font-black">{item}</div>
-            ))}
+          <h1 className="text-3xl font-black">Dashboard</h1>
+          <div className="admin-cards mt-6">
+            <Link className="admin-card" href="/admin/orders"><span>Pending orders</span><strong>{counts ? counts.pending : "–"}</strong><em>{counts ? `of the latest ${counts.recentOrders}${counts.recentOrders === recentOrderPage ? "+" : ""} orders` : "Review COD orders"}</em></Link>
+            <Link className="admin-card" href="/admin/products"><span>Products</span><strong>{counts ? counts.products : "–"}</strong><em data-alert={counts && counts.lowStock > 0 ? "" : undefined}>{counts ? `${counts.lowStock} low on stock (≤ ${lowStockLimit})` : "Manage the catalog"}</em></Link>
+            <Link className="admin-card" href="/admin/categories"><span>Categories</span><strong>{counts ? counts.categories : "–"}</strong><em>Maintain categories</em></Link>
           </div>
           <div className="mt-8 max-w-md rounded-lg border border-black/10 p-5">
             <h2 className="text-xl font-black">Delivery charge</h2>

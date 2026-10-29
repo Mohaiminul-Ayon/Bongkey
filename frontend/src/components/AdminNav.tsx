@@ -1,26 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { BrandLogo } from "@/components/BrandLogo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { clearAdminToken } from "@/lib/api";
 
 const links = [
   ["/admin/dashboard", "Dashboard"],
-  ["/admin/products", "Products"],
-  ["/admin/products/new", "Add Product"],
   ["/admin/orders", "Orders"],
+  ["/admin/products", "Products"],
+  ["/admin/products/new", "Add product"],
   ["/admin/categories", "Categories"],
 ];
 
-// AdminNav links owner pages and clears the local session on sign-out.
+/** isActive marks the deepest matching link so "Add product" doesn't also light up "Products". */
+function isActive(pathname: string, href: string) {
+  if (href === "/admin/products") return pathname === href || /^\/admin\/products\/\d+/.test(pathname);
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+// AdminNav is the owner sidebar: page links, a shop link, and sign-out that clears the local session.
 export function AdminNav() {
   const router = useRouter();
+  const pathname = usePathname();
   return (
-    <div className="mb-6 flex flex-wrap gap-3 rounded-xl bg-white p-4 shadow-sm">
-      {links.map(([href, label]) => (
-        <Link key={href} className="rounded-md border border-neutral-200 px-4 py-2 text-sm font-black hover:border-[#173c34]" href={href}>{label}</Link>
-      ))}
-      <button className="ml-auto rounded-md border border-neutral-200 px-4 py-2 text-sm font-black hover:border-[#173c34]" onClick={() => { clearAdminToken(); router.replace("/admin/login"); }} type="button">Sign out</button>
-    </div>
+    <nav aria-label="Admin" className="admin-nav">
+      <Link className="admin-nav-logo" href="/admin/dashboard"><BrandLogo /></Link>
+      <div className="admin-nav-links">
+        {links.map(([href, label]) => (
+          <Link key={href} aria-current={isActive(pathname, href) ? "page" : undefined} href={href}>{label}</Link>
+        ))}
+      </div>
+      <div className="admin-nav-footer">
+        <Link href="/">View shop ↗</Link>
+        <div className="admin-nav-row">
+          <ThemeToggle />
+          <button onClick={() => { clearAdminToken(); router.replace("/admin/login"); }} type="button">Sign out</button>
+        </div>
+      </div>
+    </nav>
   );
 }

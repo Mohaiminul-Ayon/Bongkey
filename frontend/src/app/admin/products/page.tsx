@@ -4,9 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
-import { adminRequest, toProduct, type ApiProduct } from "@/lib/api";
+import { adminRequest, assetUrl, toProduct, type ApiProduct } from "@/lib/api";
 import { formatPrice, type Product } from "@/lib/products";
 
+/** AdminProductsPage lists every base product and variant with its photo, stock and actions. */
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState("");
@@ -38,7 +39,7 @@ export default function AdminProductsPage() {
             <tbody>
               {products.map((product) => (
                 <tr key={product.slug} className="border-b">
-                  <td className="p-4 font-black">{product.name}<span className="mt-1 block text-xs font-normal text-neutral-600">{product.parentProductId ? "Variant · " : "Base SKU · "}{product.sku} · {product.color} · {product.size}</span></td>
+                  <td className="p-4"><div className="flex items-center gap-3"><div className="admin-thumb">{product.imageUrl ? <img alt="" src={assetUrl(product.imageUrl)} /> : null}</div><div className="font-black">{product.name}<span className="mt-1 block text-xs font-normal text-neutral-600">{product.parentProductId ? "Variant · " : "Base SKU · "}{product.sku} · {product.color} · {product.size}</span></div></div></td>
                   <td>{formatPrice(product.price)}</td>
                   <td>{product.category}</td>
                   <td>{product.stockQuantity} · {product.stockStatus}</td>
