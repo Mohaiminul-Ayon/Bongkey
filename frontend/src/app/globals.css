@@ -169,8 +169,23 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 .footer-links a:hover { text-decoration: underline; text-underline-offset: 5px; }
 .footer-bottom { max-width: 1256px; margin: auto; padding: 20px 0 28px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; }
 
+/* Bag, checkout and order success keep their Tailwind markup; this scope softens it to the shop look. */
+.store-flow .font-black { font-weight: 600; }
+.store-flow .rounded-xl { border-radius: var(--radius); }
+.store-flow .rounded-lg, .store-flow .rounded-md { border-radius: 12px; }
 .store-flow .shadow-sm { box-shadow: none; }
-.store-flow h1 { font-weight: 600; }
+.store-flow .bg-white.shadow-sm { border: 1px solid var(--border); }
+.store-flow > .mb-8.bg-white { padding: 0; border: 0; background: transparent !important; }
+.store-flow h1 { font-size: clamp(30px, 4vw, 42px); font-weight: 600; }
+.store-flow input, .store-flow select, .store-flow textarea { border-radius: 12px; }
+.store-flow input:focus, .store-flow select:focus, .store-flow textarea:focus { border-color: var(--foreground) !important; }
+.store-flow button.rounded-md { border-radius: 999px; }
+.checkout-steps { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 18px; padding: 0; list-style: none; color: var(--muted); font-size: 14px; }
+.checkout-steps li { display: flex; align-items: center; gap: 8px; }
+.checkout-steps span { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid var(--border); border-radius: 50%; font-size: 12px; font-weight: 600; }
+.checkout-steps li[data-done] span { border-color: var(--foreground); }
+.checkout-steps li[aria-current="step"] { color: var(--foreground); font-weight: 600; }
+.checkout-steps li[aria-current="step"] span { border-color: var(--foreground); background: var(--foreground); color: var(--inverse); }
 
 /* Existing checkout and admin utilities use the same palette in both themes. */
 [class~="bg-white"] { background-color: var(--surface) !important; }
@@ -213,6 +228,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
   .editorial-band { grid-template-columns: 1fr; margin: 0 16px; padding: 40px 24px; }
   .editorial-band .site-button { grid-column: 1; }
   .product-actions { grid-template-columns: 1fr; }
+  .store-flow article.grid { grid-template-columns: 96px minmax(0, 1fr); }
   .footer-inner { flex-direction: column; padding: 40px 16px; }
   .footer-links { flex-wrap: wrap; }
   .footer-bottom { margin: 0 16px; }
