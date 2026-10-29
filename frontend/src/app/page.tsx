@@ -10,15 +10,15 @@ import { fetchFeaturedProducts } from "@/lib/api";
 import { type Product } from "@/lib/products";
 
 const categories = [
-  { title: "Eyeglasses", text: "Everyday frames with a clean, considered fit." },
-  { title: "Sunglasses", text: "Easy silhouettes for bright days." },
-  { title: "Find your frame", text: "Explore the full Bongkey collection." },
+  { title: "Eyeglasses", text: "Everyday frames with a clean, considered fit.", href: "/products?type=eyeglasses" },
+  { title: "Sunglasses", text: "Easy silhouettes for bright days.", href: "/products?type=sunglasses" },
+  { title: "Shop all", text: "Browse the full Bongkey collection.", href: "/products" },
 ];
 
 const shopNotes = [
-  { title: "Easy to explore", text: "Clear product details and pricing before you add a frame to your bag." },
-  { title: "Try it your way", text: "Use the available try-on preview to get a feel for a frame." },
-  { title: "Order with confidence", text: "Verify your email and review your order before checkout." },
+  { title: "Pick your frame", text: "Clear product details and pricing before you add a frame to your bag." },
+  { title: "Verify your email", text: "A one-time code keeps your order and invoice private to you." },
+  { title: "Pay on delivery", text: "Pay cash when your frame arrives. Your invoice is ready to download." },
 ];
 
 /** Home presents the live featured catalog with an original editorial hero image. */
@@ -33,35 +33,34 @@ export default function Home() {
     <>
       <section className="home-hero">
         <div className="home-hero-copy">
-          <p className="eyebrow">Bongkey eyewear / Bangladesh</p>
+          <p className="eyebrow">Bongkey eyewear · Bangladesh</p>
           <h1>See life <em>clearly.</em><br />Look entirely yourself.</h1>
           <p className="hero-description">Eyewear made for the way you live. Find a frame that feels right, with a simple path from browsing to checkout.</p>
           <div className="hero-actions">
-            <Button href="/products">Explore the collection <span aria-hidden="true">↗</span></Button>
-            <Button href="/products" variant="secondary">Shop all frames</Button>
+            <Button href="/products?type=eyeglasses">Shop eyeglasses</Button>
+            <Button href="/products?type=sunglasses" variant="secondary">Shop sunglasses</Button>
           </div>
-          <p className="hero-caption">Thoughtful style. Clear view. Everyday wear.</p>
+          <ul className="hero-perks"><li>Cash on delivery</li><li>Delivery across Bangladesh</li><li>Invoice with every order</li></ul>
         </div>
         <div className="home-hero-media">
           <Image alt="Woman and man wearing modern eyeglasses" fill priority sizes="(max-width: 1000px) 100vw, 55vw" src="/images/eyewear-editorial.png" />
-          <span className="hero-image-note">A better way to see your day.</span>
         </div>
       </section>
 
       <section className="home-section">
         <div className="section-heading">
-          <div><p className="eyebrow">01 / Discover</p><h2>Find your next frame.</h2></div>
+          <h2>Find your next frame</h2>
           <p>Simple choices, made for every day.</p>
         </div>
         <div className="category-grid">
-          {categories.map((category, index) => <CategoryCard key={category.title} index={index + 1} {...category} />)}
+          {categories.map((category) => <CategoryCard key={category.title} {...category} />)}
         </div>
       </section>
 
       <section className="home-section featured-section" id="featured">
         <div className="section-heading">
-          <div><p className="eyebrow">02 / Selected for you</p><h2>Featured eyewear.</h2></div>
-          <Button href="/products" variant="ghost">View all <span aria-hidden="true">↗</span></Button>
+          <h2>Featured frames</h2>
+          <Button href="/products" variant="ghost">View all</Button>
         </div>
         <div className="product-grid">
           {featured.map((product) => <ProductCard key={product.slug} product={product} />)}
@@ -75,11 +74,11 @@ export default function Home() {
           <h2>Good glasses make the everyday feel different.</h2>
         </div>
         <p>From your first look to the final fit, choosing a frame should feel clear and uncomplicated.</p>
-        <Button href="/products" variant="secondary">Discover frames <span aria-hidden="true">↗</span></Button>
+        <Button href="/products" variant="secondary">Discover frames</Button>
       </section>
 
       <section className="home-section" id="how-it-works">
-        <div className="section-heading"><div><p className="eyebrow">03 / How it works</p><h2>Shop with clarity.</h2></div></div>
+        <div className="section-heading"><h2>How ordering works</h2></div>
         <div className="notes-grid">{shopNotes.map((item, index) => <TrustBadge key={item.title} index={index + 1} {...item} />)}</div>
       </section>
     </>
