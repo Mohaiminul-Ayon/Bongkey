@@ -145,8 +145,17 @@ export async function fetchAdminOrder(id: string) {
   return adminRequest<AdminOrderDetail>(`/api/admin/orders/${encodeURIComponent(id)}`, { cache: "no-store" });
 }
 
-export async function fetchProducts() {
-  const data = await request<ApiProduct[]>("/api/products");
+/** CatalogFilter mirrors the backend's optional price range and sort query values. */
+export type CatalogFilter = { minPrice?: number; maxPrice?: number; sort?: "price_asc" | "price_desc" };
+
+/** fetchProducts asks the backend to filter and sort, so the shop never re-implements those rules. */
+export async function fetchProducts(filter: CatalogFilter = {}) {
+  const params = new URLSearchParams();
+  if (filter.minPrice) params.set("min_price", String(filter.minPrice));
+  if (filter.maxPrice) params.set("max_price", String(filter.maxPrice));
+  if (filter.sort) params.set("sort", filter.sort);
+  const query = params.toString();
+  const data = await request<ApiProduct[]>(`/api/products${query ? `?${query}` : ""}`);
   return data.map(toProduct);
 }
 

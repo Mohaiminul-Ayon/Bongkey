@@ -19,6 +19,7 @@ var (
 	ErrInvalidVariant       = errors.New("invalid variant")
 	ErrDuplicateVariant     = errors.New("duplicate variant")
 	ErrHasVariants          = errors.New("product has variants")
+	ErrInvalidFilter        = errors.New("invalid product filter")
 )
 
 // ProductInput is the set of product fields the owner may edit.
@@ -36,13 +37,13 @@ type ProductInput struct {
 
 // ProductRepository stores catalog products without HTTP concerns.
 type ProductRepository interface {
-	List(context.Context, bool, bool) ([]models.Product, error)
 	GetBySlug(context.Context, string) (models.Product, error)
 	Save(context.Context, int, ProductInput) (models.Product, error)
 	Delete(context.Context, int) error
 	SetActive(context.Context, int, bool) error
 	CreateVariant(context.Context, int, VariantInput) (models.Product, error)
 	ListVariants(context.Context, int, bool) ([]models.Product, error)
+	List(context.Context, bool, bool, ListFilter) ([]models.Product, error)
 }
 
 // VariantInput describes one sellable size and color with independent stock.
@@ -51,13 +52,38 @@ type VariantInput struct {
 	Price, StockQuantity int
 }
 
+// ListFilter narrows the public catalog by price and picks the sort order.
+// MaxPrice 0 means "no upper limit".
+type ListFilter struct {
+	MinPrice, MaxPrice int
+	Sort               string
+}
+
+// Validate rejects negative prices, a min above the max, and unknown sort names.
+func (f ListFilter) Validate() error {
+	if f.MinPrice < 0 || f.MaxPrice < 0 {
+		return ErrInvalidFilter
+	}
+	if f.MaxPrice > 0 && f.MinPrice > f.MaxPrice {
+		return ErrInvalidFilter
+	}
+	switch f.Sort {
+	case "", "newest", "price_asc", "price_desc":
+		return nil
+	}
+	return ErrInvalidFilter
+}
+
+// List validates the shopper's filter, then returns visible products or the full owner view.
+func (s ProductService) List(ctx context.Context, featuredOnly, includeInactive bool, filter ListFilter) ([]models.Product, error) {
+	if err := filter.Validate(); err != nil {
+		return nil, err
+	}
+	return s.Repository.List(ctx, featuredOnly, includeInactive, filter)
+}
+
 // ProductService owns editable product rules and delegates persistence.
 type ProductService struct{ Repository ProductRepository }
-
-// List returns visible products or the full owner view.
-func (s ProductService) List(ctx context.Context, featuredOnly, includeInactive bool) ([]models.Product, error) {
-	return s.Repository.List(ctx, featuredOnly, includeInactive)
-}
 
 // GetBySlug returns one published product.
 func (s ProductService) GetBySlug(ctx context.Context, slug string) (models.Product, error) {
