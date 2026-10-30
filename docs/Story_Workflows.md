@@ -177,6 +177,21 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence and limit:** Wrong/missing/cross-order HTTP proofs returned 404 without personal data; correct proof returned PDF bytes. The existing local PostgreSQL checkout fixture confirmed the invoice number, saved `issued_at` and item price for a matching email proof and denied a different email. The fixture was cleaned by the integration test. A rendered sample with Bangla name/address and English labels was visually inspected. Current checkout supports unpaid COD with zero paid and full balance; separately priced lenses, discounts, settled/partial payment records and legal/tax store details still need their own source data before their invoice fields can be considered launch ready. The owner still needs a browser download walkthrough.
 
+## PRICE-01 — Catalog price range and sort (#13)
+
+**Status:** Review/QA (2026-10-30). The owner wrote the backend with guidance; Go tests/vet, live API checks and a browser check passed. Owner browser review remains.
+
+**Request:** `GET /api/products?min_price=1000&max_price=2000&sort=price_asc`.
+
+1. The [shop page](../frontend/src/app/products/page.tsx) keeps `type`, `min`, `max` and `sort` in its own URL, checks the range in the browser, then [fetchProducts](../frontend/src/lib/api.ts) sends the backend query. Frame type (eyeglasses/sunglasses) is still filtered in the browser.
+2. [SetupRouter](../backend/internal/routes/routes.go) runs Gin logger/recovery → CORS → [ProductHandler.ListProducts](../backend/internal/handlers/product_handler.go), a public route without `AdminAuth`. `queryInt` turns the two prices into numbers; text like `abc` is answered with 400 here and the service is not called.
+3. [ProductService.List](../backend/internal/catalog/products.go) calls `ListFilter.Validate`: a negative price, a min above a non-zero max, or an unknown sort returns `ErrInvalidFilter` before any database read; `productError` maps it to 400.
+4. [PostgresProductRepository.List](../backend/internal/catalog/product_repository.go) binds the prices as `$3`/`$4` (`$4 = 0` means no upper limit) and picks `ORDER BY` from three fixed strings, never from request text. Ties sort by newest ID. Read-only: no transaction or write. JSON returns to the page, which filters by frame type and renders cards.
+
+**Limit:** the range uses each root frame's own price; a variant with a different price is not matched separately. Featured and admin lists pass an empty filter and behave as before.
+
+**Evidence:** [TestProductServiceListRejectsInvalidFilters](../backend/internal/catalog/products_test.go) and [TestListProductsRejectsBadPriceQueries](../backend/internal/handlers/product_list_handler_test.go) cover negative, inverted, non-numeric, decimal and unknown-sort input plus valid filters reaching storage. Live API: range 1,500–2,500 returned 8 frames, `price_asc`/`price_desc` ordered correctly, bad input returned 400. Browser: combined eyeglasses + range + sort, the min-above-max message, the empty state and Reset (keeps frame type) on desktop and phone.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

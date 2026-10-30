@@ -22,12 +22,25 @@ FROM products p
 LEFT JOIN categories c ON c.id = p.category_id
 `
 
-// List reads published or owner-visible products and checks row iteration errors.
-func (r PostgresProductRepository) List(ctx context.Context, featuredOnly, includeInactive bool) ([]models.Product, error) {
+// List reads products, applying the already-validated price range and sort order.
+func (r PostgresProductRepository) List(ctx context.Context, featuredOnly, includeInactive bool, filter ListFilter) ([]models.Product, error) {
 	if r.DB == nil {
 		return nil, ErrUnavailable
 	}
-	rows, err := r.DB.QueryContext(ctx, productSelectSQL+` WHERE ($1 OR (p.is_active = true AND p.parent_product_id IS NULL)) AND ($2 = false OR p.is_featured = true) ORDER BY p.id DESC`, includeInactive, featuredOnly)
+	// ORDER BY cannot take a $ parameter, so it is chosen from a fixed list, never from user text.
+	orderBy := "p.id DESC"
+	switch filter.Sort {
+	case "price_asc":
+		orderBy = "p.price ASC, p.id DESC"
+	case "price_desc":
+		orderBy = "p.price DESC, p.id DESC"
+	}
+	rows, err := r.DB.QueryContext(ctx, productSelectSQL+`
+		WHERE ($1 OR (p.is_active = true AND p.parent_product_id IS NULL))
+		AND ($2 = false OR p.is_featured = true)
+		AND p.price >= $3
+		AND ($4 = 0 OR p.price <= $4)
+		ORDER BY `+orderBy, includeInactive, featuredOnly, filter.MinPrice, filter.MaxPrice)
 	if err != nil {
 		return nil, err
 	}

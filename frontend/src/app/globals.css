@@ -141,6 +141,14 @@ html[data-theme="dark"] {
 .filter-chip:hover { border-color: var(--foreground); }
 .filter-chip[aria-current="page"] { border-color: var(--foreground); background: var(--foreground); color: var(--inverse); }
 .catalog-count { color: var(--muted); font-size: 14px; }
+.catalog-filters { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin: -12px 0 28px; }
+.price-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.price-filter label, .sort-select { display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+.price-filter input, .sort-select select { width: 140px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 999px; color: var(--foreground); font-size: 14px; }
+.sort-select select { width: 200px; }
+.price-filter .filter-chip { background: transparent; color: var(--foreground); }
+.price-reset { padding: 9px 4px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
+.price-error { margin: -16px 0 24px; color: #ae3333; font-size: 14px; }
 
 /* Product details */
 .product-page { max-width: 1320px; margin: auto; padding: 32px 32px 96px; }

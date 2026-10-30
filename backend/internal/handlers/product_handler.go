@@ -80,24 +80,46 @@ func (h ProductHandler) CreateVariant(c *gin.Context) {
 	c.JSON(http.StatusCreated, variant)
 }
 
-// ListProducts returns published catalog products.
+// ListProducts returns published products, optionally filtered by price and sorted.
 func (h ProductHandler) ListProducts(c *gin.Context) {
-	h.listProducts(c, false, false)
+	minPrice, ok := queryInt(c, "min_price")
+	if !ok {
+		return
+	}
+	maxPrice, ok := queryInt(c, "max_price")
+	if !ok {
+		return
+	}
+	h.listProducts(c, false, false, catalog.ListFilter{MinPrice: minPrice, MaxPrice: maxPrice, Sort: c.Query("sort")})
 }
 
 // ListFeaturedProducts returns published featured products.
 func (h ProductHandler) ListFeaturedProducts(c *gin.Context) {
-	h.listProducts(c, true, false)
+	h.listProducts(c, true, false, catalog.ListFilter{})
 }
 
 // AdminListProducts returns the owner catalog, including unpublished products.
 func (h ProductHandler) AdminListProducts(c *gin.Context) {
-	h.listProducts(c, false, true)
+	h.listProducts(c, false, true, catalog.ListFilter{})
+}
+
+// queryInt reads an optional whole-number query value; a missing value is 0, and text like "abc" gets a 400.
+func queryInt(c *gin.Context, name string) (int, bool) {
+	raw := c.Query(name)
+	if raw == "" {
+		return 0, true
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": name + " must be a whole number"})
+		return 0, false
+	}
+	return value, true
 }
 
 // listProducts delegates filtering and maps storage failures to safe responses.
-func (h ProductHandler) listProducts(c *gin.Context, featuredOnly, includeInactive bool) {
-	products, err := h.Service.List(c.Request.Context(), featuredOnly, includeInactive)
+func (h ProductHandler) listProducts(c *gin.Context, featuredOnly, includeInactive bool, filter catalog.ListFilter) {
+	products, err := h.Service.List(c.Request.Context(), featuredOnly, includeInactive, filter)
 	if err != nil {
 		productError(c, err, "could not load products")
 		return
@@ -201,6 +223,8 @@ func productID(c *gin.Context) (int, bool) {
 // productError exposes expected catalog outcomes while keeping storage details private.
 func productError(c *gin.Context, err error, fallback string) {
 	switch {
+	case errors.Is(err, catalog.ErrInvalidFilter):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "price range or sort is not valid"})
 	case errors.Is(err, catalog.ErrUnavailable):
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "database is not connected"})
 	case errors.Is(err, catalog.ErrNotFound):

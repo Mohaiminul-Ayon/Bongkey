@@ -51,3 +51,30 @@ func TestCreateVariantRejectsInvalidOptions(t *testing.T) {
 		t.Fatalf("valid variant error = %v; want repository call", err)
 	}
 }
+
+// TestProductServiceListRejectsInvalidFilters checks the price range and sort before storage is touched.
+func TestProductServiceListRejectsInvalidFilters(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		filter ListFilter
+		want   error
+	}{
+		{"negative min", ListFilter{MinPrice: -1}, ErrInvalidFilter},
+		{"negative max", ListFilter{MaxPrice: -1}, ErrInvalidFilter},
+		{"min above max", ListFilter{MinPrice: 3000, MaxPrice: 1000}, ErrInvalidFilter},
+		{"unknown sort", ListFilter{Sort: "cheapest"}, ErrInvalidFilter},
+		{"no filter reaches storage", ListFilter{}, ErrUnavailable},
+		{"min only, no upper limit", ListFilter{MinPrice: 1500}, ErrUnavailable},
+		{"equal min and max", ListFilter{MinPrice: 1500, MaxPrice: 1500, Sort: "price_asc"}, ErrUnavailable},
+		{"descending sort", ListFilter{Sort: "price_desc"}, ErrUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			// A repository without a database answers ErrUnavailable, which proves a valid filter got past validation.
+			service := ProductService{Repository: PostgresProductRepository{}}
+			_, err := service.List(context.Background(), false, false, test.filter)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("List error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
