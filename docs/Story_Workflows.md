@@ -192,6 +192,21 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence:** [TestProductServiceListRejectsInvalidFilters](../backend/internal/catalog/products_test.go) and [TestListProductsRejectsBadPriceQueries](../backend/internal/handlers/product_list_handler_test.go) cover negative, inverted, non-numeric, decimal and unknown-sort input plus valid filters reaching storage. Live API: range 1,500–2,500 returned 8 frames, `price_asc`/`price_desc` ordered correctly, bad input returned 400. Browser: combined eyeglasses + range + sort, the min-above-max message, the empty state and Reset (keeps frame type) on desktop and phone.
 
+## SEARCH-01 — Admin order search and filter (#10)
+
+**Status:** Review/QA (2026-10-31). Owner tested it in the browser and confirmed it works.
+
+**Request:** `GET /api/admin/orders?search=ORD-000018&status=pending&from=2026-10-01&to=2026-10-31`.
+
+1. The [admin orders page](../frontend/src/app/admin/orders/page.tsx) `applyFilter` sends only the filled fields through `adminRequest` and keeps them out of the page URL. `Load older orders` resends the same filter with `before`.
+2. [SetupRouter](../backend/internal/routes/routes.go) runs the logger, recovery, CORS, then `AdminAuth`. A missing or bad token is rejected by the middleware with 401, so the handler never runs. `logWithoutQuery` logs the path only, so phone numbers stay out of access logs.
+3. [OrderListHandler.ListOrders](../backend/internal/handlers/order_list_handler.go) parses `before`, then [NewAdminOrderFilter](../backend/internal/orders/repository.go) checks the length, known status and dates. Failure returns 400 from the handler before any database read. Days are Bangladesh time; `to` includes the whole day.
+4. [PostgresReader.ListAdmin](../backend/internal/orders/repository.go) binds every value as a parameter. Search matches part of the order number (any case) or phone using `position()`, so `%`, `_` and SQL text are plain characters. No match returns `[]`, and the page shows its empty message. A database failure returns a generic 500.
+
+**Limit:** phone search compares stored text as typed at checkout, so `01712345678` does not match a stored `017-1234-5678`. Customer name and email are not searched, by the owner's choice. No index was added; each search scans `orders`, which is fine at this size.
+
+**Evidence:** [TestListOrdersRejectsInvalidFilters](../backend/internal/handlers/order_list_handler_test.go), [TestAdminOrderSearchRequiresLogin and TestLogWithoutQueryDropsSearchTerms](../backend/internal/routes/routes_test.go), and the search cases in [TestCheckoutOrderPostgres](../backend/internal/orders/checkout_repository_integration_test.go).
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

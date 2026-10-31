@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
@@ -43,13 +43,16 @@ export default function AdminOrdersPage() {
   const [busyOrder, setBusyOrder] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
 
-  // loadOrders fetches the newest page, or the page older than the given order ID.
-  async function loadOrders(beforeID?: number) {
+  // loadOrders fetches the newest matching page, or the page older than the given order ID.
+  async function loadOrders(query: string, beforeID?: number) {
     setLoading(true);
     setError("");
     try {
-      const page = await adminRequest<OrderRow[]>(beforeID ? `/api/admin/orders?before=${beforeID}` : "/api/admin/orders");
+      const params = new URLSearchParams(query);
+      if (beforeID) params.set("before", String(beforeID));
+      const page = await adminRequest<OrderRow[]>(`/api/admin/orders?${params}`);
       setOrders((current) => (beforeID ? [...current, ...page] : page));
       setHasMore(page.length === orderPageSize);
     } catch (err) {
@@ -60,8 +63,26 @@ export default function AdminOrdersPage() {
   }
 
   useEffect(() => {
-    void loadOrders();
+    void loadOrders("");
   }, []);
+
+  // applyFilter sends only the filled fields; they stay out of the page URL because a phone is customer data.
+  function applyFilter(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const params = new URLSearchParams();
+    new FormData(event.currentTarget).forEach((value, key) => {
+      if (typeof value === "string" && value.trim()) params.set(key, value.trim());
+    });
+    const query = params.toString();
+    setFilterQuery(query);
+    void loadOrders(query);
+  }
+
+  // clearFilter runs when the browser empties the form and returns to the full list.
+  function clearFilter() {
+    setFilterQuery("");
+    void loadOrders("");
+  }
 
   // changeStatus updates only the row accepted by the backend state machine.
   async function changeStatus(order: OrderRow, status: string) {
@@ -84,10 +105,29 @@ export default function AdminOrdersPage() {
         <AdminNav />
         <div className="rounded-xl bg-white p-6 shadow-sm">
           <h1 className="text-3xl font-black">Orders</h1>
+          <form aria-label="Find orders" className="mt-5 flex flex-wrap items-end gap-3" onSubmit={applyFilter} onReset={clearFilter}>
+            <label className="grid gap-1 text-sm font-bold">Order number or phone
+              <input name="search" maxLength={50} className="w-64 rounded-md border border-neutral-300 px-3 py-2 font-normal" />
+            </label>
+            <label className="grid gap-1 text-sm font-bold">Status
+              <select name="status" className="rounded-md border border-neutral-300 px-3 py-2 font-normal">
+                <option value="">All</option>
+                {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-bold">From
+              <input name="from" type="date" className="rounded-md border border-neutral-300 px-3 py-2 font-normal" />
+            </label>
+            <label className="grid gap-1 text-sm font-bold">To
+              <input name="to" type="date" className="rounded-md border border-neutral-300 px-3 py-2 font-normal" />
+            </label>
+            <button type="submit" disabled={loading} className="rounded-md bg-neutral-950 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Search</button>
+            <button type="reset" disabled={loading} className="rounded-md border border-neutral-300 px-4 py-2 text-sm font-bold disabled:opacity-50">Clear</button>
+          </form>
           {error ? <p role="alert" className="mt-4 rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
           <div className="mt-5 grid gap-3">
             {loading ? <p>Loading orders...</p> : null}
-            {!loading && orders.length === 0 ? <p>No orders yet.</p> : null}
+            {!loading && orders.length === 0 ? <p>{filterQuery ? "No orders match this search." : "No orders yet."}</p> : null}
             {orders.map((order) => {
               const transitions = nextStatuses[order.order_status] ?? [];
               return (
@@ -122,7 +162,7 @@ export default function AdminOrdersPage() {
             })}
           </div>
           {hasMore ? (
-            <button type="button" disabled={loading} onClick={() => void loadOrders(orders[orders.length - 1]?.id)} className="mt-4 rounded-md border border-neutral-300 px-4 py-2 text-sm font-bold disabled:opacity-50">
+            <button type="button" disabled={loading} onClick={() => void loadOrders(filterQuery, orders[orders.length - 1]?.id)} className="mt-4 rounded-md border border-neutral-300 px-4 py-2 text-sm font-bold disabled:opacity-50">
               {loading ? "Loading..." : "Load older orders"}
             </button>
           ) : null}

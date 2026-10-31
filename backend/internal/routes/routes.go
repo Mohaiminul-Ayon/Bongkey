@@ -1,6 +1,9 @@
 package routes
 
 import (
+	"fmt"
+	"strings"
+
 	"bongkey/backend/internal/auth"
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
@@ -14,9 +17,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// logWithoutQuery formats one access-log line without the query string, because admin searches carry customer phone numbers.
+func logWithoutQuery(p gin.LogFormatterParams) string {
+	path, _, _ := strings.Cut(p.Path, "?")
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n%s",
+		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, p.Method, path, p.ErrorMessage)
+}
+
 // SetupRouter configures direct-client trust and registers routes for later HTTP requests.
 func SetupRouter(cfg config.Config) *gin.Engine {
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.LoggerWithFormatter(logWithoutQuery), gin.Recovery())
 	// Direct deployments must ignore forwarded client IP headers until an exact reverse proxy is configured.
 	if err := router.SetTrustedProxies(nil); err != nil {
 		panic("disable trusted proxies: " + err.Error())
