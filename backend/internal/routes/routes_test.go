@@ -3,11 +3,30 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"bongkey/backend/internal/config"
 	"github.com/gin-gonic/gin"
 )
+
+// TestLogWithoutQueryDropsSearchTerms keeps customer phone numbers out of access logs.
+func TestLogWithoutQueryDropsSearchTerms(t *testing.T) {
+	line := logWithoutQuery(gin.LogFormatterParams{Path: "/api/admin/orders?search=01712345678", Method: http.MethodGet})
+	if strings.Contains(line, "01712345678") || !strings.Contains(line, "/api/admin/orders") {
+		t.Fatalf("log line = %q", line)
+	}
+}
+
+// TestAdminOrderSearchRequiresLogin rejects a search before any order data is read.
+func TestAdminOrderSearchRequiresLogin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	SetupRouter(config.Config{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/admin/orders?search=ORD-000001", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", response.Code)
+	}
+}
 
 // TestSetupRouterIgnoresForwardedClientIP verifies that untrusted headers cannot spoof the client address.
 func TestSetupRouterIgnoresForwardedClientIP(t *testing.T) {

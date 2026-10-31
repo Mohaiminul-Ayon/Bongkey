@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -229,11 +230,11 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if _, err := access.Admin(ctx, "0"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("non-positive order ID must not match")
 	}
-	newest, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0)
+	newest, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0, AdminOrderFilter{})
 	if err != nil || len(newest) == 0 || len(newest) > AdminOrderPageSize || newest[0].ID != receipt.ID {
 		t.Fatal("newest admin page did not start with the new order")
 	}
-	older, err := (PostgresReader{DB: db}).ListAdmin(ctx, receipt.ID)
+	older, err := (PostgresReader{DB: db}).ListAdmin(ctx, receipt.ID, AdminOrderFilter{})
 	if err != nil {
 		t.Fatal("older admin page failed")
 	}
@@ -241,6 +242,27 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 		if listed.ID >= receipt.ID {
 			t.Fatal("older admin page repeated a newer order")
 		}
+	}
+	today := time.Now().In(shopZone).Format("2006-01-02")
+	for _, search := range []string{receipt.OrderNumber, strings.ToLower(receipt.OrderNumber), request.CustomerPhone} {
+		filter, err := NewAdminOrderFilter(search, "pending", today, today)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0, filter)
+		if err != nil || len(found) == 0 || found[0].ID != receipt.ID {
+			t.Fatalf("search %q did not find the new order: %v", search, err)
+		}
+	}
+	for _, search := range []string{"' OR '1'='1", "%"} {
+		found, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0, AdminOrderFilter{Search: search})
+		if err != nil || len(found) != 0 {
+			t.Fatalf("search %q must match literally, got %d orders, err %v", search, len(found), err)
+		}
+	}
+	exact, err := (PostgresReader{DB: db}).ListAdmin(ctx, 0, AdminOrderFilter{Search: receipt.OrderNumber})
+	if err != nil || len(exact) != 1 {
+		t.Fatalf("full order number found %d orders, err %v", len(exact), err)
 	}
 	otherProof, err := security.IssueEmailProof(emailSecret, "someone-else@example.invalid")
 	if err != nil {
