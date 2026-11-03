@@ -14,8 +14,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: backend/go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          echo "$unformatted"
+          test -z "$unformatted"
       - run: go vet ./...
-      - run: go test ./...
+      - run: go test -race ./...
 
   frontend:
     runs-on: ubuntu-latest
