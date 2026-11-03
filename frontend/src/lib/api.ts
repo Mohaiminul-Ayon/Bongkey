@@ -186,6 +186,22 @@ export async function updateDeliverySettings(deliveryFee: number, outsideDhakaFe
 }
 
 /** createOrder submits one retry-safe checkout attempt and receives its guest access token. */
+/** LensPackage is one fixed-price lens type; category_ids is only sent to the owner. */
+export type LensPackage = { id: number; name: string; description: string; price: number; sort_order: number; active: boolean; category_ids?: number[] };
+
+/** fetchLensPackages lists the enabled lens types that fit one frame. */
+export async function fetchLensPackages(slug: string) {
+  return request<LensPackage[]>(`/api/products/${encodeURIComponent(slug)}/lens-packages`, { cache: "no-store" });
+}
+
+/** saveLensPackage creates (no id) or edits a lens type and returns the owner's full list. */
+export async function saveLensPackage(pkg: Omit<LensPackage, "id">, id?: number) {
+  return adminRequest<LensPackage[]>(id ? `/api/admin/lens-packages/${id}` : "/api/admin/lens-packages", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(pkg),
+  });
+}
+
 export async function createOrder(payload: OrderPayload, idempotencyKey: string) {
   return request<{
     id: number;

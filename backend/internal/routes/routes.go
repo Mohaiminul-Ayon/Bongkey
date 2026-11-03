@@ -11,6 +11,7 @@ import (
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/emailotp"
 	"bongkey/backend/internal/handlers"
+	"bongkey/backend/internal/lens"
 	"bongkey/backend/internal/middleware"
 	"bongkey/backend/internal/orders"
 
@@ -55,6 +56,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	products := handlers.ProductHandler{Service: catalog.ProductService{
 		Repository: catalog.PostgresProductRepository{DB: database.DB},
 	}}
+	lensPackages := handlers.LensHandler{Service: lens.Service{Repository: lens.PostgresRepository{DB: database.DB}}}
 	categories := handlers.CategoryHandler{Service: catalog.CategoryService{Repository: catalog.PostgresCategoryRepository{DB: database.DB}}}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
 	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
@@ -67,6 +69,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.GET("/api/products", products.ListProducts)
 	router.GET("/api/products/featured", products.ListFeaturedProducts)
 	router.GET("/api/products/:slug", products.GetProduct)
+	router.GET("/api/products/:slug/lens-packages", lensPackages.ListForProduct)
 	router.GET("/api/categories", categories.ListCategories)
 	router.GET("/api/delivery-settings", deliverySettings.Get)
 	router.POST("/api/orders", checkout.CreateOrder)
@@ -97,6 +100,9 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
 	admin.PUT("/delivery-settings", deliverySettings.Update)
+	admin.GET("/lens-packages", lensPackages.AdminListPackages)
+	admin.POST("/lens-packages", lensPackages.CreatePackage)
+	admin.PUT("/lens-packages/:id", lensPackages.UpdatePackage)
 
 	return router
 }
