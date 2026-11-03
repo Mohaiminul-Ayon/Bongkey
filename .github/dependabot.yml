@@ -5,18 +5,27 @@ updates:
     schedule:
       interval: weekly
     groups:
-      go-minor:
-        update-types: [minor, patch]
+      backend-updates:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /frontend
     schedule:
       interval: weekly
     groups:
-      npm-minor:
-        update-types: [minor, patch]
+      frontend-updates:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      ci-updates:
+        patterns: ["*"]
