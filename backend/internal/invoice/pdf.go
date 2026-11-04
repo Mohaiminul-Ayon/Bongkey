@@ -44,9 +44,12 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 		if err := layout.line(fmt.Sprintf("%s | SKU %s | %d x BDT %d = BDT %d", item.ProductName, item.SKU, item.Quantity, item.UnitPrice, item.TotalPrice), 10); err != nil {
 			return nil, err
 		}
-		// Lens selections currently have no separately priced line in the accepted order.
-		if item.LensOption != "" && item.LensOption != "Frame only" {
-			if err := layout.line("Lens selection: "+item.LensOption+" (no separate charge)", 9); err != nil {
+		if item.LensKind != "" && item.LensKind != "none" {
+			lens := fmt.Sprintf("Lens: %s = BDT %d", item.LensOption, item.LensPrice)
+			if !item.LensPriceFinal {
+				lens = "Lens: " + item.LensOption + " (price to be confirmed)"
+			}
+			if err := layout.line(lens, 9); err != nil {
 				return nil, err
 			}
 		}
@@ -63,8 +66,8 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 			return nil, err
 		}
 	}
-	// Only unpaid COD is supported; other states must not invent a collected amount.
-	if order.PaymentStatus == "unpaid" {
+	// Only unpaid states have a known collected amount (zero); others must not invent one.
+	if order.PaymentStatus == "unpaid" || order.PaymentStatus == "advance_due" {
 		if err := layout.line(fmt.Sprintf("Paid: BDT 0 | Balance: BDT %d", order.Total), 11); err != nil {
 			return nil, err
 		}

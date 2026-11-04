@@ -16,8 +16,19 @@ import (
 
 const maxOrderAmount = 1<<31 - 1
 
-// frameOnlyLens is the only lens choice R0 can price; lens packages need server pricing and prescription review first.
+// frameOnlyLens labels lines without lenses.
 const frameOnlyLens = "Frame only"
+
+// Lens kinds and power choices accepted on an order line.
+const (
+	LensKindPackage = "package"
+	LensKindCustom  = "custom"
+	LensNoPower     = "no_power"
+	LensWithPower   = "with_power"
+)
+
+// maxPrescriptionLines bounds how many files one checkout may upload.
+const maxPrescriptionLines = 5
 
 var (
 	// ErrInvalidCheckout means the submitted order cannot be accepted as written.
@@ -30,13 +41,48 @@ var (
 	ErrDeliveryUnavailable = errors.New("delivery fee unavailable")
 	// ErrDeliveryFeeChanged requires customer consent to a changed delivery charge.
 	ErrDeliveryFeeChanged = errors.New("delivery fee changed")
+	// ErrLensUnavailable means the lens type is disabled or does not fit the chosen frame.
+	ErrLensUnavailable = errors.New("lens type unavailable for this frame")
 )
 
 // CheckoutItem is one requested product and lens choice.
+// Empty lens fields are left out of the retry fingerprint, so frame-only retries still match orders placed before lenses existed.
 type CheckoutItem struct {
-	ProductID  int
-	Quantity   int
-	LensOption string
+	ProductID     int
+	Quantity      int
+	LensOption    string
+	LensKind      string `json:",omitempty"`
+	LensPackageID int    `json:",omitempty"`
+	LensPower     string `json:",omitempty"`
+	// SPH values are hundredths of a diopter (-150 = -1.50); nil means the customer is not sure.
+	SPHRight *int `json:",omitempty"`
+	SPHLeft  *int `json:",omitempty"`
+	// Prescription is the uploaded file; it is stored privately and never fingerprinted.
+	Prescription []byte `json:"-"`
+}
+
+// LensChoice is the server's current price and rules for one lens type on one frame.
+type LensChoice struct {
+	Name                 string
+	Price                int
+	MaxPower             int
+	PrescriptionRequired bool
+}
+
+// OrderLine is the priced snapshot of one accepted item.
+type OrderLine struct {
+	LensName           string
+	LensPrice          int
+	LensPriceFinal     bool
+	PrescriptionFile   string
+	PrescriptionStatus string
+	LineTotal          int
+}
+
+// PrescriptionSaver stores uploaded prescriptions privately; Remove undoes a save whose order did not commit.
+type PrescriptionSaver interface {
+	Save([]byte) (string, error)
+	Remove(string)
 }
 
 // CheckoutRequest contains the customer details and items needed to place a COD order.
@@ -63,6 +109,7 @@ type CheckoutReceipt struct {
 	DeliveryFee      int
 	Total            int
 	GuestAccessToken string
+	PaymentMethod    string
 }
 
 // ReservedProduct contains the server-authoritative name and price of a reserved product.
@@ -76,8 +123,9 @@ type ReservedProduct struct {
 type CheckoutTx interface {
 	FindIdempotentOrder(context.Context, string) (CheckoutReceipt, string, bool, error)
 	ReserveProduct(context.Context, int, int) (ReservedProduct, error)
-	InsertOrder(context.Context, CheckoutRequest, int, int, int, string, string, string) (int, string, error)
-	InsertItem(context.Context, int, CheckoutItem, ReservedProduct, int) error
+	LensForProduct(ctx context.Context, packageID, productID int) (LensChoice, error)
+	InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, keyHash, requestHash, paymentMethod, paymentStatus string) (int, string, error)
+	InsertItem(context.Context, int, CheckoutItem, ReservedProduct, OrderLine) error
 	InsertInvoice(context.Context, int, CheckoutRequest, int, int, int) (string, error)
 }
 
@@ -97,6 +145,7 @@ type CheckoutService struct {
 	EmailProofSecret    string
 	OrderTokenSecret    string
 	DeliveryFeeProvider DeliveryFeeProvider
+	Prescriptions       PrescriptionSaver
 }
 
 // Place reserves products in a stable order and commits the order and invoice together.
@@ -107,11 +156,24 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	request.CustomerEmail = strings.ToLower(strings.TrimSpace(request.CustomerEmail))
 	request.EmailVerified = request.CustomerEmail != ""
 	quantities := make(map[int]int, len(request.Items))
+	hasLens, prescriptions := false, 0
 	for _, item := range request.Items {
-		if item.ProductID <= 0 || item.Quantity <= 0 || item.Quantity > maxOrderAmount-quantities[item.ProductID] {
+		if item.ProductID <= 0 || item.Quantity <= 0 || item.Quantity > maxOrderAmount-quantities[item.ProductID] || !validLensRequest(item) {
 			return CheckoutReceipt{}, ErrInvalidCheckout
 		}
 		quantities[item.ProductID] += item.Quantity
+		hasLens = hasLens || item.LensKind != ""
+		if item.Prescription != nil {
+			prescriptions++
+		}
+	}
+	if prescriptions > maxPrescriptionLines {
+		return CheckoutReceipt{}, ErrInvalidCheckout
+	}
+	// Lenses are cut to one customer's prescription, so lens orders need an advance instead of cash on delivery.
+	paymentMethod, paymentStatus := "cash_on_delivery", "unpaid"
+	if hasLens {
+		paymentMethod, paymentStatus = "advance", "advance_due"
 	}
 	productIDs := make([]int, 0, len(quantities))
 	for id := range quantities {
@@ -129,6 +191,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		return CheckoutReceipt{}, err
 	}
 	var receipt CheckoutReceipt
+	var savedFiles []string
 	err = s.Store.InTransaction(ctx, func(tx CheckoutTx) error {
 		existing, storedRequestHash, found, err := tx.FindIdempotentOrder(ctx, idempotencyKeyHash)
 		if err != nil {
@@ -141,9 +204,8 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			receipt = existing
 			return nil
 		}
-		// New orders stay frame-only until lens pricing and private prescriptions are implemented.
 		for _, item := range request.Items {
-			if item.LensOption != "" && item.LensOption != frameOnlyLens {
+			if item.LensKind == "" && item.LensOption != "" && item.LensOption != frameOnlyLens {
 				return ErrInvalidCheckout
 			}
 		}
@@ -184,24 +246,50 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			products[id] = product
 		}
 
+		lines := make([]OrderLine, len(request.Items))
 		subtotal := 0
-		for _, item := range request.Items {
-			lineTotal := int64(products[item.ProductID].Price) * int64(item.Quantity)
+		for i, item := range request.Items {
+			line := OrderLine{}
+			if item.LensKind == LensKindPackage {
+				choice, err := tx.LensForProduct(ctx, item.LensPackageID, item.ProductID)
+				if err != nil {
+					return err
+				}
+				if choice.PrescriptionRequired && item.LensPower != LensWithPower {
+					return ErrInvalidCheckout
+				}
+				line = priceLensLine(item, choice)
+			} else if item.LensKind == LensKindCustom {
+				line = OrderLine{LensName: "Custom lens", PrescriptionStatus: "pending"}
+			}
+			lineTotal := (int64(products[item.ProductID].Price) + int64(line.LensPrice)) * int64(item.Quantity)
 			if lineTotal > int64(maxOrderAmount)-int64(deliveryFee)-int64(subtotal) {
 				return ErrInvalidCheckout
 			}
+			line.LineTotal = int(lineTotal)
+			lines[i] = line
 			subtotal += int(lineTotal)
 		}
 		total := subtotal + deliveryFee
-		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash)
+		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash, paymentMethod, paymentStatus)
 		if err != nil {
 			return err
 		}
-		for _, item := range request.Items {
-			if item.LensOption == "" {
-				item.LensOption = frameOnlyLens
+		for i, item := range request.Items {
+			item.LensOption = lensLabel(item, lines[i])
+			// Files are written only after every price and stock rule passed; a later failure removes them below.
+			if item.Prescription != nil {
+				if s.Prescriptions == nil {
+					return ErrInvalidCheckout
+				}
+				name, err := s.Prescriptions.Save(item.Prescription)
+				if err != nil {
+					return err
+				}
+				savedFiles = append(savedFiles, name)
+				lines[i].PrescriptionFile = name
 			}
-			if err := tx.InsertItem(ctx, orderID, item, products[item.ProductID], products[item.ProductID].Price*item.Quantity); err != nil {
+			if err := tx.InsertItem(ctx, orderID, item, products[item.ProductID], lines[i]); err != nil {
 				return err
 			}
 		}
@@ -209,14 +297,76 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		if err != nil {
 			return err
 		}
-		receipt = CheckoutReceipt{ID: orderID, OrderNumber: orderNumber, InvoiceNumber: invoiceNumber, Subtotal: subtotal, DeliveryFee: deliveryFee, Total: total}
+		receipt = CheckoutReceipt{ID: orderID, OrderNumber: orderNumber, InvoiceNumber: invoiceNumber, Subtotal: subtotal, DeliveryFee: deliveryFee, Total: total, PaymentMethod: paymentMethod}
 		return nil
 	})
 	if err != nil {
+		for _, name := range savedFiles {
+			s.Prescriptions.Remove(name)
+		}
 		return CheckoutReceipt{}, err
 	}
 	receipt.GuestAccessToken = guestToken
 	return receipt, nil
+}
+
+// validLensRequest checks the shape of one line's lens choice before any database work.
+// Lens lines are one pair each, because each pair is made for one prescription.
+func validLensRequest(item CheckoutItem) bool {
+	switch item.LensKind {
+	case "":
+		// The frame-only label is checked after the retry lookup, so accepted legacy retries keep their receipt.
+		return item.LensPackageID == 0 && item.LensPower == "" && item.SPHRight == nil && item.SPHLeft == nil && item.Prescription == nil
+	case LensKindPackage:
+		if item.Quantity != 1 || item.LensPackageID <= 0 || item.LensOption != "" {
+			return false
+		}
+		if item.LensPower == LensNoPower {
+			return item.SPHRight == nil && item.SPHLeft == nil && item.Prescription == nil
+		}
+		return item.LensPower == LensWithPower && item.Prescription != nil && validSPH(item.SPHRight) && validSPH(item.SPHLeft)
+	case LensKindCustom:
+		// Custom details and powers are agreed in chat; a prescription file is optional here.
+		return item.Quantity == 1 && item.LensPackageID == 0 && item.LensPower == "" && item.LensOption == "" && item.SPHRight == nil && item.SPHLeft == nil
+	default:
+		return false
+	}
+}
+
+// validSPH accepts "not sure" or a power from -20.00 to +12.00 in 0.25 steps.
+func validSPH(sph *int) bool {
+	return sph == nil || (*sph >= -2000 && *sph <= 1200 && *sph%25 == 0)
+}
+
+// priceLensLine applies the fixed price; it is final only when the stated powers are known and within the type's limit.
+// Otherwise the owner confirms the price after checking the prescription, before taking the advance.
+func priceLensLine(item CheckoutItem, choice LensChoice) OrderLine {
+	line := OrderLine{LensName: choice.Name, LensPrice: choice.Price, LensPriceFinal: true}
+	if item.LensPower == LensWithPower {
+		line.PrescriptionStatus = "pending"
+		line.LensPriceFinal = withinPower(item.SPHRight, choice.MaxPower) && withinPower(item.SPHLeft, choice.MaxPower)
+	}
+	return line
+}
+
+// withinPower is false for "not sure", because an unknown power cannot be priced safely.
+func withinPower(sph *int, maxPower int) bool {
+	return sph != nil && *sph <= maxPower && *sph >= -maxPower
+}
+
+// lensLabel is the human-readable lens text saved on the line and shown on the invoice.
+func lensLabel(item CheckoutItem, line OrderLine) string {
+	switch item.LensKind {
+	case LensKindPackage:
+		if item.LensPower == LensWithPower {
+			return line.LensName + " · with power"
+		}
+		return line.LensName + " · no power"
+	case LensKindCustom:
+		return "Custom lens · price after chat"
+	default:
+		return frameOnlyLens
+	}
 }
 
 // ValidIdempotencyKey accepts opaque browser-generated retry keys with bounded safe characters.

@@ -28,6 +28,10 @@ type Package struct {
 	SortOrder   int     `json:"sort_order"`
 	Active      bool    `json:"active"`
 	CategoryIDs []int64 `json:"category_ids"`
+	// MaxPower is the highest SPH, in hundredths (600 = ±6.00), that the fixed price covers.
+	MaxPower int `json:"max_power"`
+	// PrescriptionRequired removes the "no power" choice, e.g. for power sunglass lenses.
+	PrescriptionRequired bool `json:"prescription_required"`
 }
 
 // Repository stores packages; Save replaces the category links in the same transaction.
@@ -53,7 +57,8 @@ func (s Service) Save(ctx context.Context, id int, pkg Package) error {
 	pkg.Name = strings.TrimSpace(pkg.Name)
 	pkg.Description = strings.TrimSpace(pkg.Description)
 	if pkg.Name == "" || utf8.RuneCountInString(pkg.Name) > 80 || utf8.RuneCountInString(pkg.Description) > 300 ||
-		pkg.Price <= 0 || pkg.Price > 200000 || pkg.SortOrder < 0 || pkg.SortOrder > 999 || len(pkg.CategoryIDs) > 50 {
+		pkg.Price <= 0 || pkg.Price > 200000 || pkg.SortOrder < 0 || pkg.SortOrder > 999 || len(pkg.CategoryIDs) > 50 ||
+		pkg.MaxPower < 25 || pkg.MaxPower > 2000 || pkg.MaxPower%25 != 0 {
 		return ErrInvalidPackage
 	}
 	seen := make(map[int64]bool, len(pkg.CategoryIDs))

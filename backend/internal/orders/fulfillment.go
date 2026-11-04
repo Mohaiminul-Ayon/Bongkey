@@ -20,6 +20,8 @@ type FulfillmentTx interface {
 	LockOrder(context.Context, int) (string, error)
 	RestoreStock(context.Context, int) error
 	UpdateStatus(context.Context, int, string, string) error
+	// LensReadiness returns nil, or the first lens step still open: price, prescription, then advance.
+	LensReadiness(context.Context, int) error
 }
 
 // FulfillmentStore supplies one database transaction for an order status change.
@@ -50,6 +52,12 @@ func (s FulfillmentService) ChangeStatus(ctx context.Context, orderID int, reque
 		}
 		if !allowedOrderTransition(current, next) {
 			return ErrInvalidOrderTransition
+		}
+		// Lens orders are made to measure, so they are confirmed only after the price, prescription and advance are settled.
+		if next == "confirmed" {
+			if err := tx.LensReadiness(ctx, orderID); err != nil {
+				return err
+			}
 		}
 		if next == "cancelled" {
 			if err := tx.RestoreStock(ctx, orderID); err != nil {

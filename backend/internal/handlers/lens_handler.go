@@ -16,6 +16,9 @@ type lensPackageRequest struct {
 	SortOrder   int     `json:"sort_order"`
 	Active      bool    `json:"active"`
 	CategoryIDs []int64 `json:"category_ids"`
+	MaxPower    int     `json:"max_power"`
+	// PrescriptionRequired matches the admin form's "prescription always required" tick.
+	PrescriptionRequired bool `json:"prescription_required"`
 }
 
 // LensHandler maps lens package HTTP input to lens operations.
@@ -64,10 +67,11 @@ func (h LensHandler) savePackage(c *gin.Context, id int) {
 	}
 	err := h.Service.Save(c.Request.Context(), id, lens.Package{
 		Name: req.Name, Description: req.Description, Price: req.Price, SortOrder: req.SortOrder, Active: req.Active, CategoryIDs: req.CategoryIDs,
+		MaxPower: req.MaxPower, PrescriptionRequired: req.PrescriptionRequired,
 	})
 	switch {
 	case errors.Is(err, lens.ErrInvalidPackage):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "name, a price above 0 and valid categories are required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name, a price above 0, a power limit in 0.25 steps and valid categories are required"})
 	case errors.Is(err, lens.ErrDuplicateName):
 		c.JSON(http.StatusConflict, gin.H{"error": "another lens package already has this name"})
 	case errors.Is(err, lens.ErrNotFound):

@@ -38,7 +38,11 @@ func TestPackagesPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+	lensOrders, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "012_lens_orders.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, string(migration)+string(lensOrders)); err != nil {
 		t.Fatal("could not apply lens migration")
 	}
 
@@ -63,9 +67,9 @@ func TestPackagesPostgres(t *testing.T) {
 
 	service := Service{Repository: PostgresRepository{DB: db}}
 	for _, pkg := range []Package{
-		{Name: "Fits " + suffix, Price: 1500, Active: true, CategoryIDs: []int64{fitsID}},
-		{Name: "Other " + suffix, Price: 2500, Active: true, CategoryIDs: []int64{otherID}},
-		{Name: "Off " + suffix, Price: 3500, Active: false, CategoryIDs: []int64{fitsID}},
+		{Name: "Fits " + suffix, Price: 1500, MaxPower: 600, Active: true, CategoryIDs: []int64{fitsID}},
+		{Name: "Other " + suffix, Price: 2500, MaxPower: 600, Active: true, CategoryIDs: []int64{otherID}},
+		{Name: "Off " + suffix, Price: 3500, MaxPower: 600, Active: false, CategoryIDs: []int64{fitsID}},
 	} {
 		if err := service.Save(ctx, 0, pkg); err != nil {
 			t.Fatalf("save %s: %v", pkg.Name, err)
@@ -75,13 +79,13 @@ func TestPackagesPostgres(t *testing.T) {
 	if err != nil || len(shown) != 1 || shown[0].Name != "Fits "+suffix || shown[0].Price != 1500 {
 		t.Fatalf("frame should see only the enabled package of its category: %+v, err %v", shown, err)
 	}
-	if err := service.Save(ctx, 0, Package{Name: "Fits " + suffix, Price: 900}); !errors.Is(err, ErrDuplicateName) {
+	if err := service.Save(ctx, 0, Package{Name: "Fits " + suffix, Price: 900, MaxPower: 600}); !errors.Is(err, ErrDuplicateName) {
 		t.Fatalf("duplicate name err = %v", err)
 	}
-	if err := service.Save(ctx, 0, Package{Name: "Ghost " + suffix, Price: 900, CategoryIDs: []int64{1 << 30}}); !errors.Is(err, ErrInvalidPackage) {
+	if err := service.Save(ctx, 0, Package{Name: "Ghost " + suffix, Price: 900, MaxPower: 600, CategoryIDs: []int64{1 << 30}}); !errors.Is(err, ErrInvalidPackage) {
 		t.Fatalf("unknown category err = %v", err)
 	}
-	if err := service.Save(ctx, 1<<30, Package{Name: "Missing " + suffix, Price: 900}); !errors.Is(err, ErrNotFound) {
+	if err := service.Save(ctx, 1<<30, Package{Name: "Missing " + suffix, Price: 900, MaxPower: 600}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing package err = %v", err)
 	}
 	all, err := service.ListAll(ctx)

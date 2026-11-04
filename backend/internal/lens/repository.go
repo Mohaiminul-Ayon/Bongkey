@@ -17,7 +17,7 @@ func (r PostgresRepository) ListAll(ctx context.Context) ([]Package, error) {
 		return nil, ErrUnavailable
 	}
 	rows, err := r.DB.QueryContext(ctx, `
-		SELECT p.id, p.name, p.description, p.price, p.sort_order, p.active,
+		SELECT p.id, p.name, p.description, p.price, p.sort_order, p.active, p.max_power, p.prescription_required,
 			COALESCE(array_agg(c.category_id ORDER BY c.category_id) FILTER (WHERE c.category_id IS NOT NULL), '{}')
 		FROM lens_packages p LEFT JOIN lens_package_categories c ON c.package_id = p.id
 		GROUP BY p.id ORDER BY p.sort_order, p.id`)
@@ -28,7 +28,7 @@ func (r PostgresRepository) ListAll(ctx context.Context) ([]Package, error) {
 	packages := make([]Package, 0)
 	for rows.Next() {
 		var pkg Package
-		if err := rows.Scan(&pkg.ID, &pkg.Name, &pkg.Description, &pkg.Price, &pkg.SortOrder, &pkg.Active, pq.Array(&pkg.CategoryIDs)); err != nil {
+		if err := rows.Scan(&pkg.ID, &pkg.Name, &pkg.Description, &pkg.Price, &pkg.SortOrder, &pkg.Active, &pkg.MaxPower, &pkg.PrescriptionRequired, pq.Array(&pkg.CategoryIDs)); err != nil {
 			return nil, err
 		}
 		packages = append(packages, pkg)
@@ -42,7 +42,7 @@ func (r PostgresRepository) ListForProduct(ctx context.Context, slug string) ([]
 		return nil, ErrUnavailable
 	}
 	rows, err := r.DB.QueryContext(ctx, `
-		SELECT p.id, p.name, p.description, p.price, p.sort_order
+		SELECT p.id, p.name, p.description, p.price, p.sort_order, p.max_power, p.prescription_required
 		FROM lens_packages p
 		JOIN lens_package_categories c ON c.package_id = p.id
 		JOIN products pr ON pr.category_id = c.category_id
@@ -55,7 +55,7 @@ func (r PostgresRepository) ListForProduct(ctx context.Context, slug string) ([]
 	packages := make([]Package, 0)
 	for rows.Next() {
 		pkg := Package{Active: true}
-		if err := rows.Scan(&pkg.ID, &pkg.Name, &pkg.Description, &pkg.Price, &pkg.SortOrder); err != nil {
+		if err := rows.Scan(&pkg.ID, &pkg.Name, &pkg.Description, &pkg.Price, &pkg.SortOrder, &pkg.MaxPower, &pkg.PrescriptionRequired); err != nil {
 			return nil, err
 		}
 		packages = append(packages, pkg)
@@ -75,13 +75,15 @@ func (r PostgresRepository) Save(ctx context.Context, id int, pkg Package) error
 	defer tx.Rollback()
 	if id == 0 {
 		err = tx.QueryRowContext(ctx, `
-			INSERT INTO lens_packages (name, description, price, sort_order, active) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-			pkg.Name, pkg.Description, pkg.Price, pkg.SortOrder, pkg.Active).Scan(&id)
+			INSERT INTO lens_packages (name, description, price, sort_order, active, max_power, prescription_required)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+			pkg.Name, pkg.Description, pkg.Price, pkg.SortOrder, pkg.Active, pkg.MaxPower, pkg.PrescriptionRequired).Scan(&id)
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, `
-			UPDATE lens_packages SET name = $1, description = $2, price = $3, sort_order = $4, active = $5, updated_at = NOW() WHERE id = $6`,
-			pkg.Name, pkg.Description, pkg.Price, pkg.SortOrder, pkg.Active, id)
+			UPDATE lens_packages SET name = $1, description = $2, price = $3, sort_order = $4, active = $5,
+				max_power = $6, prescription_required = $7, updated_at = NOW() WHERE id = $8`,
+			pkg.Name, pkg.Description, pkg.Price, pkg.SortOrder, pkg.Active, pkg.MaxPower, pkg.PrescriptionRequired, id)
 		if err == nil {
 			if affected, _ := result.RowsAffected(); affected == 0 {
 				return ErrNotFound

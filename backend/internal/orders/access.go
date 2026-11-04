@@ -23,6 +23,10 @@ type Summary struct {
 	DeliveryFee     int
 	Total           int
 	Status          string
+	// LensOrder means the order has lenses and is paid by advance, not cash on delivery.
+	LensOrder bool
+	// LensPricePending means the owner still has to confirm at least one lens price.
+	LensPricePending bool
 }
 
 // Record keeps the access hash inside the order boundary.
@@ -38,14 +42,25 @@ type Record struct {
 	InvoiceIssuedAt string
 }
 
-// Item is one accepted order line with its saved product name and price.
+// Item is one accepted order line with its saved product, lens choice and prices.
+// The prescription file name stays inside the service; viewers only learn whether one exists.
 type Item struct {
-	ProductName string `json:"product_name"`
-	SKU         string `json:"sku"`
-	LensOption  string `json:"lens_option"`
-	Quantity    int    `json:"quantity"`
-	UnitPrice   int    `json:"unit_price"`
-	TotalPrice  int    `json:"total_price"`
+	ID                 int    `json:"id"`
+	ProductName        string `json:"product_name"`
+	SKU                string `json:"sku"`
+	LensOption         string `json:"lens_option"`
+	Quantity           int    `json:"quantity"`
+	UnitPrice          int    `json:"unit_price"`
+	TotalPrice         int    `json:"total_price"`
+	LensKind           string `json:"lens_kind"`
+	LensName           string `json:"lens_name"`
+	LensPower          string `json:"lens_power"`
+	SPHRight           *int   `json:"sph_right"`
+	SPHLeft            *int   `json:"sph_left"`
+	LensPrice          int    `json:"lens_price"`
+	LensPriceFinal     bool   `json:"lens_price_final"`
+	PrescriptionStatus string `json:"prescription_status"`
+	HasPrescription    bool   `json:"has_prescription"`
 }
 
 // AdminDetail adds operational fields and item snapshots to the private order summary.

@@ -29,7 +29,7 @@ func (s *packageStoreStub) Save(_ context.Context, _ int, pkg Package) error {
 
 // TestServiceSaveRejectsInvalidPackages stops bad input before storage.
 func TestServiceSaveRejectsInvalidPackages(t *testing.T) {
-	valid := Package{Name: "Blue-cut", Price: 2500, CategoryIDs: []int64{1}}
+	valid := Package{Name: "Blue-cut", Price: 2500, MaxPower: 600, CategoryIDs: []int64{1}}
 	for name, change := range map[string]func(*Package){
 		"blank name":       func(p *Package) { p.Name = "  " },
 		"long name":        func(p *Package) { p.Name = strings.Repeat("a", 81) },
@@ -39,6 +39,8 @@ func TestServiceSaveRejectsInvalidPackages(t *testing.T) {
 		"negative order":   func(p *Package) { p.SortOrder = -1 },
 		"bad category":     func(p *Package) { p.CategoryIDs = []int64{0} },
 		"long description": func(p *Package) { p.Description = strings.Repeat("a", 301) },
+		"no power limit":   func(p *Package) { p.MaxPower = 0 },
+		"odd power step":   func(p *Package) { p.MaxPower = 610 },
 	} {
 		store := &packageStoreStub{}
 		pkg := valid
@@ -52,7 +54,7 @@ func TestServiceSaveRejectsInvalidPackages(t *testing.T) {
 // TestServiceSaveNormalizesInput trims text and drops repeated categories.
 func TestServiceSaveNormalizesInput(t *testing.T) {
 	store := &packageStoreStub{}
-	err := (Service{Repository: store}).Save(context.Background(), 0, Package{Name: "  Photochromic ", Price: 3500, CategoryIDs: []int64{2, 1, 2}})
+	err := (Service{Repository: store}).Save(context.Background(), 0, Package{Name: "  Photochromic ", Price: 3500, MaxPower: 600, CategoryIDs: []int64{2, 1, 2}})
 	if err != nil || store.saved.Name != "Photochromic" || len(store.saved.CategoryIDs) != 2 {
 		t.Fatalf("saved=%+v err=%v", store.saved, err)
 	}

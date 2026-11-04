@@ -35,6 +35,9 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	}
 	router.Use(middleware.CORS())
 	router.Static("/uploads", cfg.ProjectRoot+"/backend/uploads")
+	// Prescriptions live outside /uploads so the public static route can never serve them.
+	prescriptions := lens.PrescriptionStore{Dir: cfg.ProjectRoot + "/backend/private/prescriptions"}
+	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}}, Files: prescriptions}
 	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
@@ -44,6 +47,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		EmailProofSecret:    cfg.JWTSecret,
 		OrderTokenSecret:    cfg.JWTSecret,
 		DeliveryFeeProvider: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}},
+		Prescriptions:       prescriptions,
 	}}
 	deliverySettings := handlers.DeliverySettingsHandler{Service: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}}}
 	emailCodes := handlers.EmailOTPHandler{Service: emailotp.Service{
@@ -99,6 +103,10 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id", orderAccess.GetAdminOrder)
 	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
+	admin.POST("/orders/:id/advance-received", lensReview.MarkAdvanceReceived)
+	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
+	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)
+	admin.GET("/orders/:id/items/:itemId/prescription", lensReview.Prescription)
 	admin.PUT("/delivery-settings", deliverySettings.Update)
 	admin.GET("/lens-packages", lensPackages.AdminListPackages)
 	admin.POST("/lens-packages", lensPackages.CreatePackage)
