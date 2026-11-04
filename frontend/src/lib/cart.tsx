@@ -3,9 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Product } from "@/lib/products";
 import { fetchDeliverySettings, type DeliverySettings, type LensPackage } from "@/lib/api";
-import { lensPrice, validCartLens, type CartLens } from "@/lib/lens";
+import { lensPrice, sameLens, validCartLens, type CartLens } from "@/lib/lens";
 
-/** CartItem is one bag line. Frame-only lines merge per frame; each lens line is one pair with its own id. */
+/** CartItem is one bag line. Lines with the same frame and the same lens choice (type, power, both SPH) merge into one quantity. */
 export type CartItem = {
   lineId: string;
   product: Product;
@@ -78,17 +78,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       refreshDeliverySettings,
       addItem(product, lens) {
         setItems((current) => {
-          // Each lens pair is made for one prescription, so it is always its own line.
-          if (lens) return [...current, { lineId: newLineId(), product, quantity: 1, lensOption: "", lens }];
-          const existing = current.find((item) => !item.lens && item.product.slug === product.slug);
+          // Different powers stay separate lines, because each line gets one prescription.
+          const existing = current.find((item) => item.product.slug === product.slug && sameLens(item.lens, lens));
           if (existing) return current.map((item) => (item === existing ? { ...item, quantity: item.quantity + 1 } : item));
-          return [...current, { lineId: newLineId(), product, quantity: 1, lensOption: "Frame only" }];
+          return [...current, { lineId: newLineId(), product, quantity: 1, lensOption: lens ? "" : "Frame only", lens }];
         });
       },
       updateQuantity(lineId, quantity) {
         setItems((current) =>
           current
-            .map((item) => (item.lineId === lineId && (!item.lens || quantity <= 1) ? { ...item, quantity } : item))
+            .map((item) => (item.lineId === lineId ? { ...item, quantity } : item))
             .filter((item) => item.quantity > 0)
         );
       },
@@ -146,26 +145,22 @@ function loadSavedItems(): CartItem[] {
     if (!Array.isArray(saved)) return [];
     const valid = saved.filter((item): item is CartItem =>
       typeof item?.product?.slug === "string" && typeof item?.product?.price === "number" && Number.isSafeInteger(item?.quantity) && item.quantity > 0 &&
-      (item.lens === undefined || (validCartLens(item.lens) && item.quantity === 1)));
+      (item.lens === undefined || validCartLens(item.lens)));
     return normalizeItems(valid);
   } catch {
     return [];
   }
 }
 
-/** normalizeItems keeps lens lines as they are and merges frame-only lines per frame, including carts saved before line ids existed. */
+/** normalizeItems merges saved lines with the same frame and lens choice, including carts saved before line ids existed. */
 function normalizeItems(saved: CartItem[]) {
-  const frames = new Map<string, CartItem>();
-  const lensLines: CartItem[] = [];
+  const merged: CartItem[] = [];
   for (const item of saved) {
-    if (item.lens) {
-      lensLines.push({ ...item, lineId: item.lineId || newLineId(), lensOption: "" });
-      continue;
-    }
-    const existing = frames.get(item.product.slug);
-    frames.set(item.product.slug, { ...item, lineId: existing?.lineId || item.lineId || newLineId(), lensOption: "Frame only", quantity: (existing?.quantity ?? 0) + item.quantity });
+    const existing = merged.find((line) => line.product.slug === item.product.slug && sameLens(line.lens, item.lens));
+    if (existing) existing.quantity += item.quantity;
+    else merged.push({ ...item, lineId: item.lineId || newLineId(), lensOption: item.lens ? "" : "Frame only" });
   }
-  return [...frames.values(), ...lensLines];
+  return merged;
 }
 
 export function useCart() {

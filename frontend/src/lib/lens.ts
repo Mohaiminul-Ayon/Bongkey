@@ -43,6 +43,13 @@ export function lensSummary(lens?: CartLens) {
   return `${lens.name} · with power (R ${eye(lens.sphRight)}, L ${eye(lens.sphLeft)})`;
 }
 
+/** sameLens is true when two bag lines would be made identically, so they can share one line and one prescription. */
+export function sameLens(a?: CartLens, b?: CartLens) {
+  if (!a || !b) return !a && !b;
+  if (a.kind === "custom" || b.kind === "custom") return a.kind === b.kind;
+  return a.packageId === b.packageId && a.power === b.power && a.sphRight === b.sphRight && a.sphLeft === b.sphLeft;
+}
+
 /** needsPrescription says whether checkout must ask for a file for this line. */
 export function needsPrescription(lens?: CartLens) {
   return lens?.kind === "package" && lens.power === "with_power";

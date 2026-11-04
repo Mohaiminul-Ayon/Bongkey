@@ -252,7 +252,7 @@ export default function CheckoutPage() {
           </div>
           {items.filter((item) => item.lens).map((item) => (
             <div key={item.lineId} className="rounded-md border border-black/10 p-4">
-              <p className="text-sm font-black">{item.product.name} · {lensSummary(item.lens)}</p>
+              <p className="text-sm font-black">{item.product.name} · {lensSummary(item.lens)}{item.quantity > 1 ? ` · ${item.quantity} pairs (one prescription for all)` : ""}</p>
               {item.lens?.kind === "custom" ? <p className="mt-1 text-sm text-neutral-600">After ordering, chat with us on WhatsApp about your lens. You can attach a prescription now if you have one.</p> : null}
               {item.lens?.kind === "custom" || needsPrescription(item.lens) ? (
                 <label className="mt-3 grid gap-2 text-sm font-black">Prescription (PDF or photo, up to 5 MB){needsPrescription(item.lens) ? " — required" : " — optional"}

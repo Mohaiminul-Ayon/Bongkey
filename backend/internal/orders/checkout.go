@@ -311,14 +311,14 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 }
 
 // validLensRequest checks the shape of one line's lens choice before any database work.
-// Lens lines are one pair each, because each pair is made for one prescription.
+// A lens line may hold several identical pairs; they share the line's one prescription.
 func validLensRequest(item CheckoutItem) bool {
 	switch item.LensKind {
 	case "":
 		// The frame-only label is checked after the retry lookup, so accepted legacy retries keep their receipt.
 		return item.LensPackageID == 0 && item.LensPower == "" && item.SPHRight == nil && item.SPHLeft == nil && item.Prescription == nil
 	case LensKindPackage:
-		if item.Quantity != 1 || item.LensPackageID <= 0 || item.LensOption != "" {
+		if item.LensPackageID <= 0 || item.LensOption != "" {
 			return false
 		}
 		if item.LensPower == LensNoPower {
@@ -327,7 +327,7 @@ func validLensRequest(item CheckoutItem) bool {
 		return item.LensPower == LensWithPower && item.Prescription != nil && validSPH(item.SPHRight) && validSPH(item.SPHLeft)
 	case LensKindCustom:
 		// Custom details and powers are agreed in chat; a prescription file is optional here.
-		return item.Quantity == 1 && item.LensPackageID == 0 && item.LensPower == "" && item.LensOption == "" && item.SPHRight == nil && item.SPHLeft == nil
+		return item.LensPackageID == 0 && item.LensPower == "" && item.LensOption == "" && item.SPHRight == nil && item.SPHLeft == nil
 	default:
 		return false
 	}

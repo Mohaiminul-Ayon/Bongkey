@@ -76,7 +76,12 @@ func TestCheckoutPricesLensLines(t *testing.T) {
 			t.Fatalf("%s: lens order must ask for an advance, got %s/%s", name, tx.paymentMethod, tx.paymentStatus)
 		}
 	}
-	tx, _, _, err := lensCheckout(t, CheckoutItem{ProductID: 1, Quantity: 2})
+	// Two identical pairs on one line pay the frame and the lens twice and share one prescription.
+	tx, saver, receipt, err := lensCheckout(t, CheckoutItem{ProductID: 1, Quantity: 2, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHRight: power(-100), SPHLeft: power(-100), Prescription: file})
+	if err != nil || tx.lines[0].LineTotal != 2*(1000+2500) || receipt.Total != 2*(1000+2500)+80 || len(saver.saved) != 1 {
+		t.Fatalf("two pairs: line=%+v total=%d files=%d err=%v", tx.lines, receipt.Total, len(saver.saved), err)
+	}
+	tx, _, _, err = lensCheckout(t, CheckoutItem{ProductID: 1, Quantity: 2})
 	if err != nil || tx.paymentMethod != "cash_on_delivery" || tx.paymentStatus != "unpaid" {
 		t.Fatalf("frame-only order should stay cash on delivery: %s %v", tx.paymentMethod, err)
 	}
@@ -86,7 +91,6 @@ func TestCheckoutPricesLensLines(t *testing.T) {
 func TestCheckoutRejectsBadLensRequests(t *testing.T) {
 	file := []byte("%PDF-1.7")
 	for name, item := range map[string]CheckoutItem{
-		"two pairs on one line":     {ProductID: 1, Quantity: 2, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower},
 		"with power but no file":    {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower},
 		"no power with powers":      {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower, SPHRight: power(-100)},
 		"power off the 0.25 step":   {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHRight: power(-110), Prescription: file},
