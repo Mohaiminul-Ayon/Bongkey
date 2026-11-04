@@ -207,6 +207,25 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence:** [TestListOrdersRejectsInvalidFilters](../backend/internal/handlers/order_list_handler_test.go), [TestAdminOrderSearchRequiresLogin and TestLogWithoutQueryDropsSearchTerms](../backend/internal/routes/routes_test.go), and the search cases in [TestCheckoutOrderPostgres](../backend/internal/orders/checkout_repository_integration_test.go).
 
+## LENS-01 — Lens types, lens orders and prescriptions (#14, #15, #16)
+
+**Status:** In progress on `feat/lens` (2026-11-04). Owner browser review remains; no real lens order has been placed through the UI yet (checkout needs an email code).
+
+**Owner decisions:** lens types with fixed prices per category; "no power" or "with power" (SPH per eye, or "not sure"); PDF/photo prescription required for power; custom lens agreed in WhatsApp chat with the order number as the reference; no COD for lens orders; no AI reading of prescriptions.
+
+**Request:** `POST /api/orders` as multipart: field `order` (the JSON with `lens_kind`, `lens_package_id`, `lens_power`, `sph_right`, `sph_left` per item) and file `prescription_0`.
+
+1. The [product page](../frontend/src/app/products/[slug]/page.tsx) uses [LensPicker](../frontend/src/components/LensPicker.tsx), which loads `GET /api/products/:slug/lens-packages`. The bag keeps each lens pair as its own line ([cart.tsx](../frontend/src/lib/cart.tsx)). The [checkout page](../frontend/src/app/checkout/page.tsx) asks for a file per "with power" line, and `createOrder` sends multipart only when files exist.
+2. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go:55) → `readOrderRequest` (line 128) bounds the body, accepts only `prescription_<index>` fields and checks each file's bytes with [PrescriptionType](../backend/internal/lens/prescriptions.go:34). A bad file gets 400 before any database work.
+3. [CheckoutService.Place](../backend/internal/orders/checkout.go:152) runs `validLensRequest` (line 315): lens lines are one pair, "with power" needs a file, powers are -20.00 to +12.00 in 0.25 steps. Lens orders become `advance` / `advance_due`.
+4. Inside the checkout transaction, [LensForProduct](../backend/internal/orders/checkout_repository.go:75) returns the type only if it is enabled and linked to the frame's category; otherwise 409. `priceLensLine` (line 343) adds the server price and marks it final only for "no power" or both powers within the type's limit. Files are written (line 285) only after every rule passes, under random names in `backend/private/prescriptions`; a failed transaction deletes them (line 305).
+5. Owner review on the [admin order page](../frontend/src/app/admin/orders/[id]/page.tsx): [LensReviewHandler.Prescription](../backend/internal/handlers/lens_review_handler.go:72) streams the file after `AdminAuth` (no-store, nosniff, sandbox). [PostgresLensReviewStore](../backend/internal/orders/lens_review_repository.go:14) locks the order row for each decision: prescription status, final lens price (recomputes order and invoice totals, refused once the advance is recorded), and "advance received" (refused while any price is open).
+6. Confirming checks [LensReadiness](../backend/internal/orders/fulfillment_repository.go:73) while the order is locked: open price → prescription not accepted → advance missing, each a 409 with its own message.
+
+**Limits:** prescriptions are not encrypted on disk and are not deleted automatically after 6 months (needs a scheduled job; planned with production setup). The advance is collected by phone; bKash/Nagad in the website is #18. Frame-only exchange after delivery is a policy text only until returns (#22).
+
+**Evidence:** unit tests in [checkout_lens_test.go](../backend/internal/orders/checkout_lens_test.go), [prescriptions_test.go](../backend/internal/lens/prescriptions_test.go), [lens_order_handler_test.go](../backend/internal/handlers/lens_order_handler_test.go); local PostgreSQL [TestLensOrderLifecyclePostgres](../backend/internal/orders/lens_order_integration_test.go) runs checkout → price above limit stays open → owner price updates order and invoice → confirm blocked at each step → confirmed. Browser: lens chooser, custom lens through bag to checkout.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

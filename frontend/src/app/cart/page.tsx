@@ -5,12 +5,13 @@ import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { ProductVisual } from "@/components/ProductVisual";
 import { useCart } from "@/lib/cart";
+import { lensPrice, lensPriceKnown, lensSummary } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
 /** CartPage lets shoppers adjust bag quantities before checkout. */
 export default function CartPage() {
   const { items, subtotal, deliverySettings, updateQuantity, removeItem } = useCart();
-  const hasUnsupportedLens = items.some((item) => item.lensOption !== "Frame only");
+  const hasLens = items.some((item) => item.lens);
 
   return (
     <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
@@ -29,22 +30,25 @@ export default function CartPage() {
         <div className="grid gap-6 lg:grid-cols-[1fr_370px]">
           <div className="grid gap-4">
             {items.map((item) => (
-              <article key={`${item.product.slug}-${item.lensOption}`} className="grid gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:grid-cols-[150px_1fr]">
+              <article key={item.lineId} className="grid gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:grid-cols-[150px_1fr]">
                 <ProductVisual compact product={item.product} />
                 <div className="grid gap-4 md:grid-cols-[1fr_auto]">
                   <div>
                     <p className="text-xs font-black uppercase tracking-[0.14em] text-[#173c34]">{item.product.category}</p>
                     <Link href={`/products/${item.product.slug}`} className="mt-1 block text-xl font-black text-neutral-950 hover:text-[#173c34]">{item.product.name}</Link>
-                    <p className="mt-2 text-sm font-semibold text-neutral-500">{item.product.size} · {item.product.color} · {item.lensOption}</p>
-                    <button className="mt-5 text-sm font-black text-red-600" onClick={() => removeItem(item.product.slug, item.lensOption)}>Remove</button>
+                    <p className="mt-2 text-sm font-semibold text-neutral-500">{item.product.size} · {item.product.color} · {lensSummary(item.lens)}</p>
+                    {item.lens ? <p className="mt-1 text-sm text-neutral-600">Lens: {item.lens.kind === "custom" ? "price after chat" : `${formatPrice(lensPrice(item.lens))}${lensPriceKnown(item.lens) ? "" : " (confirmed after prescription check)"}`}</p> : null}
+                    <button className="mt-5 text-sm font-black text-red-600" onClick={() => removeItem(item.lineId)}>Remove</button>
                   </div>
                   <div className="flex items-center justify-between gap-4 md:block md:text-right">
-                    <p className="text-lg font-black">{formatPrice(item.product.price)}</p>
-                    <div className="mt-0 inline-flex items-center rounded-md border border-neutral-300 bg-white md:mt-4">
-                      <button className="px-3 py-2 font-black" onClick={() => updateQuantity(item.product.slug, item.lensOption, item.quantity - 1)}>-</button>
-                      <span className="min-w-10 px-2 text-center font-black">{item.quantity}</span>
-                      <button className="px-3 py-2 font-black" onClick={() => updateQuantity(item.product.slug, item.lensOption, item.quantity + 1)}>+</button>
-                    </div>
+                    <p className="text-lg font-black">{formatPrice(item.product.price + lensPrice(item.lens))}</p>
+                    {item.lens ? <p className="mt-0 text-sm font-semibold text-neutral-500 md:mt-4">1 pair</p> : (
+                      <div className="mt-0 inline-flex items-center rounded-md border border-neutral-300 bg-white md:mt-4">
+                        <button className="px-3 py-2 font-black" aria-label="One fewer" onClick={() => updateQuantity(item.lineId, item.quantity - 1)}>-</button>
+                        <span className="min-w-10 px-2 text-center font-black">{item.quantity}</span>
+                        <button className="px-3 py-2 font-black" aria-label="One more" onClick={() => updateQuantity(item.lineId, item.quantity + 1)}>+</button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </article>
@@ -58,8 +62,8 @@ export default function CartPage() {
               <div className="border-t border-black/10 pt-3" />
               <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">Calculated at checkout</span></div>
             </div>
-            {hasUnsupportedLens ? <p role="alert" className="mt-5 rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Lens packages are not available yet. Remove those items and add the frame-only option.</p> : <Button className="mt-6 w-full" href="/checkout">Go to checkout</Button>}
-            <p className="mt-4 rounded-md bg-[#f0f7f4] p-4 text-sm font-semibold leading-6 text-[#173c34]">Pay in cash when your order arrives. Your invoice will be available after confirmation.</p>
+            <Button className="mt-6 w-full" href="/checkout">Go to checkout</Button>
+            <p className="mt-4 rounded-md bg-[#f0f7f4] p-4 text-sm font-semibold leading-6 text-[#173c34]">{hasLens ? "Your bag has lenses: we confirm the lens price, then collect an advance by phone before making them. No cash on delivery for lens orders." : "Pay in cash when your order arrives. Your invoice will be available after confirmation."}</p>
           </aside>
         </div>
       )}

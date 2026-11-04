@@ -42,6 +42,9 @@ export default function AdminLensPage() {
         price: Number(form.get("price")),
         sort_order: Number(form.get("sort_order") || 0),
         active: form.get("active") === "on",
+        // The form takes diopters (6.00); the API stores hundredths (600).
+        max_power: Math.round(Number(form.get("max_power")) * 100),
+        prescription_required: form.get("prescription_required") === "on",
         category_ids: form.getAll("category_ids").map(Number),
       }, editing?.id);
       setPackages(list);
@@ -70,6 +73,10 @@ export default function AdminLensPage() {
               <label className="grid gap-1 text-sm font-bold">Price (৳)<input name="price" required type="number" min={1} step={1} defaultValue={editing?.price} className={inputClass} /></label>
               <label className="grid gap-1 text-sm font-bold">Display order<input name="sort_order" type="number" min={0} max={999} defaultValue={editing?.sort_order ?? 0} className={inputClass} /></label>
             </div>
+            <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+              <label className="grid gap-1 text-sm font-bold">Fixed price covers power up to ±<input name="max_power" required type="number" min={0.25} max={20} step={0.25} defaultValue={editing ? editing.max_power / 100 : 6} className={inputClass} /></label>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm font-bold"><input type="checkbox" name="prescription_required" defaultChecked={editing?.prescription_required} />Prescription always required (no &quot;No power&quot; choice, e.g. power sunglass lenses)</label>
+            </div>
             <label className="grid gap-1 text-sm font-bold">Description<input name="description" maxLength={300} defaultValue={editing?.description} placeholder="Filters blue light from screens" className={inputClass} /></label>
             <fieldset className="flex flex-wrap gap-4 text-sm">
               <legend className="mb-1 font-bold">Fits frames in</legend>
@@ -94,7 +101,7 @@ export default function AdminLensPage() {
                 <div>
                   <strong>{pkg.name}</strong> <span className="font-bold">{formatPrice(pkg.price)}</span>
                   {pkg.description ? <p className="text-sm text-neutral-600">{pkg.description}</p> : null}
-                  <p className="mt-1 text-sm text-neutral-600">Fits: {pkg.category_ids?.length ? pkg.category_ids.map(categoryName).join(", ") : "no category (hidden)"}</p>
+                  <p className="mt-1 text-sm text-neutral-600">Fits: {pkg.category_ids?.length ? pkg.category_ids.map(categoryName).join(", ") : "no category (hidden)"} · Fixed price up to ±{(pkg.max_power / 100).toFixed(2)}{pkg.prescription_required ? " · Prescription always required" : ""}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`rounded-full px-3 py-1 text-xs font-black uppercase ${pkg.active ? "bg-green-50 text-green-800" : "bg-neutral-100 text-neutral-600"}`}>{pkg.active ? "Enabled" : "Disabled"}</span>

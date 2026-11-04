@@ -4,8 +4,9 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { createOrder, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type OrderPayload } from "@/lib/api";
+import { createOrder, fetchLensPackages, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
+import { lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
 
 const checkoutAttemptStorageKey = "bongkey_checkout_attempt";
@@ -20,6 +21,17 @@ async function fetchCartVariants(items: CartItem[]) {
     })));
   return found.filter((product): product is Product => product !== null);
 }
+
+/** fetchCartLensTypes reads today's lens types for every frame that has a lens line, keyed by product slug. */
+async function fetchCartLensTypes(items: CartItem[]) {
+  const slugs = [...new Set(items.filter((item) => item.lens?.kind === "package").map((item) => item.product.slug))];
+  const lists = await Promise.all(slugs.map((slug) => fetchLensPackages(slug)));
+  return new Map<string, LensPackage[]>(slugs.map((slug, i) => [slug, lists[i]]));
+}
+
+// acceptedPrescriptionTypes matches what the server accepts; the server still checks the file's content.
+const acceptedPrescriptionTypes = ".pdf,.jpg,.jpeg,.png,.heic,application/pdf,image/jpeg,image/png,image/heic";
+const maxPrescriptionBytes = 5 * 1024 * 1024;
 
 /** checkoutIdempotencyKey reuses a pending key only while the business payload is unchanged. */
 function checkoutIdempotencyKey(payload: OrderPayload) {
@@ -70,14 +82,18 @@ export default function CheckoutPage() {
   const [emailProof, setEmailProof] = useState("");
   const [emailBusy, setEmailBusy] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  // Prescription files by bag line; files stay in memory and are sent only with the order.
+  const [prescriptions, setPrescriptions] = useState<Map<string, File>>(new Map());
+  const hasLens = items.some((item) => item.lens);
+  const pricePending = items.some((item) => item.lens && !lensPriceKnown(item.lens));
 
   /** checkCurrentPrices replaces saved cart prices with the live catalog so the shown total matches what the server charges. */
   async function checkCurrentPrices() {
     setPriceCheck("checking");
     try {
       // Prices and delivery charges are confirmed together so the summary matches what the server will accept.
-      const [products, variants] = await Promise.all([fetchProducts(), fetchCartVariants(items), refreshDeliverySettings()]);
-      setPriceChanges(refreshProducts([...products, ...variants]));
+      const [products, variants, lensTypes] = await Promise.all([fetchProducts(), fetchCartVariants(items), fetchCartLensTypes(items), refreshDeliverySettings()]);
+      setPriceChanges(refreshProducts([...products, ...variants], lensTypes));
       setPriceCheck("ready");
     } catch {
       setPriceCheck("failed");
@@ -119,6 +135,18 @@ export default function CheckoutPage() {
     }
   }
 
+  /** choosePrescription keeps one file per line after a quick type and size check; the server checks the content again. */
+  function choosePrescription(lineId: string, file: File | undefined) {
+    setError("");
+    const next = new Map(prescriptions);
+    if (!file) next.delete(lineId);
+    else if (file.size > maxPrescriptionBytes) {
+      setError("A prescription file must be 5 MB or smaller.");
+      return;
+    } else next.set(lineId, file);
+    setPrescriptions(next);
+  }
+
   /** submitOrder stores the returned token only after the server accepts the order. */
   async function submitOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -135,8 +163,8 @@ export default function CheckoutPage() {
       setError("An item in your cart is no longer available. Remove it and add it again from the shop.");
       return;
     }
-    if (items.some((item) => item.lensOption !== "Frame only")) {
-      setError("Lens packages are not available yet. Remove those items and add the frame-only option.");
+    if (items.some((item) => needsPrescription(item.lens) && !prescriptions.has(item.lineId))) {
+      setError("Upload a prescription for each pair with power.");
       return;
     }
     if (!email.trim() || !emailProof) {
@@ -163,10 +191,16 @@ export default function CheckoutPage() {
         items: items.map((item) => ({
           product_id: item.product.id!,
           quantity: item.quantity,
-          lens_option: item.lensOption,
+          lens_option: item.lens ? "" : item.lensOption,
+          ...lensPayload(item.lens),
         })),
       };
-      const order = await createOrder(payload, checkoutIdempotencyKey(payload));
+      const files = new Map<number, File>();
+      items.forEach((item, index) => {
+        const file = prescriptions.get(item.lineId);
+        if (file && item.lens) files.set(index, file);
+      });
+      const order = await createOrder(payload, checkoutIdempotencyKey(payload), files);
       clearCheckoutAttempt();
       try {
         // Keep guest order access in this browser alongside verified-email recovery.
@@ -193,7 +227,7 @@ export default function CheckoutPage() {
       <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
         <CheckoutSteps current={2} />
         <h1 className="mt-2 text-4xl font-black text-neutral-950">Delivery details</h1>
-        <p className="mt-3 text-neutral-600">Enter delivery details for your frame-only order.</p>
+        <p className="mt-3 text-neutral-600">Enter your delivery details{hasLens ? " and upload your prescription" : ""}.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
@@ -216,10 +250,27 @@ export default function CheckoutPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">District<select name="city" required value={district} onChange={(event) => setDistrict(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]"><option value="">Select district</option>{deliverySettings?.districts.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
+          {items.filter((item) => item.lens).map((item) => (
+            <div key={item.lineId} className="rounded-md border border-black/10 p-4">
+              <p className="text-sm font-black">{item.product.name} · {lensSummary(item.lens)}</p>
+              {item.lens?.kind === "custom" ? <p className="mt-1 text-sm text-neutral-600">After ordering, chat with us on WhatsApp about your lens. You can attach a prescription now if you have one.</p> : null}
+              {item.lens?.kind === "custom" || needsPrescription(item.lens) ? (
+                <label className="mt-3 grid gap-2 text-sm font-black">Prescription (PDF or photo, up to 5 MB){needsPrescription(item.lens) ? " — required" : " — optional"}
+                  <input type="file" accept={acceptedPrescriptionTypes} required={needsPrescription(item.lens)} onChange={(event) => choosePrescription(item.lineId, event.target.files?.[0])} className="font-normal" />
+                </label>
+              ) : <p className="mt-1 text-sm text-neutral-600">No prescription needed for no-power lenses.</p>}
+            </div>
+          ))}
           <label className="grid gap-2 text-sm font-black">Delivery note<input name="note" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Preferred delivery time or special instruction" /></label>
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
-            <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
-            <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
+            {hasLens ? <>
+              <p className="text-sm font-black text-[#173c34]">Payment: advance before we make your lenses (no cash on delivery)</p>
+              <p className="mt-1 text-sm leading-6 text-[#173c34]">We check your prescription{pricePending ? ", confirm the final lens price" : ""} and call you to collect the advance by bKash. Nothing is made before that.</p>
+              <p className="mt-2 text-sm leading-6 text-[#173c34]">Lenses are made for you and can&apos;t be returned. The frame can be exchanged; a new lens is paid again.</p>
+            </> : <>
+              <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
+              <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
+            </>}
           </div>
           {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : "Place order"}</Button> : null}
         </form>
@@ -236,16 +287,17 @@ export default function CheckoutPage() {
           ) : null}
           <div className="mt-5 grid gap-4">
             {items.length === 0 ? <p className="text-sm text-neutral-600">Your cart is empty.</p> : items.map((item) => (
-              <div key={`${item.product.slug}-${item.lensOption}`} className="flex justify-between gap-4 text-sm">
-                <div><p className="font-black text-neutral-950">{item.product.name}</p><p className="mt-1 text-neutral-500">{item.product.color} · {item.product.size}{item.product.sku ? ` · ${item.product.sku}` : ""} · {item.quantity} x {item.lensOption}</p></div>
-                <p className="font-black">{formatPrice(item.product.price * item.quantity)}</p>
+              <div key={item.lineId} className="flex justify-between gap-4 text-sm">
+                <div><p className="font-black text-neutral-950">{item.product.name}</p><p className="mt-1 text-neutral-500">{item.product.color} · {item.product.size}{item.product.sku ? ` · ${item.product.sku}` : ""} · {item.quantity} x {lensSummary(item.lens)}</p>{item.lens && !lensPriceKnown(item.lens) ? <p className="mt-1 text-[#7b531c]">Lens price {item.lens.kind === "custom" ? "agreed in chat" : "confirmed after prescription check"}</p> : null}</div>
+                <p className="font-black">{formatPrice((item.product.price + lensPrice(item.lens)) * item.quantity)}</p>
               </div>
             ))}
           </div>
           <div className="mt-5 grid gap-3 border-t border-black/10 pt-4 text-sm">
             <div className="flex justify-between"><span className="text-neutral-600">Subtotal</span><span className="font-black">{formatPrice(subtotal)}</span></div>
             <div className="flex justify-between"><span className="text-neutral-600">Delivery</span><span className="font-black">{deliveryFee === null ? "Select district to calculate" : formatPrice(deliveryFee)}</span></div>
-            <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">{total === null ? "—" : formatPrice(total)}</span></div>
+            <div className="flex justify-between text-xl"><span className="font-black">{pricePending ? "Estimated total" : "Total"}</span><span className="font-black">{total === null ? "—" : formatPrice(total)}</span></div>
+            {pricePending ? <p className="text-[#7b531c]">The final total is confirmed by phone before you pay.</p> : null}
           </div>
           <p className="mt-5 rounded-md bg-amber-50 p-4 text-sm font-semibold leading-6 text-[#7b531c]">Bongkey support may call to confirm your order before dispatch.</p>
         </aside>

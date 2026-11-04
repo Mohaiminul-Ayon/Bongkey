@@ -2,12 +2,16 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Product } from "@/lib/products";
-import { fetchDeliverySettings, type DeliverySettings } from "@/lib/api";
+import { fetchDeliverySettings, type DeliverySettings, type LensPackage } from "@/lib/api";
+import { lensPrice, validCartLens, type CartLens } from "@/lib/lens";
 
+/** CartItem is one bag line. Frame-only lines merge per frame; each lens line is one pair with its own id. */
 export type CartItem = {
+  lineId: string;
   product: Product;
   quantity: number;
   lensOption: string;
+  lens?: CartLens;
 };
 
 type CartContextValue = {
@@ -17,11 +21,11 @@ type CartContextValue = {
   subtotal: number;
   deliverySettings: DeliverySettings | null;
   refreshDeliverySettings: () => Promise<void>;
-  addItem: (product: Product, lensOption?: string) => void;
-  updateQuantity: (slug: string, lensOption: string, quantity: number) => void;
-  removeItem: (slug: string, lensOption: string) => void;
+  addItem: (product: Product, lens?: CartLens) => void;
+  updateQuantity: (lineId: string, quantity: number) => void;
+  removeItem: (lineId: string) => void;
   clearCart: () => void;
-  refreshProducts: (current: Product[]) => string[];
+  refreshProducts: (current: Product[], lensTypes?: Map<string, LensPackage[]>) => string[];
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -64,7 +68,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [refreshDeliverySettings]);
 
   const value = useMemo<CartContextValue>(() => {
-    const subtotal = items.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+    const subtotal = items.reduce((sum, item) => sum + (item.product.price + lensPrice(item.lens)) * item.quantity, 0);
     return {
       items,
       ready,
@@ -72,33 +76,30 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       subtotal,
       deliverySettings,
       refreshDeliverySettings,
-      addItem(product, lensOption = "Frame only") {
+      addItem(product, lens) {
         setItems((current) => {
-          const existing = current.find((item) => item.product.slug === product.slug && item.lensOption === lensOption);
-          if (existing) {
-            return current.map((item) =>
-              item.product.slug === product.slug && item.lensOption === lensOption
-                ? { ...item, quantity: item.quantity + 1 }
-                : item
-            );
-          }
-          return [...current, { product, quantity: 1, lensOption }];
+          // Each lens pair is made for one prescription, so it is always its own line.
+          if (lens) return [...current, { lineId: newLineId(), product, quantity: 1, lensOption: "", lens }];
+          const existing = current.find((item) => !item.lens && item.product.slug === product.slug);
+          if (existing) return current.map((item) => (item === existing ? { ...item, quantity: item.quantity + 1 } : item));
+          return [...current, { lineId: newLineId(), product, quantity: 1, lensOption: "Frame only" }];
         });
       },
-      updateQuantity(slug, lensOption, quantity) {
+      updateQuantity(lineId, quantity) {
         setItems((current) =>
           current
-            .map((item) => (item.product.slug === slug && item.lensOption === lensOption ? { ...item, quantity } : item))
+            .map((item) => (item.lineId === lineId && (!item.lens || quantity <= 1) ? { ...item, quantity } : item))
             .filter((item) => item.quantity > 0)
         );
       },
-      removeItem(slug, lensOption) {
-        setItems((current) => current.filter((item) => item.product.slug !== slug || item.lensOption !== lensOption));
+      removeItem(lineId) {
+        setItems((current) => current.filter((item) => item.lineId !== lineId));
       },
       clearCart() {
         setItems([]);
       },
-      refreshProducts(current) {
+      // refreshProducts swaps in live frame prices and, for lens lines, today's lens types (keyed by product slug), in one update.
+      refreshProducts(current, lensTypes = new Map()) {
         const byId = new Map(current.map((product) => [product.id, product]));
         const changes: string[] = [];
         const refreshed: CartItem[] = [];
@@ -111,7 +112,18 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           if (latest.price !== item.product.price) {
             changes.push(`${latest.name} price changed from ${item.product.price} to ${latest.price} BDT.`);
           }
-          refreshed.push({ ...item, product: latest });
+          const lens = item.lens;
+          if (lens?.kind !== "package") {
+            refreshed.push({ ...item, product: latest });
+            continue;
+          }
+          const lensType = lensTypes.get(item.product.slug)?.find((pkg) => pkg.id === lens.packageId);
+          if (!lensType || (lens.power === "no_power" && lensType.prescription_required)) {
+            changes.push(`${lens.name} lens is no longer available for ${latest.name}; that line was removed. Please choose again.`);
+            continue;
+          }
+          if (lensType.price !== lens.price) changes.push(`${lensType.name} lens price changed from ${lens.price} to ${lensType.price} BDT.`);
+          refreshed.push({ ...item, product: latest, lens: { ...lens, name: lensType.name, price: lensType.price, maxPower: lensType.max_power } });
         }
         setItems(refreshed);
         return changes;
@@ -122,27 +134,38 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
+/** newLineId names a bag line so two pairs of the same frame stay separate. */
+function newLineId() {
+  return crypto.randomUUID();
+}
+
 /** loadSavedItems reads the stored cart and starts empty when storage is blocked, corrupt, or from an old shape. */
 function loadSavedItems(): CartItem[] {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
     if (!Array.isArray(saved)) return [];
     const valid = saved.filter((item): item is CartItem =>
-      typeof item?.product?.slug === "string" && typeof item?.product?.price === "number" && Number.isSafeInteger(item?.quantity) && item.quantity > 0);
-    return frameOnlyItems(valid);
+      typeof item?.product?.slug === "string" && typeof item?.product?.price === "number" && Number.isSafeInteger(item?.quantity) && item.quantity > 0 &&
+      (item.lens === undefined || (validCartLens(item.lens) && item.quantity === 1)));
+    return normalizeItems(valid);
   } catch {
     return [];
   }
 }
 
-/** frameOnlyItems merges carts saved before lens options were withdrawn, because checkout now accepts frames only. */
-function frameOnlyItems(saved: CartItem[]) {
-  const merged = new Map<string, CartItem>();
+/** normalizeItems keeps lens lines as they are and merges frame-only lines per frame, including carts saved before line ids existed. */
+function normalizeItems(saved: CartItem[]) {
+  const frames = new Map<string, CartItem>();
+  const lensLines: CartItem[] = [];
   for (const item of saved) {
-    const existing = merged.get(item.product.slug);
-    merged.set(item.product.slug, { ...item, lensOption: "Frame only", quantity: (existing?.quantity ?? 0) + item.quantity });
+    if (item.lens) {
+      lensLines.push({ ...item, lineId: item.lineId || newLineId(), lensOption: "" });
+      continue;
+    }
+    const existing = frames.get(item.product.slug);
+    frames.set(item.product.slug, { ...item, lineId: existing?.lineId || item.lineId || newLineId(), lensOption: "Frame only", quantity: (existing?.quantity ?? 0) + item.quantity });
   }
-  return [...merged.values()];
+  return [...frames.values(), ...lensLines];
 }
 
 export function useCart() {
