@@ -45,6 +45,7 @@ Before the first backend start, fill in these values in `.env`:
 | Variable | Required | Notes |
 |---|---|---|
 | `JWT_SECRET` | Yes | Random, at least 32 characters. The backend refuses to start without it. |
+| `FRONTEND_ORIGIN` | No | Exact browser origin(s) of the shop frontend, comma-separated. Default `http://localhost:3000`. Other websites get no CORS permission. Set it to the real site address when deploying. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First start | Creates the one owner account when the admin table is empty. Password at least 12 characters. Later starts never change it. |
 | `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |

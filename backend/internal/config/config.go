@@ -17,9 +17,11 @@ type Config struct {
 	JWTSecret        string
 	GmailFrom        string
 	GmailAppPassword string
-	ProjectRoot      string
-	EnvFile          string
-	EnvFileHint      string
+	// FrontendOrigins are the browser origins allowed to read API responses (CORS).
+	FrontendOrigins []string
+	ProjectRoot     string
+	EnvFile         string
+	EnvFileHint     string
 }
 
 func Load() (Config, error) {
@@ -44,6 +46,7 @@ func Load() (Config, error) {
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		GmailFrom:        getEnv("GMAIL_FROM", ""),
 		GmailAppPassword: getEnv("GMAIL_APP_PASSWORD", ""),
+		FrontendOrigins:  strings.Split(getEnv("FRONTEND_ORIGIN", "http://localhost:3000"), ","),
 		ProjectRoot:      projectRoot,
 		EnvFile:          loadedEnvFile,
 		EnvFileHint:      envFileHint,

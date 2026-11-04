@@ -9,16 +9,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// TestCORSAllowsCheckoutIdempotencyHeader keeps browser preflight aligned with checkout.
-func TestCORSAllowsCheckoutIdempotencyHeader(t *testing.T) {
+// preflight sends one browser preflight for checkout from the given origin.
+func preflight(origin string) *httptest.ResponseRecorder {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	router.Use(CORS())
+	router.Use(CORS([]string{"http://localhost:3000"}))
 	router.POST("/api/orders", func(c *gin.Context) { c.Status(http.StatusOK) })
 	request := httptest.NewRequest(http.MethodOptions, "/api/orders", nil)
+	request.Header.Set("Origin", origin)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusNoContent || !strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key") {
-		t.Fatalf("preflight status=%d headers=%q", response.Code, response.Header().Get("Access-Control-Allow-Headers"))
+	return response
+}
+
+// TestCORSAllowsCheckoutIdempotencyHeader keeps browser preflight aligned with checkout for the shop's frontend.
+func TestCORSAllowsCheckoutIdempotencyHeader(t *testing.T) {
+	response := preflight("http://localhost:3000")
+	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" ||
+		!strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key") {
+		t.Fatalf("preflight status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+// TestCORSIgnoresOtherOrigins gives other websites no permission to read API responses.
+func TestCORSIgnoresOtherOrigins(t *testing.T) {
+	response := preflight("https://evil.example")
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("other origin allowed: %q", got)
 	}
 }

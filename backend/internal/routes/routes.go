@@ -33,7 +33,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	if err := router.SetTrustedProxies(nil); err != nil {
 		panic("disable trusted proxies: " + err.Error())
 	}
-	router.Use(middleware.CORS())
+	router.Use(middleware.CORS(cfg.FrontendOrigins))
 	router.Static("/uploads", cfg.ProjectRoot+"/backend/uploads")
 	// Prescriptions live outside /uploads so the public static route can never serve them.
 	prescriptions := lens.PrescriptionStore{Dir: cfg.ProjectRoot + "/backend/private/prescriptions"}

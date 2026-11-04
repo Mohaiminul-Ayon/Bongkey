@@ -45,7 +45,7 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 			return nil, err
 		}
 		if item.LensKind != "" && item.LensKind != "none" {
-			lens := fmt.Sprintf("Lens: %s = BDT %d", item.LensOption, item.LensPrice)
+			lens := fmt.Sprintf("Lens: %s = BDT %d per pair", item.LensOption, item.LensPrice)
 			if !item.LensPriceFinal {
 				lens = "Lens: " + item.LensOption + " (price to be confirmed)"
 			}
