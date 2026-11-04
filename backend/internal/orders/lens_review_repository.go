@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // PostgresLensReviewStore persists owner lens decisions in PostgreSQL.
@@ -39,13 +40,60 @@ func (s PostgresLensReviewStore) inLockedOrder(ctx context.Context, orderID int,
 }
 
 // SetPrescriptionStatus changes only lines that carry a prescription check.
-func (s PostgresLensReviewStore) SetPrescriptionStatus(ctx context.Context, orderID, itemID int, status string) error {
+func (s PostgresLensReviewStore) SetPrescriptionStatus(ctx context.Context, orderID, itemID int, status, note string) error {
 	return s.inLockedOrder(ctx, orderID, func(tx *sql.Tx, _ string) error {
 		result, err := tx.ExecContext(ctx, `
-			UPDATE order_items SET prescription_status = $3
-			WHERE id = $2 AND order_id = $1 AND prescription_status <> ''`, orderID, itemID, status)
+			UPDATE order_items SET prescription_status = $3, prescription_note = $4
+			WHERE id = $2 AND order_id = $1 AND prescription_status <> ''`, orderID, itemID, status, note)
 		return oneRow(result, err)
 	})
+}
+
+// ReplacePrescription points a lens line at a newly stored file and returns the file it replaced.
+// The line lock keeps two uploads from both believing they replaced the same old file.
+func (s PostgresLensReviewStore) ReplacePrescription(ctx context.Context, orderID, itemID int, name string) (string, error) {
+	var oldName string
+	err := s.inLockedOrder(ctx, orderID, func(tx *sql.Tx, _ string) error {
+		err := tx.QueryRowContext(ctx, `
+			SELECT prescription_file FROM order_items
+			WHERE id = $2 AND order_id = $1 AND prescription_status <> '' FOR UPDATE`, orderID, itemID).Scan(&oldName)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE order_items SET prescription_file = $2, prescription_status = 'pending' WHERE id = $1`, itemID, name)
+		return err
+	})
+	return oldName, err
+}
+
+// ExpiredPrescriptions lists stored files of orders that ended (delivered or cancelled) before the cutoff.
+func (s PostgresLensReviewStore) ExpiredPrescriptions(ctx context.Context, before time.Time, limit int) ([]StoredPrescription, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT i.id, i.prescription_file FROM order_items i JOIN orders o ON o.id = i.order_id
+		WHERE i.prescription_file <> '' AND o.order_status IN ('delivered', 'cancelled') AND o.updated_at < $1
+		ORDER BY i.id LIMIT $2`, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var files []StoredPrescription
+	for rows.Next() {
+		var file StoredPrescription
+		if err := rows.Scan(&file.ItemID, &file.Name); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	return files, rows.Err()
+}
+
+// ForgetPrescription clears a deleted file's name, only if the line still points at that same file.
+func (s PostgresLensReviewStore) ForgetPrescription(ctx context.Context, file StoredPrescription) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE order_items SET prescription_file = '' WHERE id = $1 AND prescription_file = $2`, file.ItemID, file.Name)
+	return err
 }
 
 // SetLensPrice settles one lens price and recomputes the order and invoice totals in the same transaction.

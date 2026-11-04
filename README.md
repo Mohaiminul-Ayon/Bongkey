@@ -54,7 +54,7 @@ Before the first backend start, fill in these values in `.env`:
 
 Keep `.env` out of source control and out of shared output.
 
-Customer prescriptions are saved in `backend/private/prescriptions/` (ignored by git, never served by the public `/uploads` route). Only the admin order page can open them. Back up this folder with the database, and keep it off shared drives.
+Customer prescriptions are saved in `backend/private/prescriptions/` (ignored by git, never served by the public `/uploads` route). Only the admin order page can open them. Back up this folder with the database, and keep it off shared drives. Files are deleted automatically 180 days after their order is delivered or cancelled (checked at startup and then daily).
 
 ## Start PostgreSQL
 
@@ -107,6 +107,7 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `010_admin_login_limits.sql` | Admin login rate limits |
    | `011_lens_packages.sql` | Lens types and the categories they fit |
    | `012_lens_orders.sql` | Lens choice, power, price and prescription on order lines |
+| `013_prescription_review.sql` | The owner's private note on a prescription check |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

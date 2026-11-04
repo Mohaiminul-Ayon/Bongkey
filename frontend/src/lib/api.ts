@@ -99,6 +99,7 @@ export type AdminOrderItem = {
   lens_price_final: boolean;
   prescription_status: "" | "pending" | "accepted" | "needs_new";
   has_prescription: boolean;
+  prescription_note: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -140,9 +141,9 @@ export async function adminRequest<T>(path: string, options: RequestInit = {}) {
   return request<T>(path, { ...options, headers });
 }
 
-export async function adminUpload(path: string, file: File) {
+export async function adminUpload(path: string, file: File, field = "image") {
   const body = new FormData();
-  body.set("image", file);
+  body.set(field, file);
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
@@ -178,8 +179,13 @@ export async function fetchAdminOrder(id: string) {
 }
 
 /** setPrescriptionStatus records the owner's check of one line's prescription. */
-export async function setPrescriptionStatus(orderId: number, itemId: number, status: "accepted" | "needs_new") {
-  return adminRequest(`/api/admin/orders/${orderId}/items/${itemId}/prescription-status`, { method: "PATCH", body: JSON.stringify({ status }) });
+export async function setPrescriptionStatus(orderId: number, itemId: number, status: "accepted" | "needs_new", note = "") {
+  return adminRequest(`/api/admin/orders/${orderId}/items/${itemId}/prescription-status`, { method: "PATCH", body: JSON.stringify({ status, note }) });
+}
+
+/** attachPrescription stores a prescription the customer sent outside the site; the line goes back to "Waiting check". */
+export async function attachPrescription(orderId: number, itemId: number, file: File) {
+  return adminUpload(`/api/admin/orders/${orderId}/items/${itemId}/prescription`, file, "file");
 }
 
 /** setLensPrice confirms one line's final lens price; name describes a custom lens. */

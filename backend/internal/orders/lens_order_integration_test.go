@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql"} {
+	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -94,7 +95,7 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	}
 
 	fulfillment := FulfillmentService{Store: PostgresFulfillmentStore{DB: db}}
-	review := LensReviewService{Store: PostgresLensReviewStore{DB: db}}
+	review := LensReviewService{Store: PostgresLensReviewStore{DB: db}, Files: files}
 	if _, err := fulfillment.ChangeStatus(ctx, orderID, "confirmed"); !errors.Is(err, ErrLensPriceNotFinal) {
 		t.Fatalf("confirmed with open price: %v", err)
 	}
@@ -114,8 +115,25 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	if _, err := fulfillment.ChangeStatus(ctx, orderID, "confirmed"); !errors.Is(err, ErrPrescriptionNotAccepted) {
 		t.Fatalf("confirmed with unchecked prescription: %v", err)
 	}
-	if err := review.SetPrescriptionStatus(ctx, orderID, item.ID, "accepted"); err != nil {
+	// The owner asks for a new file, receives it on WhatsApp and attaches it: the old file is gone and the line is pending again.
+	firstName, err := review.PrescriptionFile(ctx, orderID, item.ID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if err := review.SetPrescriptionStatus(ctx, orderID, item.ID, "needs_new", "left eye unreadable"); err != nil {
+		t.Fatal(err)
+	}
+	if err := review.AttachPrescription(ctx, orderID, item.ID, []byte("%PDF-1.7 whatsapp")); err != nil {
+		t.Fatal(err)
+	}
+	if firstPath, _ := files.Path(firstName); fileExists(firstPath) {
+		t.Fatal("replaced prescription file was kept")
+	}
+	if err := review.SetPrescriptionStatus(ctx, orderID, item.ID, "accepted", "clear copy from WhatsApp"); err != nil {
+		t.Fatal(err)
+	}
+	if order, err := access.Admin(ctx, fmt.Sprint(orderID)); err != nil || order.Items[0].PrescriptionStatus != "accepted" || order.Items[0].PrescriptionNote != "clear copy from WhatsApp" {
+		t.Fatalf("review after attach: %+v %v", order.Items, err)
 	}
 	if _, err := fulfillment.ChangeStatus(ctx, orderID, "confirmed"); !errors.Is(err, ErrAdvanceNotReceived) {
 		t.Fatalf("confirmed without advance: %v", err)
@@ -129,7 +147,7 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	if status, err := fulfillment.ChangeStatus(ctx, orderID, "confirmed"); err != nil || status != "confirmed" {
 		t.Fatalf("ready lens order not confirmed: %s %v", status, err)
 	}
-	if err := review.SetPrescriptionStatus(ctx, orderID, item.ID, "needs_new"); !errors.Is(err, ErrLensReviewClosed) {
+	if err := review.SetPrescriptionStatus(ctx, orderID, item.ID, "needs_new", ""); !errors.Is(err, ErrLensReviewClosed) {
 		t.Fatalf("review changed after confirmation: %v", err)
 	}
 	name, err := review.PrescriptionFile(ctx, orderID, item.ID)
@@ -138,7 +156,36 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	}
 	if path, err := files.Path(name); err != nil {
 		t.Fatal(err)
-	} else if data, err := os.ReadFile(path); err != nil || string(data) != "%PDF-1.7 qa" {
+	} else if data, err := os.ReadFile(path); err != nil || string(data) != "%PDF-1.7 whatsapp" {
 		t.Fatalf("stored prescription = %q %v", data, err)
 	}
+
+	// After delivery and the keep period, the file is listed as expired, deleted and forgotten.
+	store := PostgresLensReviewStore{DB: db}
+	if _, err := db.ExecContext(ctx, `UPDATE orders SET order_status = 'delivered', updated_at = NOW() - INTERVAL '181 days' WHERE id = $1`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := store.ExpiredPrescriptions(ctx, time.Now().Add(-PrescriptionKeepFor), 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine := StoredPrescription{ItemID: item.ID, Name: name}
+	if !slices.Contains(expired, mine) {
+		t.Fatalf("expired files %v miss %v", expired, mine)
+	}
+	if err := files.Delete(name); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ForgetPrescription(ctx, mine); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := review.PrescriptionFile(ctx, orderID, item.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired prescription still referenced: %v", err)
+	}
+}
+
+// fileExists reports whether a stored file is still on disk.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

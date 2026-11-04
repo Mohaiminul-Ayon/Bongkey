@@ -79,7 +79,10 @@ func TestLensReviewRoutesRejectBadInput(t *testing.T) {
 	router.PATCH("/orders/:id/items/:itemId/prescription-status", handler.SetPrescriptionStatus)
 	router.PATCH("/orders/:id/items/:itemId/lens-price", handler.SetLensPrice)
 	router.POST("/orders/:id/advance-received", handler.MarkAdvanceReceived)
+	router.POST("/orders/:id/items/:itemId/prescription", handler.AttachPrescription)
 	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodPatch, "/orders/1/items/1/prescription-status", `{"status":"accepted","note":"` + strings.Repeat("x", 501) + `"}`},
+		{http.MethodPost, "/orders/1/items/1/prescription", ``},
 		{http.MethodPatch, "/orders/x/items/1/prescription-status", `{"status":"accepted"}`},
 		{http.MethodPatch, "/orders/1/items/0/prescription-status", `{"status":"accepted"}`},
 		{http.MethodPatch, "/orders/1/items/1/prescription-status", `{"status":"maybe"}`},
@@ -91,7 +94,20 @@ func TestLensReviewRoutesRejectBadInput(t *testing.T) {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
 		if response.Code != http.StatusBadRequest {
-			t.Fatalf("%s %s %s: status=%d", tc.method, tc.path, tc.body, response.Code)
+			t.Fatalf("%s %s %.40s: status=%d", tc.method, tc.path, tc.body, response.Code)
 		}
+	}
+	// An attached file is checked by content like a checkout upload.
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, _ := form.CreateFormFile("file", "rx.pdf")
+	part.Write([]byte("<html><script>alert(1)</script>"))
+	form.Close()
+	request := httptest.NewRequest(http.MethodPost, "/orders/1/items/1/prescription", &body)
+	request.Header.Set("Content-Type", form.FormDataContentType())
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("html attached as a prescription: status=%d", response.Code)
 	}
 }

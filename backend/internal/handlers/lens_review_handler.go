@@ -23,21 +23,45 @@ type LensReviewHandler struct {
 	Files   lens.PrescriptionStore
 }
 
-// SetPrescriptionStatus records "accepted" or "needs_new" for one line's prescription.
+// SetPrescriptionStatus records "accepted" or "needs_new" for one line's prescription, with an optional private note.
 func (h LensReviewHandler) SetPrescriptionStatus(c *gin.Context) {
 	orderID, itemID, ok := orderItemIDs(c)
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
 	var req struct {
 		Status string `json:"status"`
+		Note   string `json:"note"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "status is required"})
 		return
 	}
-	respondLensReview(c, h.Service.SetPrescriptionStatus(c.Request.Context(), orderID, itemID, req.Status))
+	respondLensReview(c, h.Service.SetPrescriptionStatus(c.Request.Context(), orderID, itemID, req.Status, req.Note))
+}
+
+// AttachPrescription stores one file the customer sent outside the site, sent as the multipart field "file".
+func (h LensReviewHandler) AttachPrescription(c *gin.Context) {
+	orderID, itemID, ok := orderItemIDs(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, lens.MaxPrescriptionBytes+8<<10)
+	header, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "choose a PDF or photo up to 5 MB"})
+		return
+	}
+	data, err := readUpload(header)
+	if err == nil {
+		_, err = lens.PrescriptionType(data)
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "the file must be a PDF, JPEG, PNG or HEIC up to 5 MB"})
+		return
+	}
+	respondLensReview(c, h.Service.AttachPrescription(c.Request.Context(), orderID, itemID, data))
 }
 
 // SetLensPrice confirms one line's final lens price, and the custom lens description when given.

@@ -94,9 +94,19 @@ func (s PrescriptionStore) Path(name string) (string, error) {
 	return filepath.Join(s.Dir, name), nil
 }
 
-// Remove deletes a file saved for a checkout that did not commit; a missing file is fine.
+// Remove deletes a file whose order change did not commit, or that was replaced; a failure leaves a private orphan only.
 func (s PrescriptionStore) Remove(name string) {
-	if path, err := s.Path(name); err == nil {
-		os.Remove(path)
+	_ = s.Delete(name)
+}
+
+// Delete removes a stored file and reports any failure except the file already being gone.
+func (s PrescriptionStore) Delete(name string) error {
+	path, err := s.Path(name)
+	if err != nil {
+		return err
 	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }

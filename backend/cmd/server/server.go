@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"bongkey/backend/internal/config"
 	"bongkey/backend/internal/database"
+	"bongkey/backend/internal/lens"
+	"bongkey/backend/internal/orders"
 	"bongkey/backend/internal/routes"
 )
 
@@ -34,7 +37,19 @@ func serve(cfg config.Config) error {
 		return errors.New("database migration/seed failed; check database availability and migration state")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	retention := orders.PrescriptionRetention{Store: orders.PostgresLensReviewStore{DB: database.DB}, Files: lens.PrescriptionStore{Dir: cfg.PrescriptionDir}}
+	var cleanup sync.WaitGroup
+	cleanup.Add(1)
+	// serve owns this goroutine: it ends when ctx is cancelled (stop signal, or stop() below when
+	// runHTTP returns), and serve waits for it before the deferred database close runs.
+	go func() {
+		defer cleanup.Done()
+		retention.RunDaily(ctx)
+	}()
+	defer func() {
+		stop()
+		cleanup.Wait()
+	}()
 	return runHTTP(ctx, newHTTPServer(":"+cfg.ServerPort, routes.SetupRouter(cfg)))
 }
 

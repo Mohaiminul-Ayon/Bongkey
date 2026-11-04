@@ -36,8 +36,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.Use(middleware.CORS(cfg.FrontendOrigins))
 	router.Static("/uploads", cfg.ProjectRoot+"/backend/uploads")
 	// Prescriptions live outside /uploads so the public static route can never serve them.
-	prescriptions := lens.PrescriptionStore{Dir: cfg.ProjectRoot + "/backend/private/prescriptions"}
-	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}}, Files: prescriptions}
+	prescriptions := lens.PrescriptionStore{Dir: cfg.PrescriptionDir}
+	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}, Files: prescriptions}, Files: prescriptions}
 	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
@@ -107,6 +107,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
 	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)
 	admin.GET("/orders/:id/items/:itemId/prescription", lensReview.Prescription)
+	admin.POST("/orders/:id/items/:itemId/prescription", lensReview.AttachPrescription)
 	admin.PUT("/delivery-settings", deliverySettings.Update)
 	admin.GET("/lens-packages", lensPackages.AdminListPackages)
 	admin.POST("/lens-packages", lensPackages.CreatePackage)

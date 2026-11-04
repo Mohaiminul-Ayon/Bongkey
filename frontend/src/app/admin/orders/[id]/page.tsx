@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
-import { downloadInvoice, fetchAdminOrder, getAdminToken, markAdvanceReceived, openPrescription, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
+import { attachPrescription, downloadInvoice, fetchAdminOrder, getAdminToken, markAdvanceReceived, openPrescription, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
@@ -141,9 +141,10 @@ type LensLineProps = {
   reviewLocked: boolean;
 };
 
-// LensLine shows one lens pair with its prescription and price controls.
+// LensLine shows one lens line with its prescription and price controls.
 function LensLine({ orderId, item, busy, run, locked, reviewLocked }: LensLineProps) {
   const power = (sph: number | null) => (sph === null ? "not sure" : formatPower(sph));
+  const [note, setNote] = useState(item.prescription_note);
 
   // savePrice sends the owner's final lens price, and a description for custom lenses.
   function savePrice(event: FormEvent<HTMLFormElement>) {
@@ -158,13 +159,27 @@ function LensLine({ orderId, item, busy, run, locked, reviewLocked }: LensLinePr
       {item.lens_kind === "package" ? <p className="text-sm text-neutral-600">{item.lens_power === "with_power" ? `With power · customer says R ${power(item.sph_right)}, L ${power(item.sph_left)}` : "No power"}</p> : null}
 
       {item.prescription_status ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-bold">Prescription: {prescriptionLabel[item.prescription_status]}</span>
-          {item.has_prescription ? <button type="button" disabled={busy} onClick={() => run(() => openPrescription(orderId, item.id))} className="rounded-md border border-neutral-300 px-3 py-1 font-bold">Open</button> : <span className="text-neutral-600">(no file — sent by chat)</span>}
-          {!reviewLocked ? <>
-            <button type="button" disabled={busy || item.prescription_status === "accepted"} onClick={() => run(() => setPrescriptionStatus(orderId, item.id, "accepted"))} className="rounded-md bg-neutral-950 px-3 py-1 font-bold text-white disabled:opacity-50">Accept</button>
-            <button type="button" disabled={busy || item.prescription_status === "needs_new"} onClick={() => run(() => setPrescriptionStatus(orderId, item.id, "needs_new"))} className="rounded-md border border-red-300 px-3 py-1 font-bold text-red-700 disabled:opacity-50">Need new one</button>
-          </> : null}
+        <div className="mt-3 grid gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold">Prescription: {prescriptionLabel[item.prescription_status]}</span>
+            {item.has_prescription ? <button type="button" disabled={busy} onClick={() => run(() => openPrescription(orderId, item.id))} className="rounded-md border border-neutral-300 px-3 py-1 font-bold">Open</button> : <span className="text-neutral-600">(no file yet)</span>}
+            {!reviewLocked ? (
+              <label className="cursor-pointer rounded-md border border-neutral-300 px-3 py-1 font-bold focus-within:ring-2 focus-within:ring-[#173c34]">
+                {item.has_prescription ? "Replace with file from WhatsApp" : "Add file from WhatsApp"}
+                <input type="file" className="sr-only" disabled={busy} accept=".pdf,.jpg,.jpeg,.png,.heic,application/pdf,image/jpeg,image/png,image/heic"
+                  onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void run(() => attachPrescription(orderId, item.id, file)); }} />
+              </label>
+            ) : null}
+          </div>
+          {!reviewLocked ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid flex-1 gap-1 font-bold">Note (only you see it)
+                <input value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} placeholder="Left eye unclear, called customer" className="min-w-56 rounded-md border border-neutral-300 px-3 py-2 font-normal" />
+              </label>
+              <button type="button" disabled={busy} onClick={() => run(() => setPrescriptionStatus(orderId, item.id, "accepted", note))} className="rounded-md bg-neutral-950 px-3 py-2 font-bold text-white disabled:opacity-50">Accept</button>
+              <button type="button" disabled={busy} onClick={() => run(() => setPrescriptionStatus(orderId, item.id, "needs_new", note))} className="rounded-md border border-red-300 px-3 py-2 font-bold text-red-700 disabled:opacity-50">Need new one</button>
+            </div>
+          ) : item.prescription_note ? <p className="text-neutral-600">Note: {item.prescription_note}</p> : null}
         </div>
       ) : null}
 
