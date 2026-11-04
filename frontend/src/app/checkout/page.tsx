@@ -6,7 +6,7 @@ import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { createOrder, fetchLensPackages, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
-import { lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
+import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
 
 const checkoutAttemptStorageKey = "bongkey_checkout_attempt";
@@ -250,17 +250,15 @@ export default function CheckoutPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">District<select name="city" required value={district} onChange={(event) => setDistrict(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]"><option value="">Select district</option>{deliverySettings?.districts.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
-          {items.filter((item) => item.lens).map((item) => (
-            <div key={item.lineId} className="rounded-md border border-black/10 p-4">
-              <p className="text-sm font-black">{item.product.name} · {lensSummary(item.lens)}{item.quantity > 1 ? ` · ${item.quantity} pairs (one prescription for all)` : ""}</p>
-              {item.lens?.kind === "custom" ? <p className="mt-1 text-sm text-neutral-600">After ordering, chat with us on WhatsApp about your lens. You can attach a prescription now if you have one.</p> : null}
-              {item.lens?.kind === "custom" || needsPrescription(item.lens) ? (
-                <label className="mt-3 grid gap-2 text-sm font-black">Prescription (PDF or photo, up to 5 MB){needsPrescription(item.lens) ? " — required" : " — optional"}
-                  <input type="file" accept={acceptedPrescriptionTypes} required={needsPrescription(item.lens)} onChange={(event) => choosePrescription(item.lineId, event.target.files?.[0])} className="font-normal" />
-                </label>
-              ) : <p className="mt-1 text-sm text-neutral-600">No prescription needed for no-power lenses.</p>}
-            </div>
-          ))}
+          {items.some((item) => item.lens?.kind === "custom" || needsPrescription(item.lens)) ? (
+            <fieldset className="grid gap-3">
+              <legend className="text-lg font-black">Prescriptions</legend>
+              <p className="-mt-1 text-sm text-neutral-600">Upload one file for each item below: a PDF or a clear photo, up to 5 MB.</p>
+              {items.filter((item) => item.lens?.kind === "custom" || needsPrescription(item.lens)).map((item) => (
+                <PrescriptionCard key={item.lineId} item={item} file={prescriptions.get(item.lineId)} onChoose={(file) => choosePrescription(item.lineId, file)} />
+              ))}
+            </fieldset>
+          ) : null}
           <label className="grid gap-2 text-sm font-black">Delivery note<input name="note" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Preferred delivery time or special instruction" /></label>
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
             {hasLens ? <>
@@ -303,5 +301,40 @@ export default function CheckoutPage() {
         </aside>
       </div>
     </section>
+  );
+}
+
+type PrescriptionCardProps = { item: CartItem; file?: File; onChoose: (file: File | undefined) => void };
+
+/** PrescriptionCard shows one lens line's frame, lens and powers, and a clear upload box that names the chosen file. */
+function PrescriptionCard({ item, file, onChoose }: PrescriptionCardProps) {
+  const lens = item.lens;
+  const required = needsPrescription(lens);
+  const eye = (sph: number | null) => (sph === null ? "not sure" : formatPower(sph));
+  return (
+    <div className="rounded-lg border border-black/10 bg-white p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-black">{item.product.name}</p>
+          <p className="mt-1 text-sm text-neutral-600">{lens?.kind === "package" ? lens.name : "Custom lens"}</p>
+        </div>
+        {item.quantity > 1 ? <span className="shrink-0 rounded-full bg-neutral-100 px-3 py-1 text-xs font-black">{item.quantity} pairs</span> : null}
+      </div>
+      {lens?.kind === "package" && lens.power === "with_power" ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-sm">
+          <span className="rounded-md bg-neutral-100 px-2 py-1"><span className="text-neutral-500">Right</span> <strong>{eye(lens.sphRight)}</strong></span>
+          <span className="rounded-md bg-neutral-100 px-2 py-1"><span className="text-neutral-500">Left</span> <strong>{eye(lens.sphLeft)}</strong></span>
+        </div>
+      ) : null}
+      {lens?.kind === "custom" ? <p className="mt-2 text-sm text-neutral-600">After ordering, chat with us on WhatsApp about this lens. Attach a prescription now if you have one.</p> : null}
+      <label className={`mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md border-2 border-dashed px-4 py-3 text-sm focus-within:ring-2 focus-within:ring-[#173c34] ${file ? "border-green-600 bg-green-50" : "border-neutral-300 hover:border-[#173c34]"}`}>
+        <span className="min-w-0">
+          {file ? <span className="block truncate font-black text-green-800">✓ {file.name}</span> : <span className="block font-black">Upload prescription <span className={required ? "text-red-700" : "font-semibold text-neutral-500"}>{required ? "(required)" : "(optional)"}</span></span>}
+          {item.quantity > 1 ? <span className="block text-neutral-600">One file covers all {item.quantity} pairs.</span> : null}
+        </span>
+        <span className="shrink-0 rounded-md border border-neutral-300 bg-white px-3 py-1 font-bold">{file ? "Change" : "Choose file"}</span>
+        <input type="file" className="sr-only" accept={acceptedPrescriptionTypes} required={required && !file} onChange={(event) => onChoose(event.target.files?.[0])} />
+      </label>
+    </div>
   );
 }
