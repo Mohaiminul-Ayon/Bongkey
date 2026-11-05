@@ -25,6 +25,9 @@ func (store *handlerFulfillmentStore) LockOrder(context.Context, int) (string, e
 	return store.status, nil
 }
 
+// LensReadiness reports a frame-only order, which has no lens steps.
+func (*handlerFulfillmentStore) LensReadiness(context.Context, int) error { return nil }
+
 // RestoreStock is a no-op because service tests cover restoration accounting.
 func (*handlerFulfillmentStore) RestoreStock(context.Context, int) error { return nil }
 

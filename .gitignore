@@ -16,3 +16,6 @@
 /docs/backend_architecture_and_flow.pdf
 /docs/Bongkey_Technical_Learning_Guide.docx
 /docs/Bongkey_Project_Progress_Report.docx
+
+# Customer prescriptions are private health data; never commit them.
+/backend/private/

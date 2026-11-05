@@ -82,6 +82,20 @@ type checkoutTxStub struct {
 	idempotencyKeyHash           string
 	idempotencyRequestHash       string
 	subtotal, deliveryFee, total int
+	lenses                       map[int]LensChoice
+	lines                        []OrderLine
+	labels                       []string
+	paymentMethod, paymentStatus string
+	failInvoice                  bool
+}
+
+// LensForProduct returns the stub's lens types; a missing one behaves like a disabled or unfitting type.
+func (tx *checkoutTxStub) LensForProduct(_ context.Context, packageID, _ int) (LensChoice, error) {
+	choice, ok := tx.lenses[packageID]
+	if !ok {
+		return LensChoice{}, ErrLensUnavailable
+	}
+	return choice, nil
 }
 
 // FindIdempotentOrder returns the first completed stub order for matching retries.
@@ -89,7 +103,7 @@ func (tx *checkoutTxStub) FindIdempotentOrder(_ context.Context, keyHash string)
 	if !tx.invoiceSaved || tx.idempotencyKeyHash != keyHash {
 		return CheckoutReceipt{}, "", false, nil
 	}
-	return CheckoutReceipt{ID: 7, OrderNumber: "ORD-000007", InvoiceNumber: "INV-000009", Subtotal: tx.subtotal, DeliveryFee: tx.deliveryFee, Total: tx.total}, tx.idempotencyRequestHash, true, nil
+	return CheckoutReceipt{ID: 7, OrderNumber: "ORD-000007", InvoiceNumber: "INV-000009", Subtotal: tx.subtotal, DeliveryFee: tx.deliveryFee, Total: tx.total, PaymentMethod: tx.paymentMethod}, tx.idempotencyRequestHash, true, nil
 }
 
 // ReserveProduct simulates an atomic availability check for service tests.
@@ -103,8 +117,9 @@ func (tx *checkoutTxStub) ReserveProduct(_ context.Context, id, quantity int) (R
 }
 
 // InsertOrder notes when all stock checks allowed order persistence.
-func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, _ string, keyHash, requestHash string) (int, string, error) {
+func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, _ string, keyHash, requestHash, paymentMethod, paymentStatus string) (int, string, error) {
 	tx.orderSaved = true
+	tx.paymentMethod, tx.paymentStatus = paymentMethod, paymentStatus
 	tx.request = request
 	tx.idempotencyKeyHash = keyHash
 	tx.idempotencyRequestHash = requestHash
@@ -146,13 +161,18 @@ func TestCheckoutRequiresEmailProof(t *testing.T) {
 }
 
 // InsertItem counts saved lines after a successful stock reservation.
-func (tx *checkoutTxStub) InsertItem(_ context.Context, _ int, _ CheckoutItem, _ ReservedProduct, _ int) error {
+func (tx *checkoutTxStub) InsertItem(_ context.Context, _ int, item CheckoutItem, _ ReservedProduct, line OrderLine) error {
 	tx.itemsSaved++
+	tx.lines = append(tx.lines, line)
+	tx.labels = append(tx.labels, item.LensOption)
 	return nil
 }
 
 // InsertInvoice notes when the order has a complete invoice.
 func (tx *checkoutTxStub) InsertInvoice(_ context.Context, _ int, _ CheckoutRequest, _, _, _ int) (string, error) {
+	if tx.failInvoice {
+		return "", errors.New("invoice write failed")
+	}
 	tx.invoiceSaved = true
 	return "INV-000009", nil
 }

@@ -10,7 +10,11 @@ type fulfillmentTxStub struct {
 	status       string
 	restoreCount int
 	updateCount  int
+	lensBlock    error
 }
+
+// LensReadiness returns the stub's open lens step, if any.
+func (tx *fulfillmentTxStub) LensReadiness(context.Context, int) error { return tx.lensBlock }
 
 // LockOrder returns the stub's current serialized state.
 func (tx *fulfillmentTxStub) LockOrder(context.Context, int) (string, error) {
@@ -66,5 +70,19 @@ func TestFulfillmentTransitions(t *testing.T) {
 	before := store.calls
 	if _, err := service.ChangeStatus(ctx, 7, "refunded"); !errors.Is(err, ErrInvalidOrderStatus) || store.calls != before {
 		t.Fatalf("unknown status reached storage: err=%v calls=%d", err, store.calls)
+	}
+}
+
+// TestLensOrderConfirmationWaitsForReview keeps a lens order pending until its review steps are done.
+func TestLensOrderConfirmationWaitsForReview(t *testing.T) {
+	for _, block := range []error{ErrLensPriceNotFinal, ErrPrescriptionNotAccepted, ErrAdvanceNotReceived} {
+		store := &fulfillmentStoreStub{tx: &fulfillmentTxStub{status: "pending", lensBlock: block}}
+		if _, err := (FulfillmentService{Store: store}).ChangeStatus(context.Background(), 7, "confirmed"); !errors.Is(err, block) || store.tx.status != "pending" {
+			t.Fatalf("confirmed despite %v: status=%s err=%v", block, store.tx.status, err)
+		}
+		// Cancelling is still allowed, so an unpaid lens order can be closed.
+		if status, err := (FulfillmentService{Store: store}).ChangeStatus(context.Background(), 7, "cancelled"); err != nil || status != "cancelled" {
+			t.Fatalf("cancel of blocked lens order failed: %v", err)
+		}
 	}
 }

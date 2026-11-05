@@ -35,6 +35,12 @@ func (h OrderFulfillmentHandler) ChangeStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order status"})
 	case errors.Is(err, orders.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+	case errors.Is(err, orders.ErrLensPriceNotFinal):
+		c.JSON(http.StatusConflict, gin.H{"error": "confirm the lens price before confirming the order"})
+	case errors.Is(err, orders.ErrPrescriptionNotAccepted):
+		c.JSON(http.StatusConflict, gin.H{"error": "accept the prescription before confirming the order"})
+	case errors.Is(err, orders.ErrAdvanceNotReceived):
+		c.JSON(http.StatusConflict, gin.H{"error": "record the advance payment before confirming the order"})
 	case errors.Is(err, orders.ErrInvalidOrderTransition), errors.Is(err, orders.ErrFulfillmentConflict):
 		c.JSON(http.StatusConflict, gin.H{"error": "order status changed; reload and retry"})
 	case err != nil:

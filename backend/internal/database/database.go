@@ -13,7 +13,7 @@ import (
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -52,7 +52,7 @@ func MigrateAndSeed(cfg config.Config) error {
 	if _, err := DB.Exec(schemaSQL); err != nil {
 		return err
 	}
-	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql", "007_delivery_settings.sql", "008_product_variants.sql", "009_delivery_zones.sql", "010_admin_login_limits.sql"} {
+	for _, name := range []string{"002_guest_order_access.sql", "003_stock_quantity_nonnegative.sql", "004_email_otp.sql", "005_checkout_idempotency.sql", "006_order_fulfillment.sql", "007_delivery_settings.sql", "008_product_variants.sql", "009_delivery_zones.sql", "010_admin_login_limits.sql", "011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
@@ -68,6 +68,9 @@ func MigrateAndSeed(cfg config.Config) error {
 		return err
 	}
 	if err := seedProducts(); err != nil {
+		return err
+	}
+	if err := seedLensPackages(); err != nil {
 		return err
 	}
 	log.Println("database migrated and seeded")
@@ -115,6 +118,61 @@ func seedCategories() error {
 		}
 	}
 	return nil
+}
+
+// starterLens is one common lens type with a rough starting price for the owner to review.
+type starterLens struct {
+	Name, Description    string
+	Price, MaxPower      int
+	PrescriptionRequired bool
+	CategorySlugs        []string
+}
+
+// eyeglassCategories are the seeded categories that hold optical frames.
+var eyeglassCategories = []string{"blue-cut-glasses", "mens-frames", "womens-frames", "premium-collection", "budget-picks", "prescription-ready"}
+
+// starterLenses are common lens types sold in Bangladesh. Prices are rough placeholders, not market quotes.
+var starterLenses = []starterLens{
+	{"Clear anti-glare", "Single vision with anti-reflective and UV coating. Everyday wear.", 1200, 600, false, eyeglassCategories},
+	{"Blue-cut", "Filters part of the blue light from phone and computer screens.", 1800, 600, false, eyeglassCategories},
+	{"Photochromic", "Clear indoors, darkens in sunlight.", 2500, 600, false, eyeglassCategories},
+	{"Photochromic + blue-cut", "Darkens in sunlight and filters screen blue light.", 3500, 400, false, eyeglassCategories},
+	{"Thin high-index 1.67", "Thinner, lighter lens for strong powers.", 4500, 1000, true, eyeglassCategories},
+	{"Progressive (distance + reading)", "One lens for far, middle and near vision, no visible line.", 6500, 400, true, eyeglassCategories},
+	{"Power tinted sunglass lens", "Your prescription in a dark tinted sun lens.", 2800, 400, true, []string{"sunglasses"}},
+	{"Power polarized sunglass lens", "Your prescription with polarized glare cut for driving and water.", 3800, 400, true, []string{"sunglasses"}},
+}
+
+// seedLensPackages adds the starter lens types only when none exist, so the owner's later edits and renames are never overwritten.
+func seedLensPackages() error {
+	ctx := context.Background()
+	tx, err := DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM lens_packages`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	for i, lens := range starterLenses {
+		var id int
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO lens_packages (name, description, price, sort_order, max_power, prescription_required)
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+			lens.Name, lens.Description, lens.Price, (i+1)*10, lens.MaxPower, lens.PrescriptionRequired).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO lens_package_categories (package_id, category_id)
+			SELECT $1, id FROM categories WHERE slug = ANY($2)`, id, pq.Array(lens.CategorySlugs)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 type seedProduct struct {

@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
+import { LensPicker } from "@/components/LensPicker";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductVisual } from "@/components/ProductVisual";
 import { TryOnModal } from "@/components/TryOnModal";
 import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
+import { lensPrice, lensPriceKnown, type CartLens } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
 
 /** ProductDetailsPage renders only products returned by the live catalog. */
@@ -18,6 +20,8 @@ export default function ProductDetailsPage() {
   const [error, setError] = useState("");
   const [showTryOn, setShowTryOn] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [lens, setLens] = useState<{ choice?: CartLens; ready: boolean }>({ ready: true });
+  const [added, setAdded] = useState("");
   const { addItem } = useCart();
 
   useEffect(() => {
@@ -26,6 +30,7 @@ export default function ProductDetailsPage() {
     setRelated([]);
     setError("");
     setSelectedVariantId(null);
+    setAdded("");
     fetchProduct(params.slug)
       .then((item) => { if (active) setProduct(item); })
       .catch(() => { if (active) setError("This product is unavailable right now."); });
@@ -62,7 +67,7 @@ export default function ProductDetailsPage() {
           <div className="product-price">
             <strong>{formatPrice(variant.price)}</strong>
             {variant.oldPrice ? <del>{formatPrice(variant.oldPrice)}</del> : null}
-            <span className="pill">Cash on delivery</span>
+            <span className="pill">{lens.choice ? "Advance payment" : "Cash on delivery"}</span>
           </div>
 
           {(product.variants?.length ?? 0) > 1 ? <div className="product-block grid gap-2"><label htmlFor="variant-select" className="text-[15px] font-semibold">Color and size</label>
@@ -72,15 +77,20 @@ export default function ProductDetailsPage() {
             <span className="text-xs text-neutral-600">SKU: {variant.sku} · {variant.stockStatus}</span>
           </div> : null}
 
-          <div className="product-block">
-            <h2>Lens option</h2>
-            <div className="option-card"><strong>Frame only</strong><span>Lens packages are not available for checkout yet.</span></div>
-          </div>
+          <LensPicker slug={product.slug} productName={product.name} onChange={(choice, ready) => setLens({ choice, ready })} />
+          {lens.choice ? (
+            <p className="product-block text-sm">
+              Frame {formatPrice(variant.price)} + lens {lens.choice.kind === "custom" ? "price confirmed by call" : formatPrice(lensPrice(lens.choice))} = <strong>{lens.choice.kind === "custom" ? `${formatPrice(variant.price)} + lens` : formatPrice(variant.price + lensPrice(lens.choice))}</strong>
+              {lens.choice.kind === "package" && lens.ready && !lensPriceKnown(lens.choice) ? " (lens price confirmed after we check your prescription)" : ""}
+            </p>
+          ) : null}
 
           <div className="product-actions">
             <Button variant="secondary" disabled={!variant.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try on</Button>
-            <Button disabled={(variant.stockQuantity ?? 0) < 1} onClick={() => addItem(variant, "Frame only")}>{(variant.stockQuantity ?? 0) < 1 ? "Out of stock" : "Add to bag"}</Button>
+            <Button disabled={(variant.stockQuantity ?? 0) < 1 || !lens.ready} onClick={() => { addItem(variant, lens.choice); setAdded(lens.choice ? "Added to your bag with lenses." : "Added to your bag."); }}>{(variant.stockQuantity ?? 0) < 1 ? "Out of stock" : "Add to bag"}</Button>
           </div>
+          {!lens.ready ? <p className="info-note">Finish choosing your lens (and both eye powers, or "Not sure") to add this to your bag.</p> : null}
+          {added ? <p role="status" className="info-note">{added}</p> : null}
           {!variant.tryOnImageUrl ? <p className="info-note">Try-on preview will be available when a frame mockup is added.</p> : null}
           <p className="info-note">Easy exchange and warranty support are available after order confirmation.</p>
 

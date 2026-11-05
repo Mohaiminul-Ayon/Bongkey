@@ -69,6 +69,28 @@ func (p postgresFulfillmentTx) RestoreStock(ctx context.Context, orderID int) er
 	return err
 }
 
+// LensReadiness checks a lens order's open steps while the order row is locked.
+func (p postgresFulfillmentTx) LensReadiness(ctx context.Context, orderID int) error {
+	var method, payment string
+	var openPrice, openPrescription bool
+	err := p.Tx.QueryRowContext(ctx, `
+		SELECT o.payment_method, o.payment_status,
+			EXISTS (SELECT 1 FROM order_items WHERE order_id = o.id AND NOT lens_price_final),
+			EXISTS (SELECT 1 FROM order_items WHERE order_id = o.id AND prescription_status IN ('pending', 'needs_new'))
+		FROM orders o WHERE o.id = $1`, orderID).Scan(&method, &payment, &openPrice, &openPrescription)
+	switch {
+	case err != nil:
+		return err
+	case openPrice:
+		return ErrLensPriceNotFinal
+	case openPrescription:
+		return ErrPrescriptionNotAccepted
+	case method == "advance" && payment != "advance_received":
+		return ErrAdvanceNotReceived
+	}
+	return nil
+}
+
 // UpdateStatus rejects an unexpected concurrent state instead of overwriting it.
 func (p postgresFulfillmentTx) UpdateStatus(ctx context.Context, orderID int, current, next string) error {
 	result, err := p.Tx.ExecContext(ctx, `UPDATE orders SET order_status = $3, updated_at = NOW() WHERE id = $1 AND order_status = $2`, orderID, current, next)

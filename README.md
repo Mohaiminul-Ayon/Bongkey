@@ -45,12 +45,16 @@ Before the first backend start, fill in these values in `.env`:
 | Variable | Required | Notes |
 |---|---|---|
 | `JWT_SECRET` | Yes | Random, at least 32 characters. The backend refuses to start without it. |
+| `FRONTEND_ORIGIN` | No | Exact browser origin(s) of the shop frontend, comma-separated. Default `http://localhost:3000`. Other websites get no CORS permission. Set it to the real site address when deploying. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First start | Creates the one owner account when the admin table is empty. Password at least 12 characters. Later starts never change it. |
 | `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
 | `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
+| `NEXT_PUBLIC_WHATSAPP_NUMBER` | No | Shop WhatsApp number, e.g. `8801XXXXXXXXX` (a local `01XXXXXXXXX` is converted). The product page (custom lens, "Not sure which lens?"), checkout and order success page show WhatsApp chat links. Without it, the page says the shop will call. Next.js reads it from `frontend/.env.local`, not the root `.env`; restart `npm run dev` after setting it. |
 
 Keep `.env` out of source control and out of shared output.
+
+Customer prescriptions are saved in `backend/private/prescriptions/` (ignored by git, never served by the public `/uploads` route). Only the admin order page can open them. Back up this folder with the database, and keep it off shared drives. Files are deleted automatically 180 days after their order is delivered or cancelled (checked at startup and then daily).
 
 ## Start PostgreSQL
 
@@ -101,6 +105,9 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `008_product_variants.sql` | Product variants (SKU, color, size, stock) |
    | `009_delivery_zones.sql` | Separate outside-Dhaka delivery fee |
    | `010_admin_login_limits.sql` | Admin login rate limits |
+   | `011_lens_packages.sql` | Lens types and the categories they fit |
+   | `012_lens_orders.sql` | Lens choice, power, price and prescription on order lines |
+| `013_prescription_review.sql` | The owner's private note on a prescription check |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

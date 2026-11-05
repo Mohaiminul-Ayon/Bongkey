@@ -109,7 +109,8 @@ const findOrderSQL = `
 		o.city, o.subtotal, o.delivery_fee, o.total, o.order_status,
 		COALESCE(i.invoice_number, ''), o.guest_token_hash, o.customer_email, o.email_verified,
 		o.delivery_note, o.payment_method, o.payment_status, o.created_at,
-		COALESCE(i.issued_at::text, '')
+		COALESCE(i.issued_at::text, ''),
+		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND NOT x.lens_price_final)
 	FROM orders o LEFT JOIN invoices i ON i.order_id = o.id
 	WHERE `
 
@@ -129,7 +130,7 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 		&record.ShippingAddress, &record.City, &record.Subtotal, &record.DeliveryFee,
 		&record.Total, &record.Status, &record.InvoiceNumber, &record.GuestTokenHash,
 		&record.CustomerEmail, &record.EmailVerified, &record.DeliveryNote,
-		&record.PaymentMethod, &record.PaymentStatus, &record.CreatedAt, &record.InvoiceIssuedAt,
+		&record.PaymentMethod, &record.PaymentStatus, &record.CreatedAt, &record.InvoiceIssuedAt, &record.LensPricePending,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound
@@ -137,13 +138,16 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
+	record.LensOrder = record.PaymentMethod == "advance"
 	return record, nil
 }
 
 // Items loads immutable line snapshots for a previously authorized admin order.
 func (r PostgresReader) Items(ctx context.Context, orderID int) ([]Item, error) {
 	rows, err := r.DB.QueryContext(ctx, `
-		SELECT product_name, sku, lens_option, quantity, unit_price, total_price
+		SELECT id, product_name, sku, lens_option, quantity, unit_price, total_price,
+			lens_kind, lens_name, lens_power, sph_right, sph_left, lens_price, lens_price_final,
+			prescription_status, prescription_file <> '', prescription_note, lens_request
 		FROM order_items WHERE order_id = $1 ORDER BY id
 	`, orderID)
 	if err != nil {
@@ -153,7 +157,9 @@ func (r PostgresReader) Items(ctx context.Context, orderID int) ([]Item, error) 
 	items := make([]Item, 0)
 	for rows.Next() {
 		var item Item
-		if err := rows.Scan(&item.ProductName, &item.SKU, &item.LensOption, &item.Quantity, &item.UnitPrice, &item.TotalPrice); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProductName, &item.SKU, &item.LensOption, &item.Quantity, &item.UnitPrice, &item.TotalPrice,
+			&item.LensKind, &item.LensName, &item.LensPower, &item.SPHRight, &item.SPHLeft, &item.LensPrice, &item.LensPriceFinal,
+			&item.PrescriptionStatus, &item.HasPrescription, &item.PrescriptionNote, &item.LensRequest); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

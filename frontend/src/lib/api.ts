@@ -44,7 +44,20 @@ export type OrderPayload = {
   city: string;
   delivery_note: string;
   expected_delivery_fee: number;
-  items: Array<{ product_id: number; quantity: number; lens_option: string }>;
+  items: OrderItemPayload[];
+};
+
+/** OrderItemPayload is one bag line; lens fields are sent only for lens lines, and powers are hundredths (-150 = -1.50). */
+export type OrderItemPayload = {
+  product_id: number;
+  quantity: number;
+  lens_option: string;
+  lens_kind?: "package" | "custom";
+  lens_package_id?: number;
+  lens_power?: "no_power" | "with_power";
+  sph_right?: number;
+  sph_left?: number;
+  lens_request?: string;
 };
 
 export type DeliverySettings = { delivery_fee: number; outside_dhaka_fee: number; districts: string[] };
@@ -66,7 +79,29 @@ export type AdminOrderDetail = {
   payment_method: string;
   payment_status: string;
   created_at: string;
-  items: Array<{ product_name: string; sku: string; lens_option: string; quantity: number; unit_price: number; total_price: number }>;
+  items: AdminOrderItem[];
+};
+
+/** AdminOrderItem is one saved line; the prescription itself is fetched separately, only by the owner. */
+export type AdminOrderItem = {
+  id: number;
+  product_name: string;
+  sku: string;
+  lens_option: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  lens_kind: "none" | "package" | "custom";
+  lens_name: string;
+  lens_power: "" | "no_power" | "with_power";
+  sph_right: number | null;
+  sph_left: number | null;
+  lens_price: number;
+  lens_price_final: boolean;
+  prescription_status: "" | "pending" | "accepted" | "needs_new";
+  has_prescription: boolean;
+  prescription_note: string;
+  lens_request: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
@@ -108,9 +143,9 @@ export async function adminRequest<T>(path: string, options: RequestInit = {}) {
   return request<T>(path, { ...options, headers });
 }
 
-export async function adminUpload(path: string, file: File) {
+export async function adminUpload(path: string, file: File, field = "image") {
   const body = new FormData();
-  body.set("image", file);
+  body.set(field, file);
   const response = await fetch(`${API_URL}${path}`, {
     method: "POST",
     headers: {
@@ -143,6 +178,44 @@ export async function updateAdminOrderStatus(id: number, status: string) {
 /** fetchAdminOrder returns private order details only through the owner endpoint. */
 export async function fetchAdminOrder(id: string) {
   return adminRequest<AdminOrderDetail>(`/api/admin/orders/${encodeURIComponent(id)}`, { cache: "no-store" });
+}
+
+/** setPrescriptionStatus records the owner's check of one line's prescription. */
+export async function setPrescriptionStatus(orderId: number, itemId: number, status: "accepted" | "needs_new", note = "") {
+  return adminRequest(`/api/admin/orders/${orderId}/items/${itemId}/prescription-status`, { method: "PATCH", body: JSON.stringify({ status, note }) });
+}
+
+/** attachPrescription stores a prescription the customer sent outside the site; the line goes back to "Waiting check". */
+export async function attachPrescription(orderId: number, itemId: number, file: File) {
+  return adminUpload(`/api/admin/orders/${orderId}/items/${itemId}/prescription`, file, "file");
+}
+
+/** setLensPrice confirms one line's final lens price; name describes a custom lens. */
+export async function setLensPrice(orderId: number, itemId: number, price: number, name = "") {
+  return adminRequest(`/api/admin/orders/${orderId}/items/${itemId}/lens-price`, { method: "PATCH", body: JSON.stringify({ price, name }) });
+}
+
+/** markAdvanceReceived records the advance the moderator collected. */
+export async function markAdvanceReceived(orderId: number) {
+  return adminRequest(`/api/admin/orders/${orderId}/advance-received`, { method: "POST" });
+}
+
+/** openPrescription shows one private prescription in a new tab without putting the admin token in a URL. */
+export async function openPrescription(orderId: number, itemId: number) {
+  const viewer = window.open("", "_blank");
+  const response = await fetch(`${API_URL}/api/admin/orders/${orderId}/items/${itemId}/prescription`, {
+    headers: { Authorization: `Bearer ${getAdminToken()}` },
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    viewer?.close();
+    throw new Error("Could not open the prescription.");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  if (viewer) viewer.location.href = url;
+  else window.location.href = url;
+  // Release the file from browser memory once the new tab has had time to load it.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 /** CatalogFilter mirrors the backend's optional price range and sort query values. */
@@ -186,7 +259,63 @@ export async function updateDeliverySettings(deliveryFee: number, outsideDhakaFe
 }
 
 /** createOrder submits one retry-safe checkout attempt and receives its guest access token. */
-export async function createOrder(payload: OrderPayload, idempotencyKey: string) {
+/** LensPackage is one fixed-price lens type; max_power is hundredths (600 = ±6.00); category_ids is only sent to the owner. */
+export type LensPackage = {
+  id: number;
+  name: string;
+  description: string;
+  price: number;
+  sort_order: number;
+  active: boolean;
+  max_power: number;
+  prescription_required: boolean;
+  category_ids?: number[];
+};
+
+/** fetchLensPackages lists the enabled lens types that fit one frame. */
+export async function fetchLensPackages(slug: string) {
+  return request<LensPackage[]>(`/api/products/${encodeURIComponent(slug)}/lens-packages`, { cache: "no-store" });
+}
+
+/** saveLensPackage creates (no id) or edits a lens type and returns the owner's full list. */
+export async function saveLensPackage(pkg: Omit<LensPackage, "id">, id?: number) {
+  return adminRequest<LensPackage[]>(id ? `/api/admin/lens-packages/${id}` : "/api/admin/lens-packages", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(pkg),
+  });
+}
+
+type PlacedOrder = {
+  id: number;
+  order_number: string;
+  invoice_number: string;
+  customer_name: string;
+  customer_phone: string;
+  shipping_address: string;
+  city: string;
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  payment_method: string;
+  order_status: string;
+  guest_access_token: string;
+};
+
+/** createOrder sends JSON, or multipart when prescriptions are attached; files maps item index to its file. */
+export async function createOrder(payload: OrderPayload, idempotencyKey: string, files: Map<number, File> = new Map()) {
+  if (files.size === 0) return createJSONOrder(payload, idempotencyKey);
+  const body = new FormData();
+  body.set("order", JSON.stringify(payload));
+  files.forEach((file, index) => body.set(`prescription_${index}`, file));
+  // The browser sets the multipart boundary itself, so no Content-Type header here.
+  const response = await fetch(`${API_URL}/api/orders`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(data.error || "Request failed"), { status: response.status });
+  return data as PlacedOrder;
+}
+
+/** createJSONOrder places a frame-only order. */
+async function createJSONOrder(payload: OrderPayload, idempotencyKey: string) {
   return request<{
     id: number;
     order_number: string;
@@ -238,6 +367,8 @@ export async function fetchOrder(id: string, token: string) {
     delivery_fee: number;
     total: number;
     order_status: string;
+    lens_order: boolean;
+    lens_price_pending: boolean;
   }>(`/api/orders/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",

@@ -12,6 +12,7 @@ const links = [
   ["/admin/products", "Products"],
   ["/admin/products/new", "Add product"],
   ["/admin/categories", "Categories"],
+  ["/admin/lens", "Lens types"],
 ];
 
 /** isActive marks the deepest matching link so "Add product" doesn't also light up "Products". */
