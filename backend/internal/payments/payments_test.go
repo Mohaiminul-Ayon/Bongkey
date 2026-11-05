@@ -62,30 +62,32 @@ func TestSubmitNormalizesAndValidates(t *testing.T) {
 	}
 }
 
-// TestPayableRules covers when a customer may pay and when the owner may approve.
+// TestPayableRules covers when a customer may send money and when the owner may approve it.
 func TestPayableRules(t *testing.T) {
-	received := dueState
-	received.PaymentStatus = "advance_received"
-	priceOpen := dueState
-	priceOpen.PriceOpen = true
-	cod := dueState
-	cod.PaymentStatus = "unpaid"
-	cancelled := dueState
-	cancelled.OrderStatus = "cancelled"
+	with := func(change func(*OrderState)) OrderState {
+		state := dueState
+		change(&state)
+		return state
+	}
 	for name, tc := range map[string]struct {
 		state             OrderState
+		amount            int
 		payable, approval error
 	}{
-		"advance due":      {dueState, nil, nil},
-		"second part":      {received, ErrNotPayable, nil},
-		"lens price open":  {priceOpen, ErrPriceNotFinal, ErrPriceNotFinal},
-		"cash on delivery": {cod, ErrNotPayable, ErrNotPayable},
-		"cancelled order":  {cancelled, ErrNotPayable, ErrNotPayable},
+		"advance due":                     {dueState, 1000, nil, nil},
+		"advance received, balance left":  {with(func(s *OrderState) { s.PaymentStatus, s.Required, s.Paid = "advance_received", 2000, 2000 }), 1000, nil, nil},
+		"cash on delivery, pay early":     {with(func(s *OrderState) { s.PaymentStatus, s.Required = "unpaid", 0 }), 1000, nil, nil},
+		"shipped, still payable":          {with(func(s *OrderState) { s.OrderStatus = "shipped" }), 1000, nil, nil},
+		"delivered: approve a late check": {with(func(s *OrderState) { s.OrderStatus = "delivered" }), 1000, ErrNotPayable, nil},
+		"paid in full":                    {with(func(s *OrderState) { s.Paid = 5000 }), 1, ErrNotPayable, ErrOverpaid},
+		"approval above the total":        {with(func(s *OrderState) { s.Paid = 4500 }), 1000, nil, ErrOverpaid},
+		"lens price open":                 {with(func(s *OrderState) { s.PriceOpen = true }), 1000, ErrPriceNotFinal, ErrPriceNotFinal},
+		"cancelled order":                 {with(func(s *OrderState) { s.OrderStatus = "cancelled" }), 1000, ErrNotPayable, ErrNotPayable},
 	} {
 		if err := checkPayable(tc.state); !errors.Is(err, tc.payable) && err != tc.payable {
 			t.Fatalf("%s: payable = %v, want %v", name, err, tc.payable)
 		}
-		if err := checkApprovable(tc.state); !errors.Is(err, tc.approval) && err != tc.approval {
+		if err := checkApprovable(tc.state, tc.amount); !errors.Is(err, tc.approval) && err != tc.approval {
 			t.Fatalf("%s: approvable = %v, want %v", name, err, tc.approval)
 		}
 	}
@@ -100,7 +102,7 @@ func TestGuestViewShowsNumberOnlyWhenPayable(t *testing.T) {
 	if err != nil || view.Payable != "yes" || view.Method == nil || view.Method.AccountNumber != "01711111111" || view.Payments[0].UsedOnOrders != nil {
 		t.Fatalf("payable view = %+v %v", view, err)
 	}
-	for want, state := range map[string]OrderState{"price_pending": {PaymentStatus: "advance_due", OrderStatus: "pending", PriceOpen: true}, "not_due": {PaymentStatus: "advance_received", OrderStatus: "pending"}} {
+	for want, state := range map[string]OrderState{"price_pending": {PaymentStatus: "advance_due", OrderStatus: "pending", Total: 5000, PriceOpen: true}, "not_due": {PaymentStatus: "advance_received", OrderStatus: "pending", Total: 5000, Paid: 5000}} {
 		store.state = state
 		if view, err := (Service{Store: store}).ForGuest(context.Background(), 1); err != nil || view.Payable != want || view.Method != nil {
 			t.Fatalf("%s view = %+v %v", want, view, err)

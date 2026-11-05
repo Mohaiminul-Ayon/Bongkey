@@ -5,7 +5,8 @@ import { useParams } from "next/navigation";
 import { BkashPaymentBox } from "@/components/BkashPaymentBox";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
+import { OrderTimeline } from "@/components/OrderTimeline";
+import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode, type OrderTracking } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -24,6 +25,7 @@ type Order = {
   lens_order: boolean;
   pay_in_advance: boolean;
   lens_price_pending: boolean;
+  tracking: OrderTracking;
 };
 
 /** orderChatLink opens a chat that already names the order, so the moderator can find it in admin. */
@@ -131,7 +133,8 @@ export default function OrderSuccessPage() {
                 {whatsAppNumber ? <a className="site-button button-primary mt-3 inline-block" href={orderChatLink(order)} target="_blank" rel="noopener noreferrer">Chat on WhatsApp about order {order.order_number}</a> : <p className="mt-2">We will contact you on your phone number.</p>}
               </div>
             ) : null}
-            {order.pay_in_advance && accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} lensOrder={order.lens_order} /> : null}
+            <div className="mt-4"><OrderTimeline status={order.order_status} tracking={order.tracking} /></div>
+            {accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} lensOrder={order.lens_order} /> : null}
             {!order.pay_in_advance ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p> : null}
             <button type="button" disabled={busy || !accessToken} onClick={saveInvoice} className="site-button button-primary w-fit disabled:opacity-50">Download invoice PDF</button>
             {error ? <p role="alert" className="text-red-700">{error}</p> : null}

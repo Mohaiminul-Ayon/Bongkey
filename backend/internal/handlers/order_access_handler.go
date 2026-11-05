@@ -55,6 +55,32 @@ func respondWithInvoice(c *gin.Context, order orders.AdminDetail, err error) {
 	c.Data(http.StatusOK, "application/pdf", data)
 }
 
+// TrackOrder is the public tracking lookup. The phone travels in the POST body, never in the URL.
+// A wrong number or phone and a missing order get the same 404 so the page cannot be used to probe orders.
+func (h OrderAccessHandler) TrackOrder(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
+	var req struct {
+		OrderNumber string `json:"order_number"`
+		Phone       string `json:"phone"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter your order number and phone"})
+		return
+	}
+	view, err := h.Service.Track(c.Request.Context(), req.OrderNumber, req.Phone, c.ClientIP())
+	switch {
+	case errors.Is(err, orders.ErrTrackLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many tries; please wait 15 minutes"})
+	case errors.Is(err, orders.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "no order matches this order number and phone"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load the order"})
+	default:
+		c.JSON(http.StatusOK, view)
+	}
+}
+
 // GetOrder requires the order secret or a fresh proof of its verified email.
 func (h OrderAccessHandler) GetOrder(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
@@ -86,6 +112,7 @@ func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee, "total": order.Total,
 		"order_status": order.Status, "payment_method": order.PaymentMethod, "payment_status": order.PaymentStatus,
 		"advance_mode": order.AdvanceMode, "advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
+		"tracking":   order.Tracking,
 		"created_at": order.CreatedAt, "items": order.Items,
 	})
 }
@@ -108,5 +135,6 @@ func respondWithOrder(c *gin.Context, order orders.Summary, err error) {
 		"total": order.Total, "order_status": order.Status,
 		"lens_order": order.LensOrder, "pay_in_advance": order.PayInAdvance, "lens_price_pending": order.LensPricePending,
 		"advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
+		"tracking": order.Tracking,
 	})
 }

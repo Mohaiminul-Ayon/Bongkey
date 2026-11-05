@@ -33,6 +33,8 @@ type Summary struct {
 	AmountPaid      int
 	// AdvanceMode is the saved rule (none, delivery_fee, percent, fixed, full).
 	AdvanceMode string
+	// Tracking is when each status step happened and the courier details.
+	Tracking Tracking
 	// LensPricePending means the owner still has to confirm at least one lens price.
 	LensPricePending bool
 }
@@ -95,7 +97,9 @@ type Reader interface {
 
 // AccessService decides whether a guest or admin may receive private order details.
 type AccessService struct {
-	Reader           Reader
+	Reader Reader
+	// Limiter rate-limits public tracking lookups; order pages and invoices do not use it.
+	Limiter          AttemptCounter
 	EmailProofSecret string
 }
 
