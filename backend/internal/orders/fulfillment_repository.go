@@ -93,7 +93,16 @@ func (p postgresFulfillmentTx) LensReadiness(ctx context.Context, orderID int) e
 
 // UpdateStatus rejects an unexpected concurrent state instead of overwriting it.
 func (p postgresFulfillmentTx) UpdateStatus(ctx context.Context, orderID int, current, next string) error {
-	result, err := p.Tx.ExecContext(ctx, `UPDATE orders SET order_status = $3, updated_at = NOW() WHERE id = $1 AND order_status = $2`, orderID, current, next)
+	// Each step's time is written once, by the change into that step; the state machine never re-enters a step,
+	// so the delivered time that starts the return window cannot be silently overwritten.
+	result, err := p.Tx.ExecContext(ctx, `
+		UPDATE orders SET order_status = $3, updated_at = NOW(),
+			confirmed_at = CASE WHEN $3 = 'confirmed' THEN COALESCE(confirmed_at, NOW()) ELSE confirmed_at END,
+			preparing_at = CASE WHEN $3 = 'preparing' THEN COALESCE(preparing_at, NOW()) ELSE preparing_at END,
+			shipped_at = CASE WHEN $3 = 'shipped' THEN COALESCE(shipped_at, NOW()) ELSE shipped_at END,
+			delivered_at = CASE WHEN $3 = 'delivered' THEN COALESCE(delivered_at, NOW()) ELSE delivered_at END,
+			cancelled_at = CASE WHEN $3 = 'cancelled' THEN COALESCE(cancelled_at, NOW()) ELSE cancelled_at END
+		WHERE id = $1 AND order_status = $2`, orderID, current, next)
 	if err != nil {
 		return err
 	}
@@ -105,4 +114,26 @@ func (p postgresFulfillmentTx) UpdateStatus(ctx context.Context, orderID int, cu
 		return ErrFulfillmentConflict
 	}
 	return nil
+}
+
+// SaveTracking stores courier details in one statement that also checks the order is trackable,
+// so a concurrent cancellation cannot slip between the check and the write.
+func (s PostgresFulfillmentStore) SaveTracking(ctx context.Context, orderID int, courier, code, link string) error {
+	result, err := s.DB.ExecContext(ctx, `
+		UPDATE orders SET courier_name = $2, tracking_code = $3, tracking_url = $4, updated_at = NOW()
+		WHERE id = $1 AND order_status IN ('confirmed', 'preparing', 'shipped', 'delivered')`, orderID, courier, code, link)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed == 1 {
+		return err
+	}
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM orders WHERE id = $1)`, orderID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return ErrTrackingClosed
 }

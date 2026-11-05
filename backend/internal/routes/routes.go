@@ -42,6 +42,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
+		// shortcut: shares the login limiter's table (keys are HMACs with their own "order-track-ip" kind, so budgets never mix); give tracking its own table if limits need tuning separately.
+		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
 	}}
 	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}}
 	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
@@ -69,7 +71,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
 	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
 		Store: orders.PostgresFulfillmentStore{DB: database.DB},
-	}}
+	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}}}
 
 	router.GET("/health", handlers.Health)
 	router.POST("/api/admin/login", adminHandler.Login)
@@ -81,6 +83,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.GET("/api/categories", categories.ListCategories)
 	router.GET("/api/delivery-settings", deliverySettings.Get)
 	router.POST("/api/orders", checkout.CreateOrder)
+	router.POST("/api/track", orderAccess.TrackOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
 	router.GET("/api/payment-options", paymentHandler.PaymentOptions)
@@ -110,6 +113,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id", orderAccess.GetAdminOrder)
 	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
+	admin.PUT("/orders/:id/tracking", orderFulfillment.SetTracking)
 	admin.POST("/orders/:id/advance-received", lensReview.MarkAdvanceReceived)
 	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
 	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)

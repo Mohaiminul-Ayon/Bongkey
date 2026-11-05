@@ -231,6 +231,8 @@ func respondPayment(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": "bKash payment is not available right now"})
 	case errors.Is(err, payments.ErrTooManyPayments):
 		c.JSON(http.StatusConflict, gin.H{"error": "too many payments on this order; please contact us"})
+	case errors.Is(err, payments.ErrOverpaid):
+		c.JSON(http.StatusConflict, gin.H{"error": "approving this would be more than the order total; reject it and refund the extra"})
 	case errors.Is(err, payments.ErrAlreadyReviewed):
 		c.JSON(http.StatusConflict, gin.H{"error": "this payment was already reviewed"})
 	default:

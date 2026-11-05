@@ -11,7 +11,41 @@ import (
 
 // OrderFulfillmentHandler maps owner status commands to the fulfillment use case.
 type OrderFulfillmentHandler struct {
-	Service orders.FulfillmentService
+	Service  orders.FulfillmentService
+	Tracking orders.TrackingService
+}
+
+// SetTracking saves the courier name, tracking code and link the owner types for an order.
+func (h OrderFulfillmentHandler) SetTracking(c *gin.Context) {
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<10)
+	var req struct {
+		Courier      string `json:"courier"`
+		TrackingCode string `json:"tracking_code"`
+		TrackingURL  string `json:"tracking_url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tracking details"})
+		return
+	}
+	err = h.Tracking.SetTracking(c.Request.Context(), orderID, req.Courier, req.TrackingCode, req.TrackingURL)
+	c.Header("Cache-Control", "no-store")
+	switch {
+	case errors.Is(err, orders.ErrInvalidTracking):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "courier up to 60 characters, code up to 80, and the link must start with https://"})
+	case errors.Is(err, orders.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+	case errors.Is(err, orders.ErrTrackingClosed):
+		c.JSON(http.StatusConflict, gin.H{"error": "confirm the order first; cancelled orders have no tracking"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save tracking"})
+	default:
+		c.JSON(http.StatusOK, gin.H{"saved": true})
+	}
 }
 
 // ChangeStatus validates the admin request and returns the committed order state.

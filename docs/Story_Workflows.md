@@ -251,7 +251,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
    - checks the amount;
    - checks that bKash is turned on.
    A bad value returns 400.
-5. [PostgresStore.Submit](../backend/internal/payments/repository.go:91) opens a transaction and locks the order row (`FOR UPDATE`). It then runs [checkPayable](../backend/internal/payments/payments.go:97). The order must be `advance`, `advance_due` and `pending`, with no open lens price; otherwise 409. An amount above the order total is refused. The insert uses `ON CONFLICT DO NOTHING` on the partial unique index `(order_id, method, trx_id) WHERE status <> 'rejected'`, so a double click returns the same payment. Ten payments per order is the limit.
+5. [PostgresStore.Submit](../backend/internal/payments/repository.go:91) opens a transaction and locks the order row (`FOR UPDATE`). It then runs [checkPayable](../backend/internal/payments/payments.go:97). Since TRACK-01 the order must be neither cancelled nor delivered, still owe money, and have no open lens price; otherwise 409. An amount above what is still owed is refused. The insert uses `ON CONFLICT DO NOTHING` on the partial unique index `(order_id, method, trx_id) WHERE status <> 'rejected'`, so a double click returns the same payment. Ten payments per order is the limit.
 6. Admin: `GET /api/admin/payments?status=pending` → `AdminAuth` → [AdminPayments](../backend/internal/handlers/payment_handler.go:82). Each row lists other orders that used the same TrxID, and the [review list](../frontend/src/components/PaymentReviewList.tsx) shows that as a red warning.
 7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved` and the reviewer and time are recorded. [settles](../backend/internal/payments/payments.go) then decides whether the order becomes `advance_received`. Since ADV-01 an order settles when its approved payments reach the advance saved on it (`advance_required`), so a small payment cannot let it be confirmed and shipped; until then it stays `advance_due`. A new submission may not be more than the total minus what is already paid.
 8. Reject needs a reason of up to 200 characters, which the customer sees. The same TrxID can then be sent again.
@@ -360,6 +360,76 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
   - a frame bag outside Dhaka showed the ৳130 delivery-charge-first option and the full bKash option;
   - the order page showed ৳130 now and ৳2,290 on delivery;
   - the invoice PDF showed the paid, balance and due lines.
+
+## TRACK-01 — Delivery tracking and Track Order page (#21)
+
+**Status:** Built 2026-11-05 on `feat/delivery-tracking`. Courier API automation is not included (issue scope).
+
+**Owner decisions (2026-11-05):**
+- A public **Track order** page needs the order number **and the checkout phone**.
+  - It shows the steps, items, paid and still-to-pay amounts, and the courier tracking.
+  - The name is masked ("Ra***") and only the city is shown. Phone, address and email are never shown.
+- Any unpaid balance may be sent by bKash until delivery ("Pay the remaining"), so the courier collects less cash.
+- The owner's reference was another shop's tracking page that shows full contact details for an order number alone. That design was rejected: order numbers count up, so anyone could read other customers' addresses.
+
+**Data:** migration `016_delivery_tracking.sql` adds to `orders`:
+- the step times `confirmed_at`, `preparing_at`, `shipped_at`, `delivered_at` and `cancelled_at`;
+- `courier_name`, `tracking_code` and `tracking_url` (an https link only);
+- the constraint `orders_delivered_after_shipped`.
+
+Orders that were already shipped before the migration get `shipped_at` from their last update, so they can still be marked delivered.
+
+**Request:** `POST /api/track` with `{"order_number":"ORD-000159","phone":"+880 1712-345678"}`. The phone travels in the body, never in the URL.
+
+1. The [Track page](../frontend/src/app/track/page.tsx) (header link "Track order") sends the form through `trackOrder`.
+2. [routes.go](../backend/internal/routes/routes.go) registers the route with no login. [OrderAccessHandler.TrackOrder](../backend/internal/handlers/order_access_handler.go) limits the body to 1 KB and passes the client IP to the service.
+3. [AccessService.Track](../backend/internal/orders/tracking.go):
+   - counts the attempt with the shared PostgreSQL limiter (an HMAC key of kind `order-track-ip`; 20 tries per 15 minutes, then 429);
+   - normalizes "159", "ord-159" or "ORD-000159" to the stored order number;
+   - reduces both phones to their last 11 digits and compares them in constant time.
+
+   A wrong number or a wrong phone both give the same 404. `TrackView` holds only safe fields.
+4. The page shows the [OrderTimeline](../frontend/src/components/OrderTimeline.tsx) (Placed → Confirmed → Packed → Shipped → Delivered, or a cancelled notice), the products and the summary. While bKash is on and money is still owed, it shows **Pay … by bKash**. That button goes to the private order page, which uses this browser's order token or asks for the email code first, so the tracking lookup alone can never submit a payment.
+5. **Step times:** [postgresFulfillmentTx.UpdateStatus](../backend/internal/orders/fulfillment_repository.go) writes each step's time in the same statement as the status change, using `COALESCE`. Because the state machine never re-enters a step, the delivered time (the start of the return window) is set once and never overwritten. The database refuses a delivered time before the shipped time.
+6. **Courier details:** `PUT /api/admin/orders/:id/tracking` → `AdminAuth` → [OrderFulfillmentHandler.SetTracking](../backend/internal/handlers/order_fulfillment_handler.go) → [TrackingService.SetTracking](../backend/internal/orders/tracking.go):
+   - the service trims each value and checks lengths;
+   - the link must parse as `https://` with a host, so a `javascript:` or plain http link is refused with 400;
+   - [SaveTracking](../backend/internal/orders/fulfillment_repository.go) updates the order only while it is confirmed, preparing, shipped or delivered. This is one statement, so a concurrent cancellation cannot slip in between the check and the write. Otherwise the answer is 409 (or 404 if the order doesn't exist).
+7. **Paying the rest:** [checkPayable](../backend/internal/payments/payments.go) now accepts a payment while the order is neither cancelled nor delivered and money is still owed. `checkApprovable` also allows a late approval after delivery, but refuses a cancelled order and anything above the total (`ErrOverpaid`, 409: reject and refund). Only an order whose status is "advance due" changes status on approval; an early cash-on-delivery payment just adds to `amount_paid`.
+
+**Failure paths:**
+- A wrong phone or an unknown number: 404 with the same message.
+- More than 20 tries in 15 minutes: 429.
+- Courier details on a pending or cancelled order: 409.
+- A non-https tracking link: 400.
+- The admin tracking route without login: 401 from `AdminAuth`.
+
+**Limits:**
+- Step times are the moments the owner changes the status, not courier scan times. Mark "Delivered" when the courier confirms.
+- The phone is a weak proof if someone already knows both the order number and the customer's phone. They see only status, items, amounts, a masked name and the city.
+- The tracking limiter shares the login limiter's table, with separate keys (marked `shortcut:` in routes).
+
+**Evidence:**
+- Unit tests in [tracking_test.go](../backend/internal/orders/tracking_test.go) cover:
+  - spellings of the number and phone;
+  - wrong, short and unknown inputs;
+  - no private fields in the result;
+  - the rate limit per client;
+  - https-only links;
+  - name masking, including Bangla names.
+- `TestPayableRules` covers paying early, paying after shipping, a late approval after delivery, and refusing overpayment.
+- Local PostgreSQL `TestDeliveryTrackingPostgres`:
+  - courier details refused while pending;
+  - the step times set;
+  - a delivered time before the shipped time refused by the database;
+  - a wrong phone gives 404;
+  - a repeated "delivered" keeps the first time.
+- The route protection test covers the admin tracking route.
+- HTTP: a wrong phone gave 404, the right phone in another spelling found the order, and the response carried no private fields.
+- Browser:
+  - the Track page showed the timeline, courier link, amounts and the "Pay the remaining ৳2,290 by bKash" button;
+  - the private order page showed the timeline and the optional pay box;
+  - all four header links fit at 375 px.
 
 ## Stories without a completed request flow
 

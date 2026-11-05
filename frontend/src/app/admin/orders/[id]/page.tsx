@@ -5,8 +5,9 @@ import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
+import { OrderTimeline } from "@/components/OrderTimeline";
 import { PaymentReviewList } from "@/components/PaymentReviewList";
-import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
+import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderTracking, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
@@ -139,6 +140,27 @@ function OrderDetails({ id }: { id: string }) {
             </div>
           </div>
         ) : null}
+
+        <div className="rounded-xl bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-black">Delivery tracking</h2>
+          <div className="mt-4"><OrderTimeline status={order.order_status} tracking={order.tracking} /></div>
+          {order.order_status === "pending" || order.order_status === "cancelled" ? (
+            <p className="mt-3 text-sm text-neutral-600">Courier details can be added once the order is confirmed.</p>
+          ) : (
+            <form key={`${order.tracking.courier}-${order.tracking.tracking_code}-${order.tracking.tracking_url}`} className="mt-4 grid gap-3 sm:grid-cols-3"
+              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                void run(() => saveOrderTracking(order.id, { courier: String(form.get("courier") ?? ""), tracking_code: String(form.get("tracking_code") ?? ""), tracking_url: String(form.get("tracking_url") ?? "") }));
+              }}>
+              <label className="grid gap-1 text-sm font-bold">Courier<input name="courier" defaultValue={order.tracking.courier} maxLength={60} placeholder="Steadfast, Pathao, RedX…" className="rounded-md border border-neutral-300 px-3 py-2 font-normal" /></label>
+              <label className="grid gap-1 text-sm font-bold">Tracking code<input name="tracking_code" defaultValue={order.tracking.tracking_code} maxLength={80} className="rounded-md border border-neutral-300 px-3 py-2 font-normal" /></label>
+              <label className="grid gap-1 text-sm font-bold">Tracking link (optional)<input name="tracking_url" type="url" defaultValue={order.tracking.tracking_url} maxLength={300} placeholder="https://…" className="rounded-md border border-neutral-300 px-3 py-2 font-normal" /></label>
+              <button type="submit" disabled={busy} className="site-button button-primary w-fit disabled:opacity-50 sm:col-span-3">Save tracking</button>
+            </form>
+          )}
+          <p className="mt-3 text-xs text-neutral-500">Step times are saved automatically when you change the status. Mark &quot;Delivered&quot; when the courier confirms delivery; that time starts the return window.</p>
+        </div>
 
         <div className="grid gap-5 md:grid-cols-2">
           <div className="rounded-xl bg-white p-6 shadow-sm">

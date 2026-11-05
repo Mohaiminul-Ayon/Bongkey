@@ -2,6 +2,7 @@ package orders
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -71,5 +72,73 @@ func TestConcurrentCancellationPostgres(t *testing.T) {
 	}
 	if status != "cancelled" || stock != 3 {
 		t.Fatalf("status=%q stock=%d, want cancelled and 3", status, stock)
+	}
+}
+
+// TestDeliveryTrackingPostgres walks one order to delivery: each step gets its time once, courier details need a
+// confirmed order, delivered can never be stored before shipped, and the public lookup needs the right phone.
+func TestDeliveryTrackingPostgres(t *testing.T) {
+	db := localCheckoutDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var orderID int
+	var orderNumber string
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total)
+		VALUES ('QA-TRACK-' || $1, 'Rahim QA', '01712345678', 'House 5', 'Dhaka', 200, 80, 280)
+		RETURNING id`, fmt.Sprint(time.Now().UnixNano())).Scan(&orderID); err != nil {
+		t.Fatal(err)
+	}
+	// The public lookup only accepts ORD- numbers, so give the fixture one that cannot clash with real orders.
+	orderNumber = fmt.Sprintf("ORD-%d", 900000000+orderID)
+	if _, err := db.ExecContext(ctx, `UPDATE orders SET order_number = $2 WHERE id = $1`, orderID, orderNumber); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO order_items (order_id, product_name, quantity, unit_price, total_price) VALUES ($1, 'QA frame', 1, 200, 200)`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM orders WHERE id = $1`, orderID) })
+
+	tracking := TrackingService{Store: PostgresFulfillmentStore{DB: db}}
+	if err := tracking.SetTracking(ctx, orderID, "Steadfast", "SF-1", ""); !errors.Is(err, ErrTrackingClosed) {
+		t.Fatalf("tracking on a pending order: %v", err)
+	}
+	fulfillment := FulfillmentService{Store: PostgresFulfillmentStore{DB: db}}
+	for _, step := range []string{"confirmed", "preparing", "shipped"} {
+		if _, err := fulfillment.ChangeStatus(ctx, orderID, step); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+	}
+	if err := tracking.SetTracking(ctx, orderID, "Steadfast", "SF-1", "https://steadfast.com.bd/t/SF-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE orders SET delivered_at = shipped_at - INTERVAL '1 hour' WHERE id = $1`, orderID); err == nil {
+		t.Fatal("database accepted a delivered time before the ship time")
+	}
+	if _, err := fulfillment.ChangeStatus(ctx, orderID, "delivered"); err != nil {
+		t.Fatal(err)
+	}
+
+	access := AccessService{Reader: PostgresReader{DB: db}, Limiter: countingLimiter{}, EmailProofSecret: testEmailProofSecret}
+	if _, err := access.Track(ctx, orderNumber, "01799999999", "203.0.113.20"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong phone: %v", err)
+	}
+	view, err := access.Track(ctx, orderNumber, "+8801712345678", "203.0.113.20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := view.Tracking
+	if view.Status != "delivered" || tr.ConfirmedAt == nil || tr.PreparingAt == nil || tr.ShippedAt == nil || tr.DeliveredAt == nil || tr.CancelledAt != nil {
+		t.Fatalf("step times = %+v", tr)
+	}
+	if tr.DeliveredAt.Before(*tr.ShippedAt) || tr.Courier != "Steadfast" || tr.TrackingURL != "https://steadfast.com.bd/t/SF-1" || view.Customer != "Ra***" {
+		t.Fatalf("tracking view = %+v", view)
+	}
+	if _, err := fulfillment.ChangeStatus(ctx, orderID, "delivered"); err != nil {
+		t.Fatalf("repeated delivered request: %v", err)
+	}
+	again, _ := access.Track(ctx, orderNumber, "01712345678", "203.0.113.20")
+	if !again.Tracking.DeliveredAt.Equal(*tr.DeliveredAt) {
+		t.Fatal("delivered time was overwritten")
 	}
 }
