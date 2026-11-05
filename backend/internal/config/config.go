@@ -17,6 +17,9 @@ type Config struct {
 	JWTSecret        string
 	GmailFrom        string
 	GmailAppPassword string
+	// EmailTestCode turns on local email test mode: addresses ending in @example.test get this fixed
+	// 6-digit code and no email is sent. Empty means off; startup refuses it outside development.
+	EmailTestCode string
 	// FrontendOrigins are the browser origins allowed to read API responses (CORS).
 	FrontendOrigins []string
 	ProjectRoot     string
@@ -48,6 +51,7 @@ func Load() (Config, error) {
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		GmailFrom:        getEnv("GMAIL_FROM", ""),
 		GmailAppPassword: getEnv("GMAIL_APP_PASSWORD", ""),
+		EmailTestCode:    getEnv("EMAIL_TEST_CODE", ""),
 		FrontendOrigins:  strings.Split(getEnv("FRONTEND_ORIGIN", "http://localhost:3000"), ","),
 		ProjectRoot:      projectRoot,
 		PrescriptionDir:  filepath.Join(projectRoot, "backend", "private", "prescriptions"),
@@ -68,7 +72,24 @@ func (cfg Config) validateSecurity() error {
 	if (cfg.GmailFrom == "") != (cfg.GmailAppPassword == "") {
 		return fmt.Errorf("GMAIL_FROM and GMAIL_APP_PASSWORD must be set together")
 	}
+	// A fixed code must never reach a real shop: fail closed unless this is explicitly a development run.
+	if cfg.EmailTestCode != "" && (cfg.AppEnv != "development" || !sixDigits(cfg.EmailTestCode)) {
+		return fmt.Errorf("EMAIL_TEST_CODE is only allowed with APP_ENV=development and must be 6 digits")
+	}
 	return nil
+}
+
+// sixDigits reports whether value is exactly six ASCII digits.
+func sixDigits(value string) bool {
+	if len(value) != 6 {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func getEnv(key string, fallback string) string {
