@@ -32,7 +32,13 @@ type Service struct {
 	Store  Store
 	Sender Sender
 	Secret string
+	// TestCode is local email test mode (config EMAIL_TEST_CODE): only addresses on the reserved
+	// example.test domain, which can never receive mail, get this code without an email.
+	TestCode string
 }
+
+// testDomain is reserved for testing (RFC 2606), so a fixed code here can never unlock a real mailbox.
+const testDomain = "@example.test"
 
 // Request reserves a bounded challenge before sending one code to the mailbox.
 func (s Service) Request(ctx context.Context, rawEmail, remoteIP string) error {
@@ -44,11 +50,19 @@ func (s Service) Request(ctx context.Context, rawEmail, remoteIP string) error {
 	if err != nil {
 		return err
 	}
+	testAddress := s.TestCode != "" && strings.HasSuffix(email, testDomain)
+	if testAddress {
+		code = s.TestCode
+	}
 	emailKey := security.EmailKey(s.Secret, "email", email)
 	codeHash := security.EmailCodeHash(s.Secret, email, code)
 	ipKey := security.EmailKey(s.Secret, "ip", remoteIP)
 	if err := s.Store.Reserve(ctx, emailKey, ipKey, codeHash); err != nil {
 		return err
+	}
+	// Expiry, attempt and rate limits above still apply to test addresses; only the email is skipped.
+	if testAddress {
+		return nil
 	}
 	if err := s.Sender.Send(ctx, email, code); err != nil {
 		if releaseErr := s.Store.Release(ctx, emailKey, codeHash); releaseErr != nil {

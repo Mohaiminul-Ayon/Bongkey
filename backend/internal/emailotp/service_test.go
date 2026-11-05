@@ -88,3 +88,36 @@ func TestEmailOTPFlow(t *testing.T) {
 		t.Fatal("undelivered code remained usable")
 	}
 }
+
+// TestEmailTestMode gives only reserved test addresses the fixed code without an email; real addresses
+// still get a random code by email, and the test code is still single use.
+func TestEmailTestMode(t *testing.T) {
+	const secret = "synthetic-email-proof-secret-at-least-32-characters"
+	store, sender := &codeStore{}, &codeSender{}
+	service := Service{Store: store, Sender: sender, Secret: secret, TestCode: "123456"}
+	if err := service.Request(context.Background(), "Buyer@Example.test", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if sender.email != "" {
+		t.Fatal("an email was sent to a test address")
+	}
+	proof, err := service.Verify(context.Background(), "buyer@example.test", "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if email, err := security.VerifyEmailProof(secret, proof); err != nil || email != "buyer@example.test" {
+		t.Fatal("test proof did not bind to the test address")
+	}
+	if _, err := service.Verify(context.Background(), "buyer@example.test", "123456"); !errors.Is(err, ErrInvalid) {
+		t.Fatal("test code was used twice")
+	}
+	if err := service.Request(context.Background(), "buyer@example.com", "127.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	if sender.email != "buyer@example.com" || sender.code == "123456" && store.codeHash == security.EmailCodeHash(secret, "buyer@example.com", "123456") {
+		t.Fatal("a real address got the fixed test code")
+	}
+	if _, err := service.Verify(context.Background(), "buyer@example.com", "123456"); err == nil && sender.code != "123456" {
+		t.Fatal("the test code unlocked a real address")
+	}
+}

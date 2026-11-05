@@ -48,6 +48,7 @@ Before the first backend start, fill in these values in `.env`:
 | `FRONTEND_ORIGIN` | No | Exact browser origin(s) of the shop frontend, comma-separated. Default `http://localhost:3000`. Other websites get no CORS permission. Set it to the real site address when deploying. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First start | Creates the one owner account when the admin table is empty. Password at least 12 characters. Later starts never change it. |
 | `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
+| `EMAIL_TEST_CODE` | No | Local testing only. When set (6 digits, and only with `APP_ENV=development`, otherwise startup fails), addresses ending in `@example.test` get this code and no email is sent; every real address still needs a real emailed code. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
 | `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
 | `NEXT_PUBLIC_WHATSAPP_NUMBER` | No | Shop WhatsApp number, e.g. `8801XXXXXXXXX` (a local `01XXXXXXXXX` is converted). The product page (custom lens, "Not sure which lens?"), checkout and order success page show WhatsApp chat links. Without it, the page says the shop will call. Next.js reads it from `frontend/.env.local`, not the root `.env`; restart `npm run dev` after setting it. |
