@@ -110,7 +110,8 @@ const findOrderSQL = `
 		COALESCE(i.invoice_number, ''), o.guest_token_hash, o.customer_email, o.email_verified,
 		o.delivery_note, o.payment_method, o.payment_status, o.created_at,
 		COALESCE(i.issued_at::text, ''),
-		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND NOT x.lens_price_final)
+		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND NOT x.lens_price_final),
+		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND x.lens_kind <> 'none')
 	FROM orders o LEFT JOIN invoices i ON i.order_id = o.id
 	WHERE `
 
@@ -131,6 +132,7 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 		&record.Total, &record.Status, &record.InvoiceNumber, &record.GuestTokenHash,
 		&record.CustomerEmail, &record.EmailVerified, &record.DeliveryNote,
 		&record.PaymentMethod, &record.PaymentStatus, &record.CreatedAt, &record.InvoiceIssuedAt, &record.LensPricePending,
+		&record.LensOrder,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound
@@ -138,7 +140,7 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 	if err != nil {
 		return Record{}, err
 	}
-	record.LensOrder = record.PaymentMethod == "advance"
+	record.PayInAdvance = record.PaymentMethod == "advance"
 	return record, nil
 }
 

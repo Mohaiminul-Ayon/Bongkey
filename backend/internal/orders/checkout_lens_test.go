@@ -168,3 +168,61 @@ func TestFrameOnlyRetryFingerprintIsUnchanged(t *testing.T) {
 		t.Fatal("frame-only retry fingerprint changed; accepted retries would conflict")
 	}
 }
+
+// paymentOptionsStub reports bKash as on or off for checkout tests.
+type paymentOptionsStub bool
+
+// Enabled returns the stub's switch for every method.
+func (p paymentOptionsStub) Enabled(context.Context, string) (bool, error) { return bool(p), nil }
+
+// TestCheckoutPaymentChoice lets frame orders choose cash on delivery or bKash, and never lets lens orders pay on delivery.
+func TestCheckoutPaymentChoice(t *testing.T) {
+	frame := CheckoutItem{ProductID: 1, Quantity: 1}
+	lensLine := CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower}
+	for name, tc := range map[string]struct {
+		item          CheckoutItem
+		choice        string
+		bkashOn       bool
+		method, state string
+		err           error
+	}{
+		"frame, no choice":      {frame, "", true, "cash_on_delivery", "unpaid", nil},
+		"frame, cash":           {frame, PayCashOnDelivery, true, "cash_on_delivery", "unpaid", nil},
+		"frame, bKash on":       {frame, PayBkash, true, "advance", "advance_due", nil},
+		"frame, bKash off":      {frame, PayBkash, false, "", "", ErrPaymentUnavailable},
+		"frame, unknown method": {frame, "card", true, "", "", ErrInvalidCheckout},
+		"lens, cash refused":    {lensLine, PayCashOnDelivery, true, "", "", ErrInvalidCheckout},
+		"lens, bKash off is ok": {lensLine, PayBkash, false, "advance", "advance_due", nil},
+		"lens, no choice":       {lensLine, "", false, "advance", "advance_due", nil},
+	} {
+		tx := &checkoutTxStub{
+			products: map[int]ReservedProduct{1: {Name: "Frame", Price: 1000}},
+			stock:    map[int]int{1: 5},
+			lenses:   map[int]LensChoice{7: {Name: "Blue-cut", Price: 2500, MaxPower: 600}},
+		}
+		store := &checkoutStoreStub{tx: tx}
+		service := CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), PaymentOptions: paymentOptionsStub(tc.bkashOn)}
+		_, err := service.Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
+			IdempotencyKey: "checkout-pay-choice-01", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+			PaymentMethod: tc.choice, Items: []CheckoutItem{tc.item},
+		}))
+		if !errors.Is(err, tc.err) || tx.paymentMethod != tc.method || tx.paymentStatus != tc.state {
+			t.Fatalf("%s: got %s/%s err=%v", name, tx.paymentMethod, tx.paymentStatus, err)
+		}
+		if tc.err != nil && (store.committed || len(tx.reservedIDs) != 0) {
+			t.Fatalf("%s: refused choice still changed stock", name)
+		}
+	}
+}
+
+// TestCheckoutHashKeepsPaymentChoice treats a changed payment choice as different order data on retry.
+func TestCheckoutHashKeepsPaymentChoice(t *testing.T) {
+	base := CheckoutRequest{CustomerName: "QA", Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	withBkash := base
+	withBkash.PaymentMethod = PayBkash
+	a, _ := checkoutRequestHash(base)
+	b, _ := checkoutRequestHash(withBkash)
+	if a == b {
+		t.Fatal("payment choice is missing from the retry fingerprint")
+	}
+}

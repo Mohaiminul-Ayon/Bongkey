@@ -9,6 +9,7 @@ import { clearAdminToken } from "@/lib/api";
 const links = [
   ["/admin/dashboard", "Dashboard"],
   ["/admin/orders", "Orders"],
+  ["/admin/payments", "Payments"],
   ["/admin/products", "Products"],
   ["/admin/products/new", "Add product"],
   ["/admin/categories", "Categories"],

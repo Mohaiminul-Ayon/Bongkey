@@ -53,7 +53,8 @@ func (s FulfillmentService) ChangeStatus(ctx context.Context, orderID int, reque
 		if !allowedOrderTransition(current, next) {
 			return ErrInvalidOrderTransition
 		}
-		// Lens orders are made to measure, so they are confirmed only after the price, prescription and advance are settled.
+		// Lens orders are made to measure, so they are confirmed only after the price, prescription and advance are settled;
+		// a frame order paid by bKash is confirmed only after its payment is received.
 		if next == "confirmed" {
 			if err := tx.LensReadiness(ctx, orderID); err != nil {
 				return err

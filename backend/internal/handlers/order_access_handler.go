@@ -105,6 +105,6 @@ func respondWithOrder(c *gin.Context, order orders.Summary, err error) {
 		"shipping_address": order.ShippingAddress, "city": order.City,
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee,
 		"total": order.Total, "order_status": order.Status,
-		"lens_order": order.LensOrder, "lens_price_pending": order.LensPricePending,
+		"lens_order": order.LensOrder, "pay_in_advance": order.PayInAdvance, "lens_price_pending": order.LensPricePending,
 	})
 }

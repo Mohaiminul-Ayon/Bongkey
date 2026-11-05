@@ -23,8 +23,10 @@ type Summary struct {
 	DeliveryFee     int
 	Total           int
 	Status          string
-	// LensOrder means the order has lenses and is paid by advance, not cash on delivery.
+	// LensOrder means the order has at least one lens line; such orders never use cash on delivery.
 	LensOrder bool
+	// PayInAdvance means the customer pays before shipping (every lens order, or a frame order paid by bKash).
+	PayInAdvance bool
 	// LensPricePending means the owner still has to confirm at least one lens price.
 	LensPricePending bool
 }
