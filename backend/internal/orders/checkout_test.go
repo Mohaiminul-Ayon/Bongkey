@@ -86,6 +86,7 @@ type checkoutTxStub struct {
 	lines                        []OrderLine
 	labels                       []string
 	paymentMethod, paymentStatus string
+	terms                        PaymentTerms
 	failInvoice                  bool
 }
 
@@ -117,9 +118,9 @@ func (tx *checkoutTxStub) ReserveProduct(_ context.Context, id, quantity int) (R
 }
 
 // InsertOrder notes when all stock checks allowed order persistence.
-func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, _ string, keyHash, requestHash, paymentMethod, paymentStatus string) (int, string, error) {
+func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, _ string, keyHash, requestHash string, terms PaymentTerms) (int, string, error) {
 	tx.orderSaved = true
-	tx.paymentMethod, tx.paymentStatus = paymentMethod, paymentStatus
+	tx.paymentMethod, tx.paymentStatus, tx.terms = terms.Method, terms.Status, terms
 	tx.request = request
 	tx.idempotencyKeyHash = keyHash
 	tx.idempotencyRequestHash = requestHash

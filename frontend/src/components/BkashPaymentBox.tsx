@@ -11,7 +11,7 @@ type BkashPaymentBoxProps = {
   token: string;
   orderNumber: string;
   total: number;
-  /** lensOrder pays an advance agreed by phone; other orders pay the full total */
+  /** lensOrder changes only the thank-you text; the amount comes from the order's saved advance */
   lensOrder: boolean;
 };
 
@@ -60,17 +60,17 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
   }
 
   if (!view) return error ? <p role="alert" className="text-red-700">{error}</p> : null;
-  const received = view.payments.some((p) => p.status === "approved");
-  // A frame order is paid in full, so after a part payment the customer is asked only for the rest.
-  const paid = view.payments.filter((p) => p.status === "approved").reduce((sum, p) => sum + p.amount, 0);
-  const owed = total - paid;
+  // The server saved how much is due before confirmation; the rest of the total is paid on delivery.
+  const paid = view.amount_paid;
+  const dueNow = Math.max(0, view.advance_required - paid);
+  const onDelivery = Math.max(0, total - Math.max(paid, view.advance_required));
 
   return (
     <div className="mt-4 rounded-md border border-[#e2136e]/30 bg-[#fdf2f7] p-4 text-sm text-neutral-900">
-      <h2 className="text-lg font-black text-[#b0105a]">{lensOrder ? "Pay the advance by bKash" : "Pay by bKash"}</h2>
+      <h2 className="text-lg font-black text-[#b0105a]">Pay by bKash</h2>
       {view.payable === "price_pending" ? <p className="mt-2">We first confirm your lens price by phone. After that you can pay the advance here.</p> : null}
       {view.payable === "off" ? <p className="mt-2">We will call you about the payment.</p> : null}
-      {view.payable === "not_due" && received ? <p className="mt-2 font-bold text-green-800">Payment received. Thank you! {lensOrder ? "We start making your lenses now." : "We will ship your order soon."}</p> : null}
+      {view.payable === "not_due" && paid > 0 ? <p className="mt-2 font-bold text-green-800">Payment received. Thank you! {lensOrder ? "We start making your lenses now." : "We will confirm and ship your order soon."}{total > paid ? ` Please pay ${formatPrice(total - paid)} on delivery.` : ""}</p> : null}
       {view.payable === "yes" && view.method ? (
         <>
           <ol className="mt-3 list-decimal space-y-1 pl-5">
@@ -79,7 +79,11 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
               Send to <strong className="font-mono text-base">{view.method.account_number}</strong>{" "}
               <button type="button" onClick={() => copyNumber(view.method!.account_number)} className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs font-bold">{copied ? "Copied" : "Copy"}</button>
             </li>
-            <li>Amount: {lensOrder ? <>the advance we agreed on the phone (order total {formatPrice(total)})</> : <strong>{formatPrice(owed)}</strong>}{!lensOrder && paid > 0 ? <> (already received {formatPrice(paid)} of {formatPrice(total)})</> : null}.</li>
+            <li>
+              Amount: <strong>{formatPrice(dueNow)}</strong>
+              {paid > 0 ? <> (already received {formatPrice(paid)})</> : null}
+              {onDelivery > 0 ? <>. The rest, {formatPrice(onDelivery)}, is paid on delivery</> : null}.
+            </li>
             <li>Reference: <strong>{orderNumber}</strong></li>
             <li>Type the <strong>TrxID</strong> from your bKash SMS below.</li>
           </ol>
@@ -87,7 +91,7 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
           <form onSubmit={send} className="mt-3 grid gap-3 sm:grid-cols-3">
             <label className="grid gap-1 font-bold">TrxID<input name="trx_id" required minLength={8} maxLength={12} pattern="[A-Za-z0-9]{8,12}" placeholder="9ABC12XY34" className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-mono font-normal uppercase" /></label>
             <label className="grid gap-1 font-bold">Your bKash number<input name="sender" required inputMode="tel" placeholder="01XXXXXXXXX" className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-normal" /></label>
-            <label className="grid gap-1 font-bold">Amount sent (৳)<input name="amount" required type="number" min={1} max={owed} step={1} className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-normal" /></label>
+            <label className="grid gap-1 font-bold">Amount sent (৳)<input name="amount" required type="number" min={1} max={total - paid} step={1} className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-normal" /></label>
             <button type="submit" disabled={busy} className="site-button button-primary sm:col-span-3 disabled:opacity-50">{busy ? "Sending..." : "I have paid — send for checking"}</button>
           </form>
           <p className="mt-2 text-xs text-neutral-600">Sent in two parts? Report each TrxID separately.</p>

@@ -19,10 +19,9 @@ type queryer interface {
 
 // orderStateSQL reads what checkPayable and settles need; an open lens price is any line whose price is not final.
 const orderStateSQL = `
-	SELECT o.payment_method, o.payment_status, o.order_status, o.total,
+	SELECT o.payment_status, o.order_status, o.total,
 		EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND NOT i.lens_price_final),
-		EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.lens_kind <> 'none'),
-		COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'approved'), 0)
+		o.advance_required, o.amount_paid
 	FROM orders o WHERE o.id = $1`
 
 // readOrderState reads an order's payable state, locking the order row when lock is true.
@@ -32,7 +31,7 @@ func readOrderState(ctx context.Context, q queryer, orderID int, lock bool) (Ord
 		query += " FOR UPDATE OF o"
 	}
 	var state OrderState
-	err := q.QueryRowContext(ctx, query, orderID).Scan(&state.PaymentMethod, &state.PaymentStatus, &state.OrderStatus, &state.Total, &state.PriceOpen, &state.HasLens, &state.Paid)
+	err := q.QueryRowContext(ctx, query, orderID).Scan(&state.PaymentStatus, &state.OrderStatus, &state.Total, &state.PriceOpen, &state.Required, &state.Paid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OrderState{}, ErrNotFound
 	}
@@ -205,8 +204,8 @@ func (s PostgresStore) review(ctx context.Context, paymentID int, decide func(tx
 	})
 }
 
-// Approve marks the payment approved and, once settles says the order is paid, the order's payment received;
-// both writes happen in one transaction.
+// Approve marks the payment approved, adds it to the order's paid amount and, once settles says the advance
+// is covered, marks the order's advance received; all writes happen in one transaction.
 func (s PostgresStore) Approve(ctx context.Context, paymentID int, adminID int64) error {
 	return s.review(ctx, paymentID, func(tx *sql.Tx, orderID int, state OrderState) error {
 		if err := checkApprovable(state); err != nil {
@@ -217,10 +216,12 @@ func (s PostgresStore) Approve(ctx context.Context, paymentID int, adminID int64
 			UPDATE payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 RETURNING amount`, paymentID, adminID).Scan(&amount); err != nil {
 			return err
 		}
-		if !settles(state, amount) {
-			return nil
+		status := state.PaymentStatus
+		if settles(state, amount) {
+			status = orderAdvanceDone
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE orders SET payment_status = $2, updated_at = NOW() WHERE id = $1`, orderID, orderAdvanceDone)
+		_, err := tx.ExecContext(ctx, `
+			UPDATE orders SET amount_paid = amount_paid + $2, payment_status = $3, updated_at = NOW() WHERE id = $1`, orderID, amount, status)
 		return err
 	})
 }
@@ -233,4 +234,44 @@ func (s PostgresStore) Reject(ctx context.Context, paymentID int, adminID int64,
 			paymentID, adminID, reason)
 		return err
 	})
+}
+
+// Policies reads both advance rules, frame first.
+func (s PostgresStore) Policies(ctx context.Context) ([]Policy, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT kind, mode, value FROM advance_policies ORDER BY kind`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Policy
+	for rows.Next() {
+		var p Policy
+		if err := rows.Scan(&p.Kind, &p.Mode, &p.Value); err != nil {
+			return nil, err
+		}
+		list = append(list, p)
+	}
+	return list, rows.Err()
+}
+
+// Policy reads one advance rule.
+func (s PostgresStore) Policy(ctx context.Context, kind string) (Policy, error) {
+	p := Policy{Kind: kind}
+	err := s.DB.QueryRowContext(ctx, `SELECT mode, value FROM advance_policies WHERE kind = $1`, kind).Scan(&p.Mode, &p.Value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Policy{}, ErrNotFound
+	}
+	return p, err
+}
+
+// SavePolicy updates one existing rule; it never touches orders, which keep their own copy.
+func (s PostgresStore) SavePolicy(ctx context.Context, p Policy) error {
+	result, err := s.DB.ExecContext(ctx, `UPDATE advance_policies SET mode = $2, value = $3, updated_at = NOW() WHERE kind = $1`, p.Kind, p.Mode, p.Value)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil || n != 1 {
+		return errors.Join(err, ErrNotFound)
+	}
+	return nil
 }

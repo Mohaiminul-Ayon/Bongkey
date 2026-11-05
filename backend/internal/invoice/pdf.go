@@ -66,14 +66,15 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 			return nil, err
 		}
 	}
-	// Only an unpaid cash-on-delivery order has a known collected amount (zero); a due bKash or advance order
-	// may already be part paid, so it must not claim zero.
-	if order.PaymentStatus == "unpaid" {
-		if err := layout.line(fmt.Sprintf("Paid: BDT 0 | Balance: BDT %d", order.Total), 11); err != nil {
+	// Paid is what the owner recorded as received; the balance is collected on delivery.
+	lines := []string{fmt.Sprintf("Paid: BDT %d | Balance on delivery: BDT %d", order.AmountPaid, max(0, order.Total-order.AmountPaid))}
+	if due := order.AdvanceRequired - order.AmountPaid; due > 0 {
+		lines = append(lines, fmt.Sprintf("Due by bKash before we confirm: BDT %d", due))
+	}
+	for _, entry := range lines {
+		if err := layout.line(entry, 11); err != nil {
 			return nil, err
 		}
-	} else if err := layout.line("Paid / balance: consult payment record", 11); err != nil {
-		return nil, err
 	}
 	return pdf.GetBytesPdfReturnErr()
 }

@@ -56,9 +56,11 @@ const (
 	PayBkash          = "bkash"
 )
 
-// PaymentOptions tells checkout whether an online payment method is turned on.
+// PaymentOptions tells checkout whether an online payment method is turned on and what the owner's
+// advance rule is for a kind of order (PolicyFrame or PolicyLens).
 type PaymentOptions interface {
 	Enabled(ctx context.Context, code string) (bool, error)
+	AdvancePolicy(ctx context.Context, kind string) (mode string, value int, err error)
 }
 
 // CheckoutItem is one requested product and lens choice.
@@ -145,7 +147,7 @@ type CheckoutTx interface {
 	FindIdempotentOrder(context.Context, string) (CheckoutReceipt, string, bool, error)
 	ReserveProduct(context.Context, int, int) (ReservedProduct, error)
 	LensForProduct(ctx context.Context, packageID, productID int) (LensChoice, error)
-	InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, keyHash, requestHash, paymentMethod, paymentStatus string) (int, string, error)
+	InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, keyHash, requestHash string, terms PaymentTerms) (int, string, error)
 	InsertItem(context.Context, int, CheckoutItem, ReservedProduct, OrderLine) error
 	InsertInvoice(context.Context, int, CheckoutRequest, int, int, int) (string, error)
 }
@@ -193,7 +195,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	if prescriptions > maxPrescriptionLines {
 		return CheckoutReceipt{}, ErrInvalidCheckout
 	}
-	paymentMethod, paymentStatus, err := s.paymentFor(ctx, request.PaymentMethod, hasLens)
+	terms, err := s.paymentFor(ctx, request.PaymentMethod, hasLens)
 	if err != nil {
 		return CheckoutReceipt{}, err
 	}
@@ -293,7 +295,8 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 			subtotal += int(lineTotal)
 		}
 		total := subtotal + deliveryFee
-		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash, paymentMethod, paymentStatus)
+		terms := terms.withAmount(total, deliveryFee)
+		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash, terms)
 		if err != nil {
 			return err
 		}
@@ -319,7 +322,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		if err != nil {
 			return err
 		}
-		receipt = CheckoutReceipt{ID: orderID, OrderNumber: orderNumber, InvoiceNumber: invoiceNumber, Subtotal: subtotal, DeliveryFee: deliveryFee, Total: total, PaymentMethod: paymentMethod}
+		receipt = CheckoutReceipt{ID: orderID, OrderNumber: orderNumber, InvoiceNumber: invoiceNumber, Subtotal: subtotal, DeliveryFee: deliveryFee, Total: total, PaymentMethod: terms.Method}
 		return nil
 	})
 	if err != nil {
@@ -404,33 +407,6 @@ func ValidIdempotencyKey(key string) bool {
 		}
 	}
 	return true
-}
-
-// paymentFor turns the customer's choice into the saved payment method and status.
-// Lenses are cut to one customer's prescription, so lens orders always pay an advance and never cash on delivery;
-// their advance may still be collected by phone, so bKash being off does not block them.
-// A frame-only order may choose bKash only while the owner has it turned on, and is then paid in full before shipping.
-func (s CheckoutService) paymentFor(ctx context.Context, choice string, hasLens bool) (string, string, error) {
-	switch {
-	case choice != "" && choice != PayCashOnDelivery && choice != PayBkash:
-		return "", "", ErrInvalidCheckout
-	case hasLens && choice == PayCashOnDelivery:
-		return "", "", ErrInvalidCheckout
-	case hasLens:
-		return "advance", "advance_due", nil
-	case choice != PayBkash:
-		return "cash_on_delivery", "unpaid", nil
-	case s.PaymentOptions == nil:
-		return "", "", ErrPaymentUnavailable
-	}
-	enabled, err := s.PaymentOptions.Enabled(ctx, PayBkash)
-	if err != nil {
-		return "", "", err
-	}
-	if !enabled {
-		return "", "", ErrPaymentUnavailable
-	}
-	return "advance", "advance_due", nil
 }
 
 // checkoutRequestHash excludes proof and expected fee so accepted retries retain the original receipt after either changes.

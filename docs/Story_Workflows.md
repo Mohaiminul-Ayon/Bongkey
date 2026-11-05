@@ -239,7 +239,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 0. **Choice at checkout:** the [checkout page](../frontend/src/app/checkout/page.tsx) calls `GET /api/payment-options` ([PaymentOptions](../backend/internal/handlers/payment_handler.go)) and shows the bKash choice only while it is on. Lens carts send no choice. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go) passes `payment_method` to [CheckoutService.Place](../backend/internal/orders/checkout.go), whose `paymentFor` decides:
    - a lens order with `cash_on_delivery`, or an unknown method, gets 400;
-   - a lens order is always saved as `advance` / `advance_due`, even while bKash is off, because the advance can be collected by phone;
+   - a lens order is always saved as `advance`, even while bKash is off, because the advance can be collected by phone; how much is due follows the lens rule (ADV-01);
    - a frame order choosing `bkash` while it is off gets 409, and otherwise it is saved as `advance` / `advance_due`.
    The choice is part of the retry fingerprint, so changing it on a retry is a 409, not a second order. The order page now reads `pay_in_advance` (payment method) and `lens_order` (any lens line) separately, so a frame paid by bKash is not treated as a lens order. Confirming any `advance` order still waits for the payment ([LensReadiness](../backend/internal/orders/fulfillment_repository.go)).
 1. [BkashPaymentBox](../frontend/src/components/BkashPaymentBox.tsx) on the [order page](../frontend/src/app/order-success/[orderId]/page.tsx) first loads `GET /api/orders/:id/payments`. It shows the receiving number only when the answer says `payable: "yes"`.
@@ -253,7 +253,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
    A bad value returns 400.
 5. [PostgresStore.Submit](../backend/internal/payments/repository.go:91) opens a transaction and locks the order row (`FOR UPDATE`). It then runs [checkPayable](../backend/internal/payments/payments.go:97). The order must be `advance`, `advance_due` and `pending`, with no open lens price; otherwise 409. An amount above the order total is refused. The insert uses `ON CONFLICT DO NOTHING` on the partial unique index `(order_id, method, trx_id) WHERE status <> 'rejected'`, so a double click returns the same payment. Ten payments per order is the limit.
 6. Admin: `GET /api/admin/payments?status=pending` → `AdminAuth` → [AdminPayments](../backend/internal/handlers/payment_handler.go:82). Each row lists other orders that used the same TrxID, and the [review list](../frontend/src/components/PaymentReviewList.tsx) shows that as a red warning.
-7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved` and the reviewer and time are recorded. [settles](../backend/internal/payments/payments.go) then decides whether the order becomes `advance_received`. Any approved part settles a lens advance. A frame order settles only when its approved payments reach the total, so a small payment cannot let it be confirmed and shipped; until then it stays `advance_due`. A new submission may not be more than the amount still owed (total minus approved).
+7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved` and the reviewer and time are recorded. [settles](../backend/internal/payments/payments.go) then decides whether the order becomes `advance_received`. Since ADV-01 an order settles when its approved payments reach the advance saved on it (`advance_required`), so a small payment cannot let it be confirmed and shipped; until then it stays `advance_due`. A new submission may not be more than the total minus what is already paid.
 8. Reject needs a reason of up to 200 characters, which the customer sees. The same TrxID can then be sent again.
 
 **Failure paths:**
@@ -265,7 +265,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Limits:**
 - Nothing checks bKash itself; the owner confirms each TrxID in the bKash app. A reused TrxID is only warned about, not blocked.
-- The invoice shows plain payment words, but not paid and due amounts yet; that is #19. A due bKash order no longer prints "Paid: BDT 0", because it may be part paid.
+- The invoice shows plain payment words and, since ADV-01, the paid, balance and due amounts.
 - An unpaid bKash order keeps its stock reserved until the owner cancels it. Cancelling a paid order does not record the refund (returns, #22/#23).
 - The manual "Advance received" button stays for advances paid in other ways.
 
@@ -289,6 +289,77 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
   - a repeat submit: same id.
 - Browser: the box showed the number, instructions and steps, and a lowercase TrxID sent from the form came back uppercased as "Waiting for our check".
 - Checkout choice: unit test `TestCheckoutPaymentChoice` covers every frame/lens and on/off case. In the browser, a lens bag showed only the advance text, and a frame bag showed both choices. A frame order paid by bKash showed "Pay by bKash" with the full total. No real order was placed, because checkout needs an email code.
+
+## ADV-01 — Advance rules (#19)
+
+**Status:** Built 2026-11-05 on `feat/payment-advance`. No real customer order has been placed under these rules yet.
+
+**Owner decisions (2026-11-05):**
+- Lens orders pay the **full total** by bKash before the lenses are made.
+- A cash-on-delivery frame order pays the **delivery charge** by bKash first, and the rest on delivery.
+- A frame customer can still choose to pay everything by bKash.
+- Any lens in the bag puts the **whole order** under the lens rule.
+- bKash only, so Nagad is not in R1.
+- The owner can change both rules in Admin → Payments:
+  - frame orders: none, delivery charge, a percent, or a fixed amount;
+  - lens orders: full, a percent, or a fixed amount, never cash on delivery.
+
+**Data:**
+- Migration `015_advance_policies.sql` adds:
+  - `advance_policies`, which holds the two owner rules;
+  - four columns on each order: `advance_mode`, `advance_value`, `advance_required` and `amount_paid`.
+- Each order keeps its own copy of the rule, so changing a rule never changes an existing order.
+- Orders from before the migration that pay in advance (local test data only) were set to `full`.
+
+**Request:** `POST /api/orders` with `{"payment_method":"cash_on_delivery", "city":"Chattogram", …}` for one frame of ৳2,290.
+
+1. The [checkout page](../frontend/src/app/checkout/page.tsx) loads `GET /api/payment-options` → [PaymentOptions](../backend/internal/handlers/payment_handler.go). This returns whether bKash is on and both rules, but never the receiving number. `advancePreview` shows "first pay ৳130 (delivery charge) … Pay ৳2,290 when you receive it". That is only a preview; the server works the amount out again.
+2. [CheckoutService.Place](../backend/internal/orders/checkout.go) calls [paymentFor](../backend/internal/orders/advance.go):
+   - Lens or mixed bag: the lens rule applies, even while bKash is off (the advance is then collected by phone). Choosing cash on delivery gets 400.
+   - Frame with bKash: `full`, and only while bKash is on (409 when off).
+   - Frame with cash on delivery: the frame rule applies while bKash is on; otherwise `none`.
+3. Inside the checkout transaction, once the total is known, `PaymentTerms.withAmount` uses [AdvanceAmount](../backend/internal/orders/advance.go), the one formula:
+   - delivery charge;
+   - a percent, rounded up to whole taka;
+   - a fixed amount;
+   - the full total;
+   - always capped at the total.
+   If something is due, `payment_status` is `advance_due`; otherwise `unpaid`. `InsertOrder` saves the rule copy and the amount.
+4. The order page's [BkashPaymentBox](../frontend/src/components/BkashPaymentBox.tsx) reads `advance_required` and `amount_paid` from `GET /api/orders/:id/payments`. It shows "Amount: ৳130. The rest, ৳2,290, is paid on delivery." A customer may send up to the total minus what is already paid.
+5. Owner approval ([PostgresStore.Approve](../backend/internal/payments/repository.go)) adds the amount to `amount_paid` in the same transaction. When `amount_paid` reaches `advance_required` ([settles](../backend/internal/payments/payments.go)), the order becomes `advance_received`. "Advance received / Paid another way" records the required amount as paid.
+6. Confirmation ([LensReadiness](../backend/internal/orders/fulfillment_repository.go)) is refused while `payment_status` is `advance_due`, for any order.
+7. A lens price set by the owner ([SetLensPrice](../backend/internal/orders/lens_review_repository.go)) works the advance out again from the order's **own saved rule** and new total. If what is already paid covers it, the advance becomes received.
+8. The invoice ([pdf.go](../backend/internal/invoice/pdf.go)) prints:
+   - "Paid: BDT x | Balance on delivery: BDT y";
+   - "Due by bKash before we confirm: BDT z" while an advance is due.
+
+**Failure paths:**
+- A lens bag sending `cash_on_delivery`: 400.
+- `bkash` on a frame order while bKash is off: 409.
+- An invalid rule (lens `none`, percent 0 or above 100, frame `full`): 400 from `SaveAdvancePolicy`, before the database.
+- The rule routes without login: 401 from `AdminAuth`.
+- Confirming before the advance is paid: 409 "record the advance payment before confirming the order".
+
+**Limits:**
+- An unpaid order keeps its stock reserved until the owner cancels it.
+- The checkout preview uses the rules loaded with the page; if the owner changes a rule mid-checkout, the order page shows the server's amount.
+- The invoice "Balance on delivery" is the total minus what is paid, so it includes an advance that is still due.
+
+**Evidence:**
+- Unit tests:
+  - `TestCheckoutPaymentChoice` (11 cases: frame, lens, mixed, bKash on/off, percent rounding);
+  - `TestAdvanceAmount`;
+  - `TestSettles`;
+  - `TestValidPolicy`;
+  - the route protection test for the two rule routes.
+- Local PostgreSQL:
+  - `TestLensOrderLifecyclePostgres`: a 50% lens rule, the advance worked out again after the owner's price, and the paid amount recorded by "Advance received";
+  - `TestManualPaymentLifecyclePostgres`: a part payment stays due, the full amount settles, `amount_paid` is recorded, a rule change leaves an existing order's advance alone, and a lens rule of `none` is refused.
+- Browser:
+  - a lens bag showed "Estimated: Pay ৳1,770 by bKash";
+  - a frame bag outside Dhaka showed the ৳130 delivery-charge-first option and the full bKash option;
+  - the order page showed ৳130 now and ৳2,290 on delivery;
+  - the invoice PDF showed the paid, balance and due lines.
 
 ## Stories without a completed request flow
 

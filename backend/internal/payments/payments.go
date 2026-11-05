@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"bongkey/backend/internal/orders"
 )
 
 // MethodBkash is the only manual method for now; the owner receives on a personal number with "Send Money".
@@ -31,7 +33,7 @@ const (
 var (
 	// ErrInvalidPayment means a submitted or reviewed value is malformed or out of range.
 	ErrInvalidPayment = errors.New("invalid payment")
-	// ErrNotPayable means the order is not waiting for an advance (paid, cancelled, or not a lens order).
+	// ErrNotPayable means the order is not waiting for an advance (paid, cancelled, or nothing due before delivery).
 	ErrNotPayable = errors.New("order is not waiting for a payment")
 	// ErrPriceNotFinal means a lens price is still open, so the customer must not pay yet.
 	ErrPriceNotFinal = errors.New("lens price not confirmed")
@@ -85,21 +87,21 @@ type Payment struct {
 
 // OrderState is what decides whether an order may receive a payment.
 type OrderState struct {
-	PaymentMethod string
 	PaymentStatus string
 	OrderStatus   string
 	Total         int
 	PriceOpen     bool
-	// HasLens means the order has a lens line; its "advance" is a part payment agreed by phone.
-	HasLens bool
-	// Paid is the sum of approved payments so far.
-	Paid int
+	// Required is the advance saved on the order at checkout; Paid is what has been recorded as received.
+	Required int
+	Paid     int
 }
 
 // checkPayable is the one rule for "may this order take a payment now", used both for the
 // customer's view and, under the order lock, before a submission or an approval is saved.
+// Any order with an advance due qualifies: a lens order, a frame order paid by bKash, or a
+// cash-on-delivery order whose delivery fee is due first.
 func checkPayable(state OrderState) error {
-	if state.PaymentMethod != "advance" || state.PaymentStatus != orderAdvanceDue || state.OrderStatus != "pending" {
+	if state.PaymentStatus != orderAdvanceDue || state.OrderStatus != "pending" {
 		return ErrNotPayable
 	}
 	if state.PriceOpen {
@@ -117,11 +119,41 @@ func checkApprovable(state OrderState) error {
 	return checkPayable(state)
 }
 
-// settles reports whether approving amount finishes the order's payment step.
-// A lens advance is any agreed part, so one approval is enough; a frame order paid by bKash
-// must be paid in full, otherwise a small payment would let the order be confirmed and shipped.
+// settles reports whether approving amount covers the advance saved on the order. Until it does the order
+// stays due, so a payment smaller than the agreement cannot let the order be confirmed and shipped.
 func settles(state OrderState, amount int) bool {
-	return state.HasLens || state.Paid+amount >= state.Total
+	return state.Paid+amount >= state.Required
+}
+
+// Policy is the owner's advance rule for one kind of order; Value is a percent (1-100) or taka amount.
+type Policy struct {
+	Kind  string `json:"kind"`
+	Mode  string `json:"mode"`
+	Value int    `json:"value"`
+}
+
+// validPolicy mirrors the database checks so the owner gets a clear 400 instead of a constraint error.
+// Lens orders always pay something first; a frame order's "full" payment is the customer's own bKash choice.
+func validPolicy(p Policy) bool {
+	switch p.Kind {
+	case orders.PolicyLens:
+		if p.Mode != orders.AdvancePercent && p.Mode != orders.AdvanceFixed && p.Mode != orders.AdvanceFull {
+			return false
+		}
+	case orders.PolicyFrame:
+		if p.Mode != orders.AdvanceNone && p.Mode != orders.AdvanceDeliveryFee && p.Mode != orders.AdvancePercent && p.Mode != orders.AdvanceFixed {
+			return false
+		}
+	default:
+		return false
+	}
+	switch p.Mode {
+	case orders.AdvancePercent:
+		return p.Value >= 1 && p.Value <= 100
+	case orders.AdvanceFixed:
+		return p.Value >= 1 && p.Value <= maxAmount
+	}
+	return p.Value == 0
 }
 
 // Store persists methods and payments; each write that touches an order locks it and rechecks checkPayable.
@@ -134,6 +166,9 @@ type Store interface {
 	List(ctx context.Context, status string) ([]Payment, error)
 	Approve(ctx context.Context, paymentID int, adminID int64) error
 	Reject(ctx context.Context, paymentID int, adminID int64, reason string) error
+	Policies(ctx context.Context) ([]Policy, error)
+	Policy(ctx context.Context, kind string) (Policy, error)
+	SavePolicy(ctx context.Context, p Policy) error
 }
 
 // Service applies the payment rules; it never trusts a submission as money received.
@@ -145,6 +180,9 @@ type GuestView struct {
 	Payable  string    `json:"payable"`
 	Method   *Method   `json:"method,omitempty"`
 	Payments []Payment `json:"payments"`
+	// Required is the amount due before confirmation and Paid what is recorded; the rest is paid on delivery.
+	Required int `json:"advance_required"`
+	Paid     int `json:"amount_paid"`
 }
 
 // ForGuest builds the customer's payment view for an order they are already authorized to see.
@@ -161,7 +199,7 @@ func (s Service) ForGuest(ctx context.Context, orderID int) (GuestView, error) {
 	for i := range list {
 		list[i].UsedOnOrders = nil
 	}
-	view := GuestView{Payable: "yes", Payments: list}
+	view := GuestView{Payable: "yes", Payments: list, Required: state.Required, Paid: state.Paid}
 	switch err := checkPayable(state); {
 	case errors.Is(err, ErrPriceNotFinal):
 		view.Payable = "price_pending"
@@ -218,6 +256,25 @@ func (s Service) Method(ctx context.Context, code string) (Method, error) {
 		return Method{}, ErrNotFound
 	}
 	return s.Store.Method(ctx, code)
+}
+
+// Policies returns both advance rules for the owner and the checkout page.
+func (s Service) Policies(ctx context.Context) ([]Policy, error) {
+	return s.Store.Policies(ctx)
+}
+
+// AdvancePolicy gives checkout the current rule for one kind of order.
+func (s Service) AdvancePolicy(ctx context.Context, kind string) (string, int, error) {
+	p, err := s.Store.Policy(ctx, kind)
+	return p.Mode, p.Value, err
+}
+
+// SavePolicy changes one rule for future orders; existing orders keep the copy saved at checkout.
+func (s Service) SavePolicy(ctx context.Context, p Policy) error {
+	if !validPolicy(p) {
+		return ErrInvalidPayment
+	}
+	return s.Store.SavePolicy(ctx, p)
 }
 
 // Enabled reports whether customers can choose a method at checkout.

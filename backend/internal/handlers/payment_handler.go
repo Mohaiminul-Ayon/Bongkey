@@ -133,14 +133,50 @@ func (h PaymentHandler) RejectPayment(c *gin.Context) {
 	respondPaymentReview(c, h.Service.Reject(c.Request.Context(), paymentID, c.GetInt64("admin_id"), req.Reason))
 }
 
-// PaymentOptions tells the checkout page which online payments it may offer; it never returns the receiving number.
+// PaymentOptions tells the checkout page which online payments it may offer and the advance rules it uses
+// to preview the amount due now; it never returns the receiving number. The server recomputes the amount.
 func (h PaymentHandler) PaymentOptions(c *gin.Context) {
 	enabled, err := h.Service.Enabled(c.Request.Context(), payments.MethodBkash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load payment options"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"bkash": enabled})
+	policies, err := h.Service.Policies(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load payment options"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"bkash": enabled, "policies": policies})
+}
+
+// AdvancePolicies returns both advance rules for the owner's settings page.
+func (h PaymentHandler) AdvancePolicies(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	policies, err := h.Service.Policies(c.Request.Context())
+	if err != nil {
+		respondPayment(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, policies)
+}
+
+// SaveAdvancePolicy changes the rule for future frame or lens orders.
+func (h PaymentHandler) SaveAdvancePolicy(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
+	var req struct {
+		Mode  string `json:"mode"`
+		Value int    `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid advance rule"})
+		return
+	}
+	err := h.Service.SavePolicy(c.Request.Context(), payments.Policy{Kind: c.Param("kind"), Mode: req.Mode, Value: req.Value})
+	if errors.Is(err, payments.ErrInvalidPayment) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid advance rule: lens orders need full, a percent (1-100) or a fixed amount; frame orders need none, the delivery fee, a percent or a fixed amount"})
+		return
+	}
+	respondPaymentReview(c, err)
 }
 
 // PaymentMethod returns one method's settings for the owner.

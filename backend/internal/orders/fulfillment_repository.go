@@ -85,7 +85,7 @@ func (p postgresFulfillmentTx) LensReadiness(ctx context.Context, orderID int) e
 		return ErrLensPriceNotFinal
 	case openPrescription:
 		return ErrPrescriptionNotAccepted
-	case method == "advance" && payment != "advance_received":
+	case payment == "advance_due":
 		return ErrAdvanceNotReceived
 	}
 	return nil

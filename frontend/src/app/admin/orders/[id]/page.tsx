@@ -13,6 +13,7 @@ import { formatPrice } from "@/lib/products";
 const prescriptionLabel: Record<string, string> = { pending: "Waiting check", accepted: "Accepted", needs_new: "Asked for a new one" };
 const paymentMethodLabel: Record<string, string> = { cash_on_delivery: "Cash on delivery", advance: "Pays before shipping (bKash)" };
 const paymentStatusLabel: Record<string, string> = { unpaid: "Not paid yet", advance_due: "Payment due", advance_received: "Payment received" };
+const advanceLabel: Record<string, string> = { none: "nothing before delivery", delivery_fee: "delivery charge first", percent: "part advance", fixed: "fixed advance", full: "full payment first" };
 
 // AdminOrderPage mounts the private detail request only after AdminGuard accepts the session.
 export default function AdminOrderPage() {
@@ -65,9 +66,9 @@ function OrderDetails({ id }: { id: string }) {
   }, [id]);
 
   const orderId = order?.id;
-  // Lens orders and frame orders paid by bKash both pay before the order is confirmed.
-  const payInAdvance = order?.payment_method === "advance";
-  const paid = payments.filter((p) => p.status === "approved").reduce((sum, p) => sum + p.amount, 0);
+  // Any order with an advance saved at checkout (lens, full bKash, or a delivery charge first) is paid before confirmation.
+  const payInAdvance = (order?.advance_required ?? 0) > 0;
+  const paid = order?.amount_paid ?? 0;
   // reloadPayments reads this order's bKash payments; an approval also changes the order, so it reloads both.
   const reloadPayments = useCallback(() => {
     if (!orderId) return;
@@ -89,6 +90,11 @@ function OrderDetails({ id }: { id: string }) {
           <h1 className="text-3xl font-black">{order.order_number}</h1>
           <p className="mt-2 text-sm text-neutral-600">Invoice {order.invoice_number || "Pending"} · {new Date(order.created_at).toLocaleString("en-BD")}</p>
           <p className="mt-3 font-bold">Order: {order.order_status} · Payment: {paymentStatusLabel[order.payment_status] ?? order.payment_status} · {paymentMethodLabel[order.payment_method] ?? order.payment_method}</p>
+          {payInAdvance ? (
+            <p className="mt-1 text-sm">
+              Rule: {advanceLabel[order.advance_mode] ?? order.advance_mode} · due before confirming {formatPrice(order.advance_required)} · received {formatPrice(paid)} · on delivery {formatPrice(Math.max(0, order.total - Math.max(paid, order.advance_required)))}
+            </p>
+          ) : null}
           <button type="button" disabled={busy} onClick={saveInvoice} className="site-button button-primary mt-4 disabled:opacity-50">Download invoice PDF</button>
         </div>
 
@@ -98,7 +104,7 @@ function OrderDetails({ id }: { id: string }) {
             <ol className="mt-3 list-decimal pl-5 text-sm leading-6">
               <li>Open each prescription and accept it, or ask for a new one.</li>
               <li>Confirm each lens price (custom lenses: agreed in chat).</li>
-              <li>Check the customer&apos;s bKash payment below and approve it (or, if paid another way, press &quot;Advance received&quot;).</li>
+              <li>Check the customer&apos;s bKash payment below ({formatPrice(order.advance_required)} due) and approve it (or, if paid another way, press &quot;Advance received&quot;).</li>
               <li>Mark the order Confirmed in the order list.</li>
             </ol>
             <div className="mt-4 grid gap-4">
@@ -118,8 +124,11 @@ function OrderDetails({ id }: { id: string }) {
         ) : payInAdvance ? (
           <div className="rounded-xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-black">bKash payment</h2>
-            <p className="mt-2 text-sm leading-6">The customer chose to pay the full total by bKash. Approve each payment once you find it in your bKash app. The order counts as paid only when approved payments reach the total; then mark it Confirmed.</p>
-            <p className="mt-2 font-bold">Received {formatPrice(paid)} of {formatPrice(order.total)}{paid < order.total ? ` · ${formatPrice(order.total - paid)} still due` : ""}</p>
+            <p className="mt-2 text-sm leading-6">
+              {order.advance_mode === "full" ? "The customer chose to pay the full total by bKash." : `Cash on delivery, with ${formatPrice(order.advance_required)} (${advanceLabel[order.advance_mode] ?? order.advance_mode}) by bKash first.`}
+              {" "}Approve each payment once you find it in your bKash app. The order counts as paid when approved payments reach {formatPrice(order.advance_required)}; then mark it Confirmed.
+            </p>
+            <p className="mt-2 font-bold">Received {formatPrice(paid)} of {formatPrice(order.advance_required)}{paid < order.advance_required ? ` · ${formatPrice(order.advance_required - paid)} still due` : ""}</p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {order.payment_status === "advance_received" ? <strong className="text-green-800">Payment received</strong> : (
                 <button type="button" disabled={busy || order.order_status !== "pending"} onClick={() => run(() => markAdvanceReceived(order.id))} className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-bold disabled:opacity-50">Paid another way</button>

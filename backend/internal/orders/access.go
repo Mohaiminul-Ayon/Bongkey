@@ -25,8 +25,14 @@ type Summary struct {
 	Status          string
 	// LensOrder means the order has at least one lens line; such orders never use cash on delivery.
 	LensOrder bool
-	// PayInAdvance means the customer pays before shipping (every lens order, or a frame order paid by bKash).
+	// PayInAdvance means something must be paid by bKash before the order is confirmed.
 	PayInAdvance bool
+	// AdvanceRequired is the amount due before confirmation under the order's saved rule; AmountPaid is what
+	// the owner has recorded as received. The rest of the total is collected on delivery.
+	AdvanceRequired int
+	AmountPaid      int
+	// AdvanceMode is the saved rule (none, delivery_fee, percent, fixed, full).
+	AdvanceMode string
 	// LensPricePending means the owner still has to confirm at least one lens price.
 	LensPricePending bool
 }
