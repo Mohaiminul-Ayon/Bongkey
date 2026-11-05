@@ -102,3 +102,28 @@ func TestCreateVariantRequiresAdmin(t *testing.T) {
 		t.Fatalf("unauthenticated variant create status=%d", response.Code)
 	}
 }
+
+// TestPaymentReviewRoutesRequireAdmin proves approval, rejection and settings stop at AdminAuth, and guest
+// payment routes answer 404 without the order secret.
+func TestPaymentReviewRoutesRequireAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := SetupRouter(config.Config{})
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/admin/payments", http.StatusUnauthorized},
+		{http.MethodPost, "/api/admin/payments/1/approve", http.StatusUnauthorized},
+		{http.MethodPost, "/api/admin/payments/1/reject", http.StatusUnauthorized},
+		{http.MethodGet, "/api/admin/orders/1/payments", http.StatusUnauthorized},
+		{http.MethodPut, "/api/admin/payment-methods/bkash", http.StatusUnauthorized},
+		{http.MethodGet, "/api/orders/1/payments", http.StatusNotFound},
+		{http.MethodPost, "/api/orders/1/payments", http.StatusNotFound},
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, nil))
+		if response.Code != tc.want {
+			t.Fatalf("%s %s status=%d, want %d", tc.method, tc.path, response.Code, tc.want)
+		}
+	}
+}

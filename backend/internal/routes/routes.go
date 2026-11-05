@@ -14,6 +14,7 @@ import (
 	"bongkey/backend/internal/lens"
 	"bongkey/backend/internal/middleware"
 	"bongkey/backend/internal/orders"
+	"bongkey/backend/internal/payments"
 
 	"github.com/gin-gonic/gin"
 )
@@ -42,6 +43,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
 	}}
+	paymentHandler := handlers.PaymentHandler{Service: payments.Service{Store: payments.PostgresStore{DB: database.DB}}, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
 		Store:               orders.PostgresCheckoutStore{DB: database.DB},
 		EmailProofSecret:    cfg.JWTSecret,
@@ -79,6 +81,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/orders", checkout.CreateOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
+	router.GET("/api/orders/:id/payments", paymentHandler.GuestPayments)
+	router.POST("/api/orders/:id/payments", paymentHandler.SubmitPayment)
 	router.POST("/api/email-otp/request", emailCodes.Request)
 	router.POST("/api/email-otp/verify", emailCodes.Verify)
 
@@ -112,6 +116,12 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/lens-packages", lensPackages.AdminListPackages)
 	admin.POST("/lens-packages", lensPackages.CreatePackage)
 	admin.PUT("/lens-packages/:id", lensPackages.UpdatePackage)
+	admin.GET("/payments", paymentHandler.AdminPayments)
+	admin.POST("/payments/:id/approve", paymentHandler.ApprovePayment)
+	admin.POST("/payments/:id/reject", paymentHandler.RejectPayment)
+	admin.GET("/orders/:id/payments", paymentHandler.AdminOrderPayments)
+	admin.GET("/payment-methods/:code", paymentHandler.PaymentMethod)
+	admin.PUT("/payment-methods/:code", paymentHandler.SavePaymentMethod)
 
 	return router
 }

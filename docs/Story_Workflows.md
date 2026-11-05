@@ -225,12 +225,64 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 8. **Retention:** [serve](../backend/cmd/server/server.go:45) starts one goroutine running [PrescriptionRetention.RunDaily](../backend/internal/orders/prescription_retention.go:64); it stops on the shutdown signal and `serve` waits for it before closing the database. [Purge](../backend/internal/orders/prescription_retention.go:41) lists files of orders delivered or cancelled more than 180 days ago (200 per pass), deletes each file, then clears its name. A file that cannot be deleted keeps its name, so the next pass retries.
 9. **Custom lens request:** choosing Customized lens in [LensPicker](../frontend/src/components/LensPicker.tsx) opens a description box (at least 5 characters to continue), a "price is not fixed" note and a WhatsApp chat button built by [whatsAppLink](../frontend/src/lib/whatsapp.ts), so the customer can ask before ordering. The text travels as `lens_request`; [validLensRequest](../backend/internal/orders/checkout.go) requires it (trimmed, up to 500 characters) for custom lines and refuses it on any other line. It is stored on `order_items.lens_request` and shown only on the admin order page, never on the invoice.
 
-**Limits:** prescriptions are not encrypted on disk. Customers cannot download their own file (owner decision: admin only). With several server instances each one runs the daily cleanup; that is safe because a delete of an already-gone file is ignored. The advance is collected by phone; bKash/Nagad in the website is #18. Frame-only exchange after delivery is a policy text only until returns (#22).
+**Limits:** prescriptions are not encrypted on disk. Customers cannot download their own file (owner decision: admin only). With several server instances each one runs the daily cleanup; that is safe because a delete of an already-gone file is ignored. The advance is paid by bKash on the order page (PAY-01) or collected by phone. Frame-only exchange after delivery is a policy text only until returns (#22).
 
 **Evidence:** unit tests in [checkout_lens_test.go](../backend/internal/orders/checkout_lens_test.go), [prescriptions_test.go](../backend/internal/lens/prescriptions_test.go), [lens_order_handler_test.go](../backend/internal/handlers/lens_order_handler_test.go); local PostgreSQL [TestLensOrderLifecyclePostgres](../backend/internal/orders/lens_order_integration_test.go) runs checkout → price above limit stays open → owner price updates order and invoice → confirm blocked at each step → confirmed. Browser: lens chooser, custom lens through bag to checkout.
+
+## PAY-01 — Manual bKash advance (#18)
+
+**Status:** Built 2026-11-05 on `feat/payment-manual`. The owner has not yet entered the real receiving number or approved a real payment.
+
+**Owner decisions:** bKash only, to the owner's personal number by **Send Money**, for now. The number and instructions are set in Admin → Payments, not in code or `.env`. Only lens (advance) orders pay online; frame-only orders stay COD. SSLCOMMERZ comes in phase 2, after the TIN and trade license.
+
+**Request:** `POST /api/orders/106/payments` with `Authorization: Bearer <guest token>` and `{"method":"bkash","trx_id":"9abc12xy34","sender_number":"+8801712345678","amount":2000}`.
+
+1. [BkashPaymentBox](../frontend/src/components/BkashPaymentBox.tsx) on the [order page](../frontend/src/app/order-success/[orderId]/page.tsx) first loads `GET /api/orders/:id/payments`. It shows the receiving number only when the answer says `payable: "yes"`.
+2. [routes.go](../backend/internal/routes/routes.go:84) registers both guest routes with no admin middleware. Order access is checked inside the handler.
+3. [PaymentHandler.SubmitPayment](../backend/internal/handlers/payment_handler.go:56) → `guestOrderID` (line 22) checks the Bearer token with `orders.AccessService.Guest`. A missing or wrong token gets 404, so an outsider cannot tell whether the order exists. The body is limited to 2 KB. Only `method`, `trx_id`, `sender_number` and `amount` are read; an extra `status` is ignored.
+4. [Service.Submit](../backend/internal/payments/payments.go:176):
+   - uppercases the TrxID and checks it is 8–12 letters or digits;
+   - normalizes the sender to `01XXXXXXXXX`;
+   - checks the amount;
+   - checks that bKash is turned on.
+   A bad value returns 400.
+5. [PostgresStore.Submit](../backend/internal/payments/repository.go:91) opens a transaction and locks the order row (`FOR UPDATE`). It then runs [checkPayable](../backend/internal/payments/payments.go:97). The order must be `advance`, `advance_due` and `pending`, with no open lens price; otherwise 409. An amount above the order total is refused. The insert uses `ON CONFLICT DO NOTHING` on the partial unique index `(order_id, method, trx_id) WHERE status <> 'rejected'`, so a double click returns the same payment. Ten payments per order is the limit.
+6. Admin: `GET /api/admin/payments?status=pending` → `AdminAuth` → [AdminPayments](../backend/internal/handlers/payment_handler.go:82). Each row lists other orders that used the same TrxID, and the [review list](../frontend/src/components/PaymentReviewList.tsx) shows that as a red warning.
+7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved`, the reviewer and time are recorded, and the order becomes `advance_received`.
+8. Reject needs a reason of up to 200 characters, which the customer sees. The same TrxID can then be sent again.
+
+**Failure paths:**
+- Lens price still open: the box shows "we first confirm your lens price", and a direct POST gets 409.
+- bKash turned off: the box says "we will call you", and a POST gets 409.
+- Second approval of the same payment: 409.
+- Admin routes without login: 401 from `AdminAuth` before any handler runs.
+
+**Limits:**
+- Nothing checks bKash itself; the owner confirms each TrxID in the bKash app. A reused TrxID is only warned about, not blocked.
+- The invoice does not show paid and due amounts yet; that is #19.
+- The manual "Advance received" button stays for advances paid in other ways.
+
+**Evidence:**
+- Unit tests in [payments_test.go](../backend/internal/payments/payments_test.go) and the route protection test in [routes_test.go](../backend/internal/routes/routes_test.go).
+- Local PostgreSQL [TestManualPaymentLifecyclePostgres](../backend/internal/payments/repository_integration_test.go):
+  - submitting while bKash is off is refused;
+  - two submits at the same moment make one payment;
+  - an open lens price blocks payment;
+  - an amount above the total is refused;
+  - a reused TrxID is flagged;
+  - two parts are approved;
+  - a second approval is refused;
+  - submitting after the advance is received is refused;
+  - after a reject, the same TrxID can be sent again.
+- HTTP checks on a throwaway order (since removed):
+  - no token and a wrong token: 404;
+  - a quote in the TrxID and an amount over the total: 400;
+  - an extra `status: approved` field: ignored, the payment stays pending;
+  - a repeat submit: same id.
+- Browser: the box showed the number, instructions and steps, and a lowercase TrxID sent from the form came back uppercased as "Waiting for our check".
 
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.
 - `ACCOUNT-01` is deferred to R2: there is no customer signup/login or historical order-linking implementation to trace. Guest email OTP in `EMAIL-01` does not create a customer account.
-- Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, manual payment verification, returns/refunds and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.
+- Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, returns/refunds and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { BkashPaymentBox } from "@/components/BkashPaymentBox";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode } from "@/lib/api";
@@ -124,11 +125,13 @@ export default function OrderSuccessPage() {
             </div>
             {order.lens_order ? (
               <div className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">
-                <p>Next: we check your prescription{order.lens_price_pending ? " and confirm the final lens price" : ""}, then call you to collect the advance by bKash. We start making your lenses only after that.</p>
+                <p>Next: we check your prescription{order.lens_price_pending ? " and confirm the final lens price by phone" : ""}, then you pay the advance by bKash below. We start making your lenses only after that.</p>
                 {order.lens_price_pending ? <p className="mt-2">The total shown is an estimate until we confirm the lens price.</p> : null}
                 {whatsAppNumber ? <a className="site-button button-primary mt-3 inline-block" href={orderChatLink(order)} target="_blank" rel="noopener noreferrer">Chat on WhatsApp about order {order.order_number}</a> : <p className="mt-2">We will contact you on your phone number.</p>}
               </div>
-            ) : <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p>}
+            ) : null}
+            {order.lens_order && accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} /> : null}
+            {!order.lens_order ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p> : null}
             <button type="button" disabled={busy || !accessToken} onClick={saveInvoice} className="site-button button-primary w-fit disabled:opacity-50">Download invoice PDF</button>
             {error ? <p role="alert" className="text-red-700">{error}</p> : null}
           </div>

@@ -375,6 +375,73 @@ export async function fetchOrder(id: string, token: string) {
   });
 }
 
+/** PaymentMethod is how the shop receives money and what the customer is told to do. */
+export type PaymentMethod = { code: string; enabled: boolean; account_number: string; instructions: string };
+
+/** Payment is one submitted bKash transaction and the owner's review of it. */
+export type Payment = {
+  id: number;
+  order_id: number;
+  order_number: string;
+  method: string;
+  trx_id: string;
+  sender_number: string;
+  amount: number;
+  status: "pending" | "approved" | "rejected";
+  reject_reason: string;
+  created_at: string;
+  reviewed_at: string | null;
+  /** other orders that carry the same transaction ID (admin only) */
+  used_on_orders?: string[];
+};
+
+/** GuestPaymentView says whether the customer can pay now ("yes") or why not, with the number only while payable. */
+export type GuestPaymentView = { payable: "yes" | "price_pending" | "not_due" | "off"; method?: PaymentMethod; payments: Payment[] };
+
+/** fetchOrderPayments reads the customer's payment box with the order's guest proof. */
+export async function fetchOrderPayments(id: string, token: string) {
+  return request<GuestPaymentView>(`/api/orders/${encodeURIComponent(id)}/payments`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+}
+
+/** submitPayment sends the customer's bKash transaction for the owner to check. */
+export async function submitPayment(id: string, token: string, body: { trx_id: string; sender_number: string; amount: number }) {
+  return request<Payment>(`/api/orders/${encodeURIComponent(id)}/payments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ method: "bkash", ...body }),
+  });
+}
+
+/** fetchAdminPayments lists payments for the owner; status "" means all. */
+export async function fetchAdminPayments(status: "" | "pending" | "approved" | "rejected" = "pending") {
+  return adminRequest<Payment[]>(`/api/admin/payments?status=${status}`, { cache: "no-store" });
+}
+
+/** fetchAdminOrderPayments lists one order's payments with reuse warnings. */
+export async function fetchAdminOrderPayments(orderId: number) {
+  return adminRequest<Payment[]>(`/api/admin/orders/${orderId}/payments`, { cache: "no-store" });
+}
+
+/** approvePayment records the money as received after the owner found it in the bKash app. */
+export async function approvePayment(id: number) {
+  return adminRequest(`/api/admin/payments/${id}/approve`, { method: "POST" });
+}
+
+/** rejectPayment closes a payment the owner could not match; the customer sees the reason. */
+export async function rejectPayment(id: number, reason: string) {
+  return adminRequest(`/api/admin/payments/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) });
+}
+
+/** fetchPaymentMethod reads the bKash settings for the owner. */
+export async function fetchPaymentMethod(code = "bkash") {
+  return adminRequest<PaymentMethod>(`/api/admin/payment-methods/${code}`, { cache: "no-store" });
+}
+
+/** savePaymentMethod turns bKash on or off and sets the receiving number and instructions. */
+export async function savePaymentMethod(method: PaymentMethod) {
+  return adminRequest(`/api/admin/payment-methods/${method.code}`, { method: "PUT", body: JSON.stringify(method) });
+}
+
 /** downloadInvoice keeps guest and admin bearer proofs out of URLs. */
 export async function downloadInvoice(id: string, token: string, admin = false) {
   const path = admin ? `/api/admin/orders/${encodeURIComponent(id)}` : `/api/orders/${encodeURIComponent(id)}`;

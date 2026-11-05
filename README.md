@@ -107,7 +107,8 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `010_admin_login_limits.sql` | Admin login rate limits |
    | `011_lens_packages.sql` | Lens types and the categories they fit |
    | `012_lens_orders.sql` | Lens choice, power, price and prescription on order lines |
-| `013_prescription_review.sql` | The owner's private note on a prescription check |
+   | `013_prescription_review.sql` | The owner's private note on a prescription check |
+   | `014_manual_payments.sql` | bKash settings and submitted payments waiting for the owner's check |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
-import { attachPrescription, downloadInvoice, fetchAdminOrder, getAdminToken, markAdvanceReceived, openPrescription, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
+import { PaymentReviewList } from "@/components/PaymentReviewList";
+import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
@@ -22,6 +23,7 @@ function OrderDetails({ id }: { id: string }) {
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
   // saveInvoice requests the protected PDF with the current owner session.
   async function saveInvoice() {
@@ -60,6 +62,15 @@ function OrderDetails({ id }: { id: string }) {
     return () => { active = false; };
   }, [id]);
 
+  const orderId = order?.id;
+  const lensOrder = order?.payment_method === "advance";
+  // reloadPayments reads this order's bKash payments; an approval also changes the order, so it reloads both.
+  const reloadPayments = useCallback(() => {
+    if (!orderId) return;
+    fetchAdminOrderPayments(orderId).then(setPayments).catch(() => setPayments([]));
+  }, [orderId]);
+  useEffect(() => { if (lensOrder) reloadPayments(); }, [lensOrder, reloadPayments]);
+
   const lensItems = order?.items.filter((item) => item.lens_kind !== "none") ?? [];
   const openPrices = lensItems.some((item) => !item.lens_price_final);
 
@@ -83,7 +94,7 @@ function OrderDetails({ id }: { id: string }) {
             <ol className="mt-3 list-decimal pl-5 text-sm leading-6">
               <li>Open each prescription and accept it, or ask for a new one.</li>
               <li>Confirm each lens price (custom lenses: agreed in chat).</li>
-              <li>Collect the advance by phone, then press &quot;Advance received&quot;.</li>
+              <li>Check the customer&apos;s bKash payment below and approve it (or, if paid another way, press &quot;Advance received&quot;).</li>
               <li>Mark the order Confirmed in the order list.</li>
             </ol>
             <div className="mt-4 grid gap-4">
@@ -94,6 +105,10 @@ function OrderDetails({ id }: { id: string }) {
                 <button type="button" disabled={busy || openPrices || order.order_status !== "pending"} onClick={() => run(() => markAdvanceReceived(order.id))} className="site-button button-primary disabled:opacity-50">Advance received</button>
               )}
               {openPrices ? <span className="text-sm text-neutral-600">Confirm every lens price first.</span> : null}
+            </div>
+            <div className="mt-5 border-t pt-4">
+              <h3 className="mb-3 font-black">bKash payments</h3>
+              <PaymentReviewList payments={payments} onChanged={() => void run(async () => reloadPayments())} />
             </div>
           </div>
         ) : null}
