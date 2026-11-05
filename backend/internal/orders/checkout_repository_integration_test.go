@@ -47,12 +47,15 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
 	}
-	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "005_checkout_idempotency.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
-		t.Fatal("could not apply local checkout idempotency migration")
+	// Status changes write the delivery-tracking times, so that migration is needed by every order test.
+	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql"} {
+		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+			t.Fatalf("could not apply local migration %s", name)
+		}
 	}
 	return db
 }

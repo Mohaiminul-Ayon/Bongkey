@@ -208,16 +208,20 @@ func (s PostgresStore) review(ctx context.Context, paymentID int, decide func(tx
 // is covered, marks the order's advance received; all writes happen in one transaction.
 func (s PostgresStore) Approve(ctx context.Context, paymentID int, adminID int64) error {
 	return s.review(ctx, paymentID, func(tx *sql.Tx, orderID int, state OrderState) error {
-		if err := checkApprovable(state); err != nil {
-			return err
-		}
 		var amount int
-		if err := tx.QueryRowContext(ctx, `
-			UPDATE payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 RETURNING amount`, paymentID, adminID).Scan(&amount); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT amount FROM payments WHERE id = $1`, paymentID).Scan(&amount); err != nil {
 			return err
 		}
+		if err := checkApprovable(state, amount); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1`, paymentID, adminID); err != nil {
+			return err
+		}
+		// Only an order waiting for its advance changes status; a cash-on-delivery balance paid early just adds up.
 		status := state.PaymentStatus
-		if settles(state, amount) {
+		if status == orderAdvanceDue && settles(state, amount) {
 			status = orderAdvanceDone
 		}
 		_, err := tx.ExecContext(ctx, `

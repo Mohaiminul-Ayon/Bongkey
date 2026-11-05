@@ -41,6 +41,8 @@ var (
 	ErrMethodOff = errors.New("payment method is off")
 	// ErrTooManyPayments stops a guest from filling the review queue.
 	ErrTooManyPayments = errors.New("too many payments for this order")
+	// ErrOverpaid means approving would record more than the order total; the owner rejects and refunds it.
+	ErrOverpaid = errors.New("payment exceeds the order total")
 	// ErrAlreadyReviewed means the payment was approved or rejected before.
 	ErrAlreadyReviewed = errors.New("payment already reviewed")
 	// ErrNotFound means no such payment or method.
@@ -96,12 +98,12 @@ type OrderState struct {
 	Paid     int
 }
 
-// checkPayable is the one rule for "may this order take a payment now", used both for the
-// customer's view and, under the order lock, before a submission or an approval is saved.
-// Any order with an advance due qualifies: a lens order, a frame order paid by bKash, or a
-// cash-on-delivery order whose delivery fee is due first.
+// checkPayable is the one rule for "may the customer send money now", used both for the customer's view
+// and, under the order lock, before a submission is saved. Owner decision (#21): any unpaid balance may be
+// sent by bKash until the order is delivered, so the courier collects less cash; the required advance
+// (if any) is simply the first part of it.
 func checkPayable(state OrderState) error {
-	if state.PaymentStatus != orderAdvanceDue || state.OrderStatus != "pending" {
+	if state.OrderStatus == "cancelled" || state.OrderStatus == "delivered" || state.Paid >= state.Total {
 		return ErrNotPayable
 	}
 	if state.PriceOpen {
@@ -110,13 +112,18 @@ func checkPayable(state OrderState) error {
 	return nil
 }
 
-// checkApprovable allows approving while the advance is due, and also after an earlier part was approved,
-// because a customer may send the advance in two bKash transactions.
-func checkApprovable(state OrderState) error {
-	if state.PaymentStatus == orderAdvanceDone {
-		state.PaymentStatus = orderAdvanceDue
+// checkApprovable lets the owner approve a payment the customer sent before delivery even if the order has
+// since been delivered; never on a cancelled order, and never above the total (that money must be refunded).
+func checkApprovable(state OrderState, amount int) error {
+	switch {
+	case state.OrderStatus == "cancelled":
+		return ErrNotPayable
+	case state.PriceOpen:
+		return ErrPriceNotFinal
+	case state.Paid+amount > state.Total:
+		return ErrOverpaid
 	}
-	return checkPayable(state)
+	return nil
 }
 
 // settles reports whether approving amount covers the advance saved on the order. Until it does the order

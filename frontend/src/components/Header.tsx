@@ -21,6 +21,7 @@ export function Header() {
             <Link href="/products?type=eyeglasses">Eyeglasses</Link>
             <Link href="/products?type=sunglasses">Sunglasses</Link>
             <Link href="/products">Shop all</Link>
+            <Link href="/track">Track order</Link>
           </div>
           <div className="header-actions">
             <ThemeToggle />

@@ -85,8 +85,50 @@ export type AdminOrderDetail = {
   advance_required: number;
   amount_paid: number;
   created_at: string;
+  tracking: OrderTracking;
   items: AdminOrderItem[];
 };
+
+/** OrderTracking is when each status step happened (null for steps not reached or older orders) and the courier details. */
+export type OrderTracking = {
+  placed_at: string;
+  confirmed_at: string | null;
+  preparing_at: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  cancelled_at: string | null;
+  courier: string;
+  tracking_code: string;
+  tracking_url: string;
+};
+
+/** TrackedOrder is what the public tracking page may show: no full name, phone, address or email. */
+export type TrackedOrder = {
+  id: number;
+  order_number: string;
+  order_status: string;
+  tracking: OrderTracking;
+  items: { name: string; option: string; quantity: number; total_price: number }[];
+  subtotal: number;
+  delivery_fee: number;
+  total: number;
+  advance_required: number;
+  amount_paid: number;
+  payment_method: string;
+  lens_price_pending: boolean;
+  customer: string;
+  city: string;
+};
+
+/** trackOrder looks an order up by number and checkout phone; both travel in the body, not the URL. */
+export async function trackOrder(orderNumber: string, phone: string) {
+  return request<TrackedOrder>("/api/track", { method: "POST", body: JSON.stringify({ order_number: orderNumber, phone }), cache: "no-store" });
+}
+
+/** saveOrderTracking stores the courier details the owner types for an order. */
+export async function saveOrderTracking(id: number, body: { courier: string; tracking_code: string; tracking_url: string }) {
+  return adminRequest(`/api/admin/orders/${id}/tracking`, { method: "PUT", body: JSON.stringify(body) });
+}
 
 /** AdminOrderItem is one saved line; the prescription itself is fetched separately, only by the owner. */
 export type AdminOrderItem = {
@@ -396,6 +438,7 @@ export async function fetchOrder(id: string, token: string) {
     lens_order: boolean;
     pay_in_advance: boolean;
     lens_price_pending: boolean;
+    tracking: OrderTracking;
   }>(`/api/orders/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",

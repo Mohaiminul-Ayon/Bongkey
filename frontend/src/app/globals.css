@@ -255,7 +255,7 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
 }
 @media (max-width: 700px) {
   .header-inner { gap: 4px 8px; min-height: 0; padding: 8px 16px; }
-  .header-links { overflow-x: auto; gap: 22px; font-size: 14px; white-space: nowrap; }
+  .header-links { overflow-x: auto; gap: 16px; font-size: 14px; white-space: nowrap; }
   .brand-logo--sm { width: 128px; }
   .home-hero { margin-top: 12px; padding: 0 16px; }
   .home-hero h1 { font-size: clamp(38px, 10vw, 56px); }
