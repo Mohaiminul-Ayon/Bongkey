@@ -209,7 +209,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 ## LENS-01 — Lens types, lens orders and prescriptions (#14, #15, #16)
 
-**Status:** In review as PR #70 on `feat/lens` (2026-11-04). Owner browser review remains; no real lens order has been placed through the UI yet (checkout needs an email code).
+**Status:** Merged 2026-11-05 as PR #70 (closes #14, #15, #16). Owner browser review remains; no real lens order has been placed through the UI yet (checkout needs an email code).
 
 **Owner decisions:** lens types with fixed prices per category; "no power" or "with power" (SPH per eye, or "not sure"); PDF/photo prescription required for power; custom lens agreed in WhatsApp chat with the order number as the reference; no COD for lens orders; no AI reading of prescriptions.
 
