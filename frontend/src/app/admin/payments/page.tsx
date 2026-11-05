@@ -4,10 +4,55 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { PaymentReviewList } from "@/components/PaymentReviewList";
-import { fetchAdminPayments, fetchPaymentMethod, savePaymentMethod, type Payment, type PaymentMethod } from "@/lib/api";
+import { fetchAdminPayments, fetchAdvancePolicies, fetchPaymentMethod, saveAdvancePolicy, savePaymentMethod, type AdvanceMode, type AdvancePolicy, type Payment, type PaymentMethod } from "@/lib/api";
 
 const inputClass = "rounded-md border border-neutral-300 px-3 py-2 font-normal";
 const filters = [["pending", "Waiting check"], ["approved", "Approved"], ["rejected", "Rejected"], ["", "All"]] as const;
+
+// Lens orders always pay something first; a frame order's full payment is the customer's own bKash choice.
+const ruleChoices: Record<AdvancePolicy["kind"], [AdvanceMode, string][]> = {
+  frame: [["none", "Nothing — plain cash on delivery"], ["delivery_fee", "The delivery charge"], ["percent", "A percent of the total"], ["fixed", "A fixed amount"]],
+  lens: [["full", "The full total"], ["percent", "A percent of the total"], ["fixed", "A fixed amount"]],
+};
+const ruleTitle = { frame: "Frame-only orders with cash on delivery", lens: "Orders with lenses (and mixed bags)" } as const;
+
+/** AdvanceRuleForm edits one advance rule; the server checks it and existing orders keep their own copy. */
+function AdvanceRuleForm({ policy, onSaved }: { policy: AdvancePolicy; onSaved: () => void }) {
+  const [mode, setMode] = useState<AdvanceMode>(policy.mode);
+  const [value, setValue] = useState(policy.value);
+  const [message, setMessage] = useState("");
+  const needsValue = mode === "percent" || mode === "fixed";
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    try {
+      await saveAdvancePolicy({ kind: policy.kind, mode, value: needsValue ? value : 0 });
+      setMessage("Saved. New orders use this rule.");
+      onSaved();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not save.");
+    }
+  }
+
+  return (
+    <form onSubmit={save} className="grid gap-2 rounded-md border border-neutral-200 p-4">
+      <p className="font-black">{ruleTitle[policy.kind]}: pay first by bKash</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <select value={mode} onChange={(event) => setMode(event.target.value as AdvanceMode)} className={inputClass}>
+          {ruleChoices[policy.kind].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+        {needsValue ? (
+          <label className="grid gap-1 text-sm font-bold">{mode === "percent" ? "Percent (1–100)" : "Amount (৳)"}
+            <input type="number" required min={1} max={mode === "percent" ? 100 : undefined} step={1} value={value || ""} onChange={(event) => setValue(Number(event.target.value))} className={`${inputClass} w-32`} />
+          </label>
+        ) : null}
+        <button type="submit" className="site-button button-primary w-fit">Save rule</button>
+      </div>
+      {message ? <p className="text-sm font-bold">{message}</p> : null}
+    </form>
+  );
+}
 
 // AdminPaymentsPage is where the owner sets the bKash number and checks submitted transactions.
 export default function AdminPaymentsPage() {
@@ -17,6 +62,11 @@ export default function AdminPaymentsPage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [saving, setSaving] = useState(false);
+  const [policies, setPolicies] = useState<AdvancePolicy[] | null>(null);
+  const loadPolicies = useCallback(() => {
+    fetchAdvancePolicies().then(setPolicies).catch((err) => setError(err.message));
+  }, []);
+  useEffect(loadPolicies, [loadPolicies]);
 
   const load = useCallback(() => {
     fetchAdminPayments(status).then(setPayments).catch((err) => setError(err.message));
@@ -55,7 +105,7 @@ export default function AdminPaymentsPage() {
         {method ? (
           <form key={`${method.enabled}-${method.account_number}`} onSubmit={saveSettings} className="mt-5 grid gap-3 rounded-xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-black">bKash settings</h2>
-            <label className="flex items-center gap-2 font-bold"><input type="checkbox" name="enabled" defaultChecked={method.enabled} />Customers can pay by bKash (frame orders in full, lens orders as an advance)</label>
+            <label className="flex items-center gap-2 font-bold"><input type="checkbox" name="enabled" defaultChecked={method.enabled} />Customers can pay by bKash (and the advance rules below apply)</label>
             <label className="grid gap-1 font-bold">Receiving bKash number (personal, "Send Money")
               <input name="account_number" defaultValue={method.account_number} inputMode="tel" placeholder="01XXXXXXXXX" className={`${inputClass} max-w-xs`} />
             </label>
@@ -67,6 +117,14 @@ export default function AdminPaymentsPage() {
               {saved ? <span className="text-sm font-bold text-green-800">{saved}</span> : null}
             </div>
           </form>
+        ) : null}
+
+        {policies ? (
+          <div className="mt-5 grid gap-3 rounded-xl bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-black">Advance rules</h2>
+            <p className="text-sm text-neutral-600">What the customer pays by bKash before you confirm the order; the rest is paid on delivery. A frame customer can also choose to pay everything by bKash. Changes apply to new orders only. While bKash is off, frame orders are plain cash on delivery and lens advances are collected by phone.</p>
+            {policies.map((policy) => <AdvanceRuleForm key={`${policy.kind}-${policy.mode}-${policy.value}`} policy={policy} onSaved={loadPolicies} />)}
+          </div>
         ) : null}
 
         <div className="mt-5 rounded-xl bg-white p-6 shadow-sm">

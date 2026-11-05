@@ -88,16 +88,17 @@ func (p postgresCheckoutTx) LensForProduct(ctx context.Context, packageID, produ
 }
 
 // InsertOrder allocates its final unique number before inserting the order row.
-func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, idempotencyKeyHash, requestHash, paymentMethod, paymentStatus string) (int, string, error) {
+func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, idempotencyKeyHash, requestHash string, terms PaymentTerms) (int, string, error) {
 	var id int
 	if err := p.Tx.QueryRowContext(ctx, `SELECT nextval(pg_get_serial_sequence('orders', 'id'))`).Scan(&id); err != nil {
 		return 0, "", err
 	}
 	number := fmt.Sprintf("ORD-%06d", id)
 	_, err := p.Tx.ExecContext(ctx, `
-		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash, payment_method, payment_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash, paymentMethod, paymentStatus)
+		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash, payment_method, payment_status, advance_mode, advance_value, advance_required)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash,
+		terms.Method, terms.Status, terms.AdvanceMode, terms.AdvanceValue, terms.AdvanceRequired)
 	return id, number, err
 }
 

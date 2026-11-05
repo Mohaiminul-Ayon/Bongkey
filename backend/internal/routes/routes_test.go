@@ -117,6 +117,8 @@ func TestPaymentReviewRoutesRequireAdmin(t *testing.T) {
 		{http.MethodPost, "/api/admin/payments/1/reject", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/orders/1/payments", http.StatusUnauthorized},
 		{http.MethodPut, "/api/admin/payment-methods/bkash", http.StatusUnauthorized},
+		{http.MethodGet, "/api/admin/advance-policies", http.StatusUnauthorized},
+		{http.MethodPut, "/api/admin/advance-policies/lens", http.StatusUnauthorized},
 		{http.MethodGet, "/api/orders/1/payments", http.StatusNotFound},
 		{http.MethodPost, "/api/orders/1/payments", http.StatusNotFound},
 	} {

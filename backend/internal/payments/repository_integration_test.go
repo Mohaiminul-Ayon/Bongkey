@@ -37,7 +37,7 @@ func localDB(t *testing.T) *sql.DB {
 		t.Fatal("could not open local PostgreSQL")
 	}
 	t.Cleanup(func() { db.Close() })
-	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql", "014_manual_payments.sql"} {
+	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql", "014_manual_payments.sql", "015_advance_policies.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -72,8 +72,8 @@ func TestManualPaymentLifecyclePostgres(t *testing.T) {
 	newOrder := func(name string, priceFinal bool) int {
 		var id int
 		if err := db.QueryRowContext(ctx, `
-			INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total, payment_method, payment_status)
-			VALUES ($1, 'QA', '01700000000', 'Local', 'Dhaka', 4920, 80, 5000, 'advance', 'advance_due') RETURNING id`, "PAY-QA-"+name+"-"+suffix).Scan(&id); err != nil {
+			INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total, payment_method, payment_status, advance_mode, advance_required)
+			VALUES ($1, 'QA', '01700000000', 'Local', 'Dhaka', 4920, 80, 5000, 'advance', 'advance_due', 'full', 5000) RETURNING id`, "PAY-QA-"+name+"-"+suffix).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := db.ExecContext(ctx, `
@@ -87,8 +87,8 @@ func TestManualPaymentLifecyclePostgres(t *testing.T) {
 	// orderC is a frame-only order the customer chose to pay by bKash, so it must be paid in full.
 	var orderC int
 	if err := db.QueryRowContext(ctx, `
-		INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total, payment_method, payment_status)
-		VALUES ($1, 'QA', '01700000000', 'Local', 'Dhaka', 4920, 80, 5000, 'advance', 'advance_due') RETURNING id`, "PAY-QA-C-"+suffix).Scan(&orderC); err != nil {
+		INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total, payment_method, payment_status, advance_mode, advance_required)
+		VALUES ($1, 'QA', '01700000000', 'Local', 'Dhaka', 4920, 80, 5000, 'advance', 'advance_due', 'full', 5000) RETURNING id`, "PAY-QA-C-"+suffix).Scan(&orderC); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO order_items (order_id, product_name, quantity, unit_price, total_price) VALUES ($1, 'QA frame', 1, 4920, 4920)`, orderC); err != nil {
@@ -191,6 +191,35 @@ func TestManualPaymentLifecyclePostgres(t *testing.T) {
 	}
 	if err := db.QueryRowContext(ctx, `SELECT payment_status FROM orders WHERE id = $1`, orderC).Scan(&paymentStatus); err != nil || paymentStatus != "advance_received" {
 		t.Fatalf("frame order paid in full = %q %v", paymentStatus, err)
+	}
+
+	var paid int
+	if err := db.QueryRowContext(ctx, `SELECT amount_paid FROM orders WHERE id = $1`, orderC).Scan(&paid); err != nil || paid != 5000 {
+		t.Fatalf("recorded paid amount = %d %v", paid, err)
+	}
+
+	// Changing the owner's rule affects only future orders: the saved advance on an existing order stays.
+	oldPolicies, err := service.Policies(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, p := range oldPolicies {
+			db.Exec(`UPDATE advance_policies SET mode = $2, value = $3 WHERE kind = $1`, p.Kind, p.Mode, p.Value)
+		}
+	})
+	if err := service.SavePolicy(ctx, Policy{Kind: "lens", Mode: "percent", Value: 50}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.SavePolicy(ctx, Policy{Kind: "lens", Mode: "none"}); !errors.Is(err, ErrInvalidPayment) {
+		t.Fatalf("lens rule without an advance: %v", err)
+	}
+	var required int
+	if err := db.QueryRowContext(ctx, `SELECT advance_required FROM orders WHERE id = $1`, orderB).Scan(&required); err != nil || required != 5000 {
+		t.Fatalf("existing order advance after a rule change = %d %v", required, err)
+	}
+	if mode, value, err := service.AdvancePolicy(ctx, "lens"); err != nil || mode != "percent" || value != 50 {
+		t.Fatalf("saved rule = %s %d %v", mode, value, err)
 	}
 
 	// A rejected payment keeps its reason, and the customer may send the same ID again after a mistake.

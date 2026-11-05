@@ -31,7 +31,7 @@ func (s *storeStub) SaveMethod(_ context.Context, m Method) error {
 	return nil
 }
 
-var dueState = OrderState{PaymentMethod: "advance", PaymentStatus: "advance_due", OrderStatus: "pending", Total: 5000}
+var dueState = OrderState{PaymentStatus: "advance_due", OrderStatus: "pending", Total: 5000, Required: 5000}
 
 // TestSubmitNormalizesAndValidates accepts what customers really type and refuses malformed values before the store.
 func TestSubmitNormalizesAndValidates(t *testing.T) {
@@ -69,7 +69,7 @@ func TestPayableRules(t *testing.T) {
 	priceOpen := dueState
 	priceOpen.PriceOpen = true
 	cod := dueState
-	cod.PaymentMethod, cod.PaymentStatus = "cash_on_delivery", "unpaid"
+	cod.PaymentStatus = "unpaid"
 	cancelled := dueState
 	cancelled.OrderStatus = "cancelled"
 	for name, tc := range map[string]struct {
@@ -100,7 +100,7 @@ func TestGuestViewShowsNumberOnlyWhenPayable(t *testing.T) {
 	if err != nil || view.Payable != "yes" || view.Method == nil || view.Method.AccountNumber != "01711111111" || view.Payments[0].UsedOnOrders != nil {
 		t.Fatalf("payable view = %+v %v", view, err)
 	}
-	for want, state := range map[string]OrderState{"price_pending": {PaymentMethod: "advance", PaymentStatus: "advance_due", OrderStatus: "pending", PriceOpen: true}, "not_due": {PaymentMethod: "advance", PaymentStatus: "advance_received", OrderStatus: "pending"}} {
+	for want, state := range map[string]OrderState{"price_pending": {PaymentStatus: "advance_due", OrderStatus: "pending", PriceOpen: true}, "not_due": {PaymentStatus: "advance_received", OrderStatus: "pending"}} {
 		store.state = state
 		if view, err := (Service{Store: store}).ForGuest(context.Background(), 1); err != nil || view.Payable != want || view.Method != nil {
 			t.Fatalf("%s view = %+v %v", want, view, err)
@@ -112,20 +112,44 @@ func TestGuestViewShowsNumberOnlyWhenPayable(t *testing.T) {
 	}
 }
 
-// TestSettles keeps a frame order due until it is paid in full, while any approved lens advance is enough.
+// TestSettles keeps an order due until approved payments cover the advance saved on it.
 func TestSettles(t *testing.T) {
 	for name, tc := range map[string]struct {
 		state  OrderState
 		amount int
 		want   bool
 	}{
-		"frame part payment":       {OrderState{Total: 2370}, 500, false},
-		"frame second part fills":  {OrderState{Total: 2370, Paid: 500}, 1870, true},
-		"frame paid in one":        {OrderState{Total: 2370}, 2370, true},
-		"lens advance is any part": {OrderState{Total: 6500, HasLens: true}, 2000, true},
+		"part of a full payment":      {OrderState{Total: 2370, Required: 2370}, 500, false},
+		"second part fills":           {OrderState{Total: 2370, Required: 2370, Paid: 500}, 1870, true},
+		"delivery fee paid":           {OrderState{Total: 2370, Required: 80}, 80, true},
+		"half advance, short by one":  {OrderState{Total: 6500, Required: 3250}, 3249, false},
+		"more than the advance is ok": {OrderState{Total: 6500, Required: 3250}, 4000, true},
 	} {
 		if got := settles(tc.state, tc.amount); got != tc.want {
 			t.Fatalf("%s: settles = %v", name, got)
+		}
+	}
+}
+
+// TestValidPolicy accepts only rules the database allows and refuses cash on delivery for lenses.
+func TestValidPolicy(t *testing.T) {
+	for p, want := range map[Policy]bool{
+		{Kind: "lens", Mode: "full"}:                     true,
+		{Kind: "lens", Mode: "percent", Value: 50}:       true,
+		{Kind: "lens", Mode: "fixed", Value: 1000}:       true,
+		{Kind: "lens", Mode: "none"}:                     false,
+		{Kind: "lens", Mode: "delivery_fee"}:             false,
+		{Kind: "lens", Mode: "percent", Value: 0}:        false,
+		{Kind: "lens", Mode: "percent", Value: 101}:      false,
+		{Kind: "frame", Mode: "delivery_fee"}:            true,
+		{Kind: "frame", Mode: "none"}:                    true,
+		{Kind: "frame", Mode: "full"}:                    false,
+		{Kind: "frame", Mode: "fixed", Value: 0}:         false,
+		{Kind: "frame", Mode: "delivery_fee", Value: 80}: false,
+		{Kind: "both", Mode: "full"}:                     false,
+	} {
+		if validPolicy(p) != want {
+			t.Fatalf("%+v: valid = %v", p, !want)
 		}
 	}
 }

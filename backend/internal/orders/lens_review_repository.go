@@ -112,10 +112,22 @@ func (s PostgresLensReviewStore) SetLensPrice(ctx context.Context, orderID, item
 		if err := oneRow(result, err); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
+		var mode string
+		var value, total, deliveryFee int
+		if err := tx.QueryRowContext(ctx, `
 			UPDATE orders o SET subtotal = s.sum, total = s.sum + o.delivery_fee, updated_at = NOW()
 			FROM (SELECT SUM(total_price)::INTEGER AS sum FROM order_items WHERE order_id = $1) s
-			WHERE o.id = $1`, orderID); err != nil {
+			WHERE o.id = $1
+			RETURNING o.advance_mode, o.advance_value, o.total, o.delivery_fee`, orderID).Scan(&mode, &value, &total, &deliveryFee); err != nil {
+			return err
+		}
+		// The advance follows the new total under the order's own saved rule, never the current settings.
+		// If a part payment already covers it, the advance is received.
+		required := AdvanceAmount(mode, value, total, deliveryFee)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE orders SET advance_required = $2,
+				payment_status = CASE WHEN $2 > 0 AND amount_paid >= $2 THEN 'advance_received' ELSE payment_status END
+			WHERE id = $1`, orderID, required); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `
@@ -138,7 +150,10 @@ func (s PostgresLensReviewStore) MarkAdvanceReceived(ctx context.Context, orderI
 		if open {
 			return ErrLensPriceNotFinal
 		}
-		_, err := tx.ExecContext(ctx, `UPDATE orders SET payment_status = 'advance_received', updated_at = NOW() WHERE id = $1`, orderID)
+		// The owner states the required advance was collected another way, so it counts as paid.
+		_, err := tx.ExecContext(ctx, `
+			UPDATE orders SET payment_status = 'advance_received', amount_paid = GREATEST(amount_paid, advance_required), updated_at = NOW()
+			WHERE id = $1`, orderID)
 		return err
 	})
 }

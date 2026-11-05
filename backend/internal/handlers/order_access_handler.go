@@ -85,6 +85,7 @@ func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
 		"shipping_address": order.ShippingAddress, "city": order.City, "delivery_note": order.DeliveryNote,
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee, "total": order.Total,
 		"order_status": order.Status, "payment_method": order.PaymentMethod, "payment_status": order.PaymentStatus,
+		"advance_mode": order.AdvanceMode, "advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
 		"created_at": order.CreatedAt, "items": order.Items,
 	})
 }
@@ -106,5 +107,6 @@ func respondWithOrder(c *gin.Context, order orders.Summary, err error) {
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee,
 		"total": order.Total, "order_status": order.Status,
 		"lens_order": order.LensOrder, "pay_in_advance": order.PayInAdvance, "lens_price_pending": order.LensPricePending,
+		"advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
 	})
 }

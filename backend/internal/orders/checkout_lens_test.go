@@ -169,48 +169,95 @@ func TestFrameOnlyRetryFingerprintIsUnchanged(t *testing.T) {
 	}
 }
 
-// paymentOptionsStub reports bKash as on or off for checkout tests.
-type paymentOptionsStub bool
+// paymentOptionsStub reports bKash as on or off and serves fixed advance rules for checkout tests.
+type paymentOptionsStub struct {
+	on                    bool
+	frameMode, lensMode   string
+	frameValue, lensValue int
+}
 
 // Enabled returns the stub's switch for every method.
-func (p paymentOptionsStub) Enabled(context.Context, string) (bool, error) { return bool(p), nil }
+func (p paymentOptionsStub) Enabled(context.Context, string) (bool, error) { return p.on, nil }
 
-// TestCheckoutPaymentChoice lets frame orders choose cash on delivery or bKash, and never lets lens orders pay on delivery.
+// AdvancePolicy returns the stub's rule for frame or lens orders.
+func (p paymentOptionsStub) AdvancePolicy(_ context.Context, kind string) (string, int, error) {
+	if kind == PolicyLens {
+		return p.lensMode, p.lensValue, nil
+	}
+	return p.frameMode, p.frameValue, nil
+}
+
+// TestCheckoutPaymentChoice saves each order's payment terms from the customer's choice and the owner's rules:
+// frame orders choose cash on delivery (delivery fee first while bKash is on) or full bKash; lens orders never pay on delivery.
 func TestCheckoutPaymentChoice(t *testing.T) {
 	frame := CheckoutItem{ProductID: 1, Quantity: 1}
 	lensLine := CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower}
+	owner := paymentOptionsStub{on: true, frameMode: AdvanceDeliveryFee, lensMode: AdvanceFull}
+	off, noFrameRule, lensPercent := owner, owner, owner
+	off.on = false
+	noFrameRule.frameMode = AdvanceNone
+	lensPercent.lensMode, lensPercent.lensValue = AdvancePercent, 30
+	// Frame order total 1000 + 80 delivery = 1080; lens order 1000 + 2500 + 80 = 3580.
 	for name, tc := range map[string]struct {
 		item          CheckoutItem
 		choice        string
-		bkashOn       bool
+		options       paymentOptionsStub
 		method, state string
+		required      int
 		err           error
 	}{
-		"frame, no choice":      {frame, "", true, "cash_on_delivery", "unpaid", nil},
-		"frame, cash":           {frame, PayCashOnDelivery, true, "cash_on_delivery", "unpaid", nil},
-		"frame, bKash on":       {frame, PayBkash, true, "advance", "advance_due", nil},
-		"frame, bKash off":      {frame, PayBkash, false, "", "", ErrPaymentUnavailable},
-		"frame, unknown method": {frame, "card", true, "", "", ErrInvalidCheckout},
-		"lens, cash refused":    {lensLine, PayCashOnDelivery, true, "", "", ErrInvalidCheckout},
-		"lens, bKash off is ok": {lensLine, PayBkash, false, "advance", "advance_due", nil},
-		"lens, no choice":       {lensLine, "", false, "advance", "advance_due", nil},
+		"frame, no choice: delivery fee first":  {frame, "", owner, "cash_on_delivery", "advance_due", 80, nil},
+		"frame, cash: delivery fee first":       {frame, PayCashOnDelivery, owner, "cash_on_delivery", "advance_due", 80, nil},
+		"frame, cash, bKash off: nothing first": {frame, PayCashOnDelivery, off, "cash_on_delivery", "unpaid", 0, nil},
+		"frame, cash, rule none":                {frame, PayCashOnDelivery, noFrameRule, "cash_on_delivery", "unpaid", 0, nil},
+		"frame, bKash: full total":              {frame, PayBkash, owner, "advance", "advance_due", 1080, nil},
+		"frame, bKash off":                      {frame, PayBkash, off, "", "", 0, ErrPaymentUnavailable},
+		"frame, unknown method":                 {frame, "card", owner, "", "", 0, ErrInvalidCheckout},
+		"lens, cash refused":                    {lensLine, PayCashOnDelivery, owner, "", "", 0, ErrInvalidCheckout},
+		"lens, bKash off still full":            {lensLine, PayBkash, off, "advance", "advance_due", 3580, nil},
+		"lens, 30 percent rounds up":            {lensLine, "", lensPercent, "advance", "advance_due", 1074, nil},
+		"mixed cart follows lens rule":          {frame, "", owner, "advance", "advance_due", 4580, nil},
 	} {
 		tx := &checkoutTxStub{
 			products: map[int]ReservedProduct{1: {Name: "Frame", Price: 1000}},
 			stock:    map[int]int{1: 5},
 			lenses:   map[int]LensChoice{7: {Name: "Blue-cut", Price: 2500, MaxPower: 600}},
 		}
+		items := []CheckoutItem{tc.item}
+		if strings.HasPrefix(name, "mixed") {
+			items = append(items, lensLine)
+		}
 		store := &checkoutStoreStub{tx: tx}
-		service := CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), PaymentOptions: paymentOptionsStub(tc.bkashOn)}
+		service := CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), PaymentOptions: tc.options}
 		_, err := service.Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
 			IdempotencyKey: "checkout-pay-choice-01", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
-			PaymentMethod: tc.choice, Items: []CheckoutItem{tc.item},
+			PaymentMethod: tc.choice, Items: items,
 		}))
-		if !errors.Is(err, tc.err) || tx.paymentMethod != tc.method || tx.paymentStatus != tc.state {
-			t.Fatalf("%s: got %s/%s err=%v", name, tx.paymentMethod, tx.paymentStatus, err)
+		if !errors.Is(err, tc.err) || tx.paymentMethod != tc.method || tx.paymentStatus != tc.state || tx.terms.AdvanceRequired != tc.required {
+			t.Fatalf("%s: got %+v err=%v", name, tx.terms, err)
 		}
 		if tc.err != nil && (store.committed || len(tx.reservedIDs) != 0) {
 			t.Fatalf("%s: refused choice still changed stock", name)
+		}
+	}
+}
+
+// TestAdvanceAmount checks the one formula for the amount due before confirmation.
+func TestAdvanceAmount(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mode               string
+		value, total, want int
+	}{
+		"none":                  {AdvanceNone, 0, 1080, 0},
+		"delivery fee":          {AdvanceDeliveryFee, 0, 1080, 80},
+		"percent rounds up":     {AdvancePercent, 30, 3581, 1075},
+		"fixed":                 {AdvanceFixed, 1000, 3580, 1000},
+		"fixed capped at total": {AdvanceFixed, 5000, 3580, 3580},
+		"full":                  {AdvanceFull, 0, 3580, 3580},
+		"unknown mode":          {"later", 0, 3580, 0},
+	} {
+		if got := AdvanceAmount(tc.mode, tc.value, tc.total, 80); got != tc.want {
+			t.Fatalf("%s: %d, want %d", name, got, tc.want)
 		}
 	}
 }

@@ -26,7 +26,7 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql"} {
+	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql", "014_manual_payments.sql", "015_advance_policies.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -69,7 +69,8 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := lens.PrescriptionStore{Dir: t.TempDir()}
-	checkout := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings, Prescriptions: files}
+	checkout := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings, Prescriptions: files,
+		PaymentOptions: paymentOptionsStub{on: true, frameMode: AdvanceDeliveryFee, lensMode: AdvancePercent, lensValue: 50}}
 	high := -1600
 	receipt, err := checkout.Place(ctx, CheckoutRequest{
 		IdempotencyKey: "lens-order-qa-" + suffix, CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
@@ -83,6 +84,8 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	if receipt.Total != 1000+2500+fee || receipt.PaymentMethod != "advance" {
 		t.Fatalf("receipt = %+v", receipt)
 	}
+	// halfOf is the 50% lens advance, rounded up to whole taka.
+	halfOf := func(total int) int { return (total + 1) / 2 }
 
 	access := AccessService{Reader: PostgresReader{DB: db}}
 	order, err := access.Admin(ctx, fmt.Sprint(orderID))
@@ -92,6 +95,9 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	item := order.Items[0]
 	if item.LensPriceFinal || item.PrescriptionStatus != "pending" || !item.HasPrescription || item.SPHRight == nil || *item.SPHRight != -1600 || item.SPHLeft != nil {
 		t.Fatalf("lens line snapshot = %+v", item)
+	}
+	if order.AdvanceMode != AdvancePercent || order.AdvanceRequired != halfOf(receipt.Total) || order.PaymentStatus != "advance_due" {
+		t.Fatalf("saved advance = %s %d %s", order.AdvanceMode, order.AdvanceRequired, order.PaymentStatus)
 	}
 
 	fulfillment := FulfillmentService{Store: PostgresFulfillmentStore{DB: db}}
@@ -111,6 +117,10 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	}
 	if orderTotal != 1000+4200+fee || invoiceTotal != orderTotal {
 		t.Fatalf("totals after price change: order=%d invoice=%d", orderTotal, invoiceTotal)
+	}
+	// The advance follows the new price under the order's saved 50% rule.
+	if order, err := access.Admin(ctx, fmt.Sprint(orderID)); err != nil || order.AdvanceRequired != halfOf(orderTotal) {
+		t.Fatalf("advance after price change = %d %v", order.AdvanceRequired, err)
 	}
 	if _, err := fulfillment.ChangeStatus(ctx, orderID, "confirmed"); !errors.Is(err, ErrPrescriptionNotAccepted) {
 		t.Fatalf("confirmed with unchecked prescription: %v", err)
@@ -140,6 +150,9 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 	}
 	if err := review.MarkAdvanceReceived(ctx, orderID); err != nil {
 		t.Fatal(err)
+	}
+	if order, err := access.Admin(ctx, fmt.Sprint(orderID)); err != nil || order.AmountPaid != halfOf(orderTotal) {
+		t.Fatalf("paid amount after the owner recorded the advance = %d %v", order.AmountPaid, err)
 	}
 	if err := review.SetLensPrice(ctx, orderID, item.ID, 100, ""); !errors.Is(err, ErrLensReviewClosed) {
 		t.Fatalf("price changed after the advance was paid: %v", err)
