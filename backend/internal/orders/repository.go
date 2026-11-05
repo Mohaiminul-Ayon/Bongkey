@@ -147,7 +147,7 @@ func (r PostgresReader) Items(ctx context.Context, orderID int) ([]Item, error) 
 	rows, err := r.DB.QueryContext(ctx, `
 		SELECT id, product_name, sku, lens_option, quantity, unit_price, total_price,
 			lens_kind, lens_name, lens_power, sph_right, sph_left, lens_price, lens_price_final,
-			prescription_status, prescription_file <> '', prescription_note
+			prescription_status, prescription_file <> '', prescription_note, lens_request
 		FROM order_items WHERE order_id = $1 ORDER BY id
 	`, orderID)
 	if err != nil {
@@ -159,7 +159,7 @@ func (r PostgresReader) Items(ctx context.Context, orderID int) ([]Item, error) 
 		var item Item
 		if err := rows.Scan(&item.ID, &item.ProductName, &item.SKU, &item.LensOption, &item.Quantity, &item.UnitPrice, &item.TotalPrice,
 			&item.LensKind, &item.LensName, &item.LensPower, &item.SPHRight, &item.SPHLeft, &item.LensPrice, &item.LensPriceFinal,
-			&item.PrescriptionStatus, &item.HasPrescription, &item.PrescriptionNote); err != nil {
+			&item.PrescriptionStatus, &item.HasPrescription, &item.PrescriptionNote, &item.LensRequest); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

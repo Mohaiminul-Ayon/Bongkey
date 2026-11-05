@@ -43,6 +43,7 @@ type orderItemRequest struct {
 	LensPower     string `json:"lens_power"`
 	SPHRight      *int   `json:"sph_right"`
 	SPHLeft       *int   `json:"sph_left"`
+	LensRequest   string `json:"lens_request"`
 }
 
 // CheckoutHandler maps order input and checkout decisions to HTTP.
@@ -81,7 +82,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		items[i] = orders.CheckoutItem{
 			ProductID: item.ProductID, Quantity: item.Quantity, LensOption: item.LensOption,
 			LensKind: item.LensKind, LensPackageID: item.LensPackageID, LensPower: item.LensPower,
-			SPHRight: item.SPHRight, SPHLeft: item.SPHLeft, Prescription: files[i],
+			SPHRight: item.SPHRight, SPHLeft: item.SPHLeft, LensRequest: item.LensRequest, Prescription: files[i],
 		}
 	}
 	receipt, err := h.Service.Place(c.Request.Context(), orders.CheckoutRequest{

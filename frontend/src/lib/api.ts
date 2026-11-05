@@ -57,6 +57,7 @@ export type OrderItemPayload = {
   lens_power?: "no_power" | "with_power";
   sph_right?: number;
   sph_left?: number;
+  lens_request?: string;
 };
 
 export type DeliverySettings = { delivery_fee: number; outside_dhaka_fee: number; districts: string[] };
@@ -100,6 +101,7 @@ export type AdminOrderItem = {
   prescription_status: "" | "pending" | "accepted" | "needs_new";
   has_prescription: boolean;
   prescription_note: string;
+  lens_request: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";

@@ -156,6 +156,7 @@ function LensLine({ orderId, item, busy, run, locked, reviewLocked }: LensLinePr
   return (
     <div className="rounded-md border border-neutral-200 p-4">
       <p className="font-black">{item.product_name} · {item.lens_kind === "custom" ? "Custom lens" : item.lens_name}</p>
+      {item.lens_kind === "custom" && item.lens_request ? <p className="mt-1 rounded-md bg-amber-50 px-3 py-2 text-sm"><span className="font-bold">Customer asked for:</span> {item.lens_request}</p> : null}
       {item.lens_kind === "package" ? <p className="text-sm text-neutral-600">{item.lens_power === "with_power" ? `With power · customer says R ${power(item.sph_right)}, L ${power(item.sph_left)}` : "No power"}</p> : null}
 
       {item.prescription_status ? (

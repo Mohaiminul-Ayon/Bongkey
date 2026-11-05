@@ -63,6 +63,8 @@ type Item struct {
 	HasPrescription    bool   `json:"has_prescription"`
 	// PrescriptionNote is the owner's private review note; only admin JSON exposes items.
 	PrescriptionNote string `json:"prescription_note"`
+	// LensRequest is the customer's custom lens description; only admin JSON exposes items.
+	LensRequest string `json:"lens_request"`
 }
 
 // AdminDetail adds operational fields and item snapshots to the private order summary.

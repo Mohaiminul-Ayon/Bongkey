@@ -37,7 +37,7 @@ export default function CartPage() {
                     <p className="text-xs font-black uppercase tracking-[0.14em] text-[#173c34]">{item.product.category}</p>
                     <Link href={`/products/${item.product.slug}`} className="mt-1 block text-xl font-black text-neutral-950 hover:text-[#173c34]">{item.product.name}</Link>
                     <p className="mt-2 text-sm font-semibold text-neutral-500">{item.product.size} · {item.product.color} · {lensSummary(item.lens)}</p>
-                    {item.lens ? <p className="mt-1 text-sm text-neutral-600">Lens: {item.lens.kind === "custom" ? "price after chat" : `${formatPrice(lensPrice(item.lens))} per pair${lensPriceKnown(item.lens) ? "" : " (confirmed after prescription check)"}`}</p> : null}
+                    {item.lens ? <p className="mt-1 text-sm text-neutral-600">Lens: {item.lens.kind === "custom" ? "price confirmed by call (it can change)" : `${formatPrice(lensPrice(item.lens))} per pair${lensPriceKnown(item.lens) ? "" : " (confirmed after prescription check)"}`}</p> : null}
                     {needsPrescription(item.lens) ? <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-[#7b531c]">Prescription: you upload the PDF or photo on the next step (Details).</p> : null}
                     <button className="mt-5 text-sm font-black text-red-600" onClick={() => removeItem(item.lineId)}>Remove</button>
                   </div>

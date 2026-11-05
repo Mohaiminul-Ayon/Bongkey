@@ -50,7 +50,7 @@ Before the first backend start, fill in these values in `.env`:
 | `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
 | `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
-| `NEXT_PUBLIC_WHATSAPP_NUMBER` | No | Shop WhatsApp number in international form without `+`, e.g. `8801XXXXXXXXX`. Lens orders show a "Chat on WhatsApp" button with the order number. Without it, the page says the shop will call. Next.js reads it from `frontend/.env.local`, not the root `.env`; restart `npm run dev` after setting it. |
+| `NEXT_PUBLIC_WHATSAPP_NUMBER` | No | Shop WhatsApp number, e.g. `8801XXXXXXXXX` (a local `01XXXXXXXXX` is converted). The product page (custom lens, "Not sure which lens?"), checkout and order success page show WhatsApp chat links. Without it, the page says the shop will call. Next.js reads it from `frontend/.env.local`, not the root `.env`; restart `npm run dev` after setting it. |
 
 Keep `.env` out of source control and out of shared output.
 

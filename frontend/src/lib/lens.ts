@@ -3,7 +3,10 @@ import type { LensPackage, OrderItemPayload } from "@/lib/api";
 /** CartLens is the lens choice saved on one bag line. Powers are hundredths (-150 = -1.50); null means "not sure". */
 export type CartLens =
   | { kind: "package"; packageId: number; name: string; price: number; maxPower: number; power: "no_power" | "with_power"; sphRight: number | null; sphLeft: number | null }
-  | { kind: "custom" };
+  | { kind: "custom"; request: string };
+
+/** maxLensRequest matches the server limit on a custom lens description. */
+export const maxLensRequest = 500;
 
 /** sphOptions lists every power a customer may pick, -20.00 to +12.00 in 0.25 steps. */
 export const sphOptions = Array.from({ length: (1200 + 2000) / 25 + 1 }, (_, i) => -2000 + i * 25);
@@ -37,7 +40,7 @@ export function lensPrice(lens?: CartLens) {
 /** lensSummary is the short text shown under a bag line. */
 export function lensSummary(lens?: CartLens) {
   if (!lens) return "Frame only";
-  if (lens.kind === "custom") return "Custom lens · price after chat";
+  if (lens.kind === "custom") return "Custom lens · price confirmed by call";
   if (lens.power === "no_power") return `${lens.name} · no power`;
   const eye = (sph: number | null) => (sph === null ? "not sure" : formatPower(sph));
   return `${lens.name} · with power (R ${eye(lens.sphRight)}, L ${eye(lens.sphLeft)})`;
@@ -46,7 +49,7 @@ export function lensSummary(lens?: CartLens) {
 /** sameLens is true when two bag lines would be made identically, so they can share one line and one prescription. */
 export function sameLens(a?: CartLens, b?: CartLens) {
   if (!a || !b) return !a && !b;
-  if (a.kind === "custom" || b.kind === "custom") return a.kind === b.kind;
+  if (a.kind === "custom" || b.kind === "custom") return a.kind === "custom" && b.kind === "custom" && a.request === b.request;
   return a.packageId === b.packageId && a.power === b.power && a.sphRight === b.sphRight && a.sphLeft === b.sphLeft;
 }
 
@@ -58,7 +61,7 @@ export function needsPrescription(lens?: CartLens) {
 /** lensPayload turns a saved choice into the fields the order API expects. */
 export function lensPayload(lens?: CartLens): Partial<OrderItemPayload> {
   if (!lens) return {};
-  if (lens.kind === "custom") return { lens_kind: "custom" };
+  if (lens.kind === "custom") return { lens_kind: "custom", lens_request: lens.request };
   return {
     lens_kind: "package",
     lens_package_id: lens.packageId,
@@ -71,7 +74,7 @@ export function lensPayload(lens?: CartLens): Partial<OrderItemPayload> {
 /** validCartLens checks a lens loaded from browser storage before trusting its shape. */
 export function validCartLens(lens: unknown): lens is CartLens {
   const value = lens as Record<string, unknown> | null;
-  if (value?.kind === "custom") return true;
+  if (value?.kind === "custom") return typeof value.request === "string" && value.request.trim() !== "" && value.request.length <= maxLensRequest;
   const power = (sph: unknown) => sph === null || (Number.isInteger(sph) && (sph as number) % 25 === 0 && (sph as number) >= -2000 && (sph as number) <= 1200);
   return value?.kind === "package" && Number.isInteger(value.packageId) && typeof value.name === "string" && Number.isInteger(value.price) &&
     Number.isInteger(value.maxPower) && (value.power === "no_power" || value.power === "with_power") && power(value.sphRight) && power(value.sphLeft);

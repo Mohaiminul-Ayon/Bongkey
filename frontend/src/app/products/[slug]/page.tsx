@@ -77,10 +77,10 @@ export default function ProductDetailsPage() {
             <span className="text-xs text-neutral-600">SKU: {variant.sku} · {variant.stockStatus}</span>
           </div> : null}
 
-          <LensPicker slug={product.slug} onChange={(choice, ready) => setLens({ choice, ready })} />
+          <LensPicker slug={product.slug} productName={product.name} onChange={(choice, ready) => setLens({ choice, ready })} />
           {lens.choice ? (
             <p className="product-block text-sm">
-              Frame {formatPrice(variant.price)} + lens {lens.choice.kind === "custom" ? "price after chat" : formatPrice(lensPrice(lens.choice))} = <strong>{lens.choice.kind === "custom" ? `${formatPrice(variant.price)} + lens` : formatPrice(variant.price + lensPrice(lens.choice))}</strong>
+              Frame {formatPrice(variant.price)} + lens {lens.choice.kind === "custom" ? "price confirmed by call" : formatPrice(lensPrice(lens.choice))} = <strong>{lens.choice.kind === "custom" ? `${formatPrice(variant.price)} + lens` : formatPrice(variant.price + lensPrice(lens.choice))}</strong>
               {lens.choice.kind === "package" && lens.ready && !lensPriceKnown(lens.choice) ? " (lens price confirmed after we check your prescription)" : ""}
             </p>
           ) : null}

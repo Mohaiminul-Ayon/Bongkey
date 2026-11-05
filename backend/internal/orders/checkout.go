@@ -9,6 +9,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/security"
@@ -23,8 +24,10 @@ const frameOnlyLens = "Frame only"
 const (
 	LensKindPackage = "package"
 	LensKindCustom  = "custom"
-	LensNoPower     = "no_power"
-	LensWithPower   = "with_power"
+	// maxLensRequest matches the database limit on a custom lens description.
+	maxLensRequest = 500
+	LensNoPower    = "no_power"
+	LensWithPower  = "with_power"
 )
 
 // maxPrescriptionLines bounds how many files one checkout may upload.
@@ -57,6 +60,8 @@ type CheckoutItem struct {
 	// SPH values are hundredths of a diopter (-150 = -1.50); nil means the customer is not sure.
 	SPHRight *int `json:",omitempty"`
 	SPHLeft  *int `json:",omitempty"`
+	// LensRequest is the customer's own description of a custom lens; required for custom, empty otherwise.
+	LensRequest string `json:",omitempty"`
 	// Prescription is the uploaded file; it is stored privately and never fingerprinted.
 	Prescription []byte `json:"-"`
 }
@@ -72,6 +77,7 @@ type LensChoice struct {
 // OrderLine is the priced snapshot of one accepted item.
 type OrderLine struct {
 	LensName           string
+	LensRequest        string
 	LensPrice          int
 	LensPriceFinal     bool
 	PrescriptionFile   string
@@ -260,7 +266,7 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 				}
 				line = priceLensLine(item, choice)
 			} else if item.LensKind == LensKindCustom {
-				line = OrderLine{LensName: "Custom lens", PrescriptionStatus: "pending"}
+				line = OrderLine{LensName: "Custom lens", LensRequest: strings.TrimSpace(item.LensRequest), PrescriptionStatus: "pending"}
 			}
 			lineTotal := (int64(products[item.ProductID].Price) + int64(line.LensPrice)) * int64(item.Quantity)
 			if lineTotal > int64(maxOrderAmount)-int64(deliveryFee)-int64(subtotal) {
@@ -316,9 +322,9 @@ func validLensRequest(item CheckoutItem) bool {
 	switch item.LensKind {
 	case "":
 		// The frame-only label is checked after the retry lookup, so accepted legacy retries keep their receipt.
-		return item.LensPackageID == 0 && item.LensPower == "" && item.SPHRight == nil && item.SPHLeft == nil && item.Prescription == nil
+		return item.LensPackageID == 0 && item.LensPower == "" && item.SPHRight == nil && item.SPHLeft == nil && item.Prescription == nil && item.LensRequest == ""
 	case LensKindPackage:
-		if item.LensPackageID <= 0 || item.LensOption != "" {
+		if item.LensPackageID <= 0 || item.LensOption != "" || item.LensRequest != "" {
 			return false
 		}
 		if item.LensPower == LensNoPower {
@@ -326,8 +332,10 @@ func validLensRequest(item CheckoutItem) bool {
 		}
 		return item.LensPower == LensWithPower && item.Prescription != nil && validSPH(item.SPHRight) && validSPH(item.SPHLeft)
 	case LensKindCustom:
-		// Custom details and powers are agreed in chat; a prescription file is optional here.
-		return item.LensPackageID == 0 && item.LensPower == "" && item.LensOption == "" && item.SPHRight == nil && item.SPHLeft == nil
+		// The customer describes the lens; powers and price are agreed by phone or chat, and a prescription file is optional.
+		request := strings.TrimSpace(item.LensRequest)
+		return request != "" && utf8.RuneCountInString(request) <= maxLensRequest &&
+			item.LensPackageID == 0 && item.LensPower == "" && item.LensOption == "" && item.SPHRight == nil && item.SPHLeft == nil
 	default:
 		return false
 	}
@@ -363,7 +371,7 @@ func lensLabel(item CheckoutItem, line OrderLine) string {
 		}
 		return line.LensName + " · no power"
 	case LensKindCustom:
-		return "Custom lens · price after chat"
+		return "Custom lens · price confirmed by call"
 	default:
 		return frameOnlyLens
 	}

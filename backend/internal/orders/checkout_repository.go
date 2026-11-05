@@ -114,11 +114,11 @@ func (p postgresCheckoutTx) InsertItem(ctx context.Context, orderID int, item Ch
 	_, err := p.Tx.ExecContext(ctx, `
 		INSERT INTO order_items (order_id, product_id, product_name, sku, lens_option, quantity, unit_price, total_price,
 			lens_kind, lens_package_id, lens_name, lens_power, sph_right, sph_left, lens_price, lens_price_final,
-			prescription_file, prescription_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			prescription_file, prescription_status, lens_request)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`, orderID, item.ProductID, product.Name, product.SKU, item.LensOption, item.Quantity, product.Price, line.LineTotal,
 		kind, packageID, line.LensName, item.LensPower, item.SPHRight, item.SPHLeft, line.LensPrice, line.LensPriceFinal,
-		line.PrescriptionFile, line.PrescriptionStatus)
+		line.PrescriptionFile, line.PrescriptionStatus, line.LensRequest)
 	return err
 }
 

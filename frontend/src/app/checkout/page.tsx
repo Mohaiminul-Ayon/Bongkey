@@ -8,6 +8,7 @@ import { createOrder, fetchLensPackages, fetchProduct, fetchProducts, requestEma
 import { useCart, type CartItem } from "@/lib/cart";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
+import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
 const checkoutAttemptStorageKey = "bongkey_checkout_attempt";
 let volatileCheckoutAttempt: { key: string; signature: string } | null = null;
@@ -326,7 +327,13 @@ function PrescriptionCard({ item, file, onChoose }: PrescriptionCardProps) {
           <span className="rounded-md bg-neutral-100 px-2 py-1"><span className="text-neutral-500">Left</span> <strong>{eye(lens.sphLeft)}</strong></span>
         </div>
       ) : null}
-      {lens?.kind === "custom" ? <p className="mt-2 text-sm text-neutral-600">After ordering, chat with us on WhatsApp about this lens. Attach a prescription now if you have one.</p> : null}
+      {lens?.kind === "custom" ? (
+        <div className="mt-2 grid gap-2 text-sm">
+          <p className="rounded-md bg-neutral-100 px-3 py-2"><span className="text-neutral-500">You asked for:</span> {lens.request}</p>
+          <p className="text-neutral-600">The lens price is not fixed yet. We call you with the price before you pay; it can change after we check your prescription.</p>
+          {whatsAppNumber ? <a className="font-bold text-green-800 underline" target="_blank" rel="noopener noreferrer" href={whatsAppLink(`Hi Bongkey, I'm ordering ${item.product.name} with a custom lens. My needs: ${lens.request}`)}>Questions? Chat with us on WhatsApp</a> : null}
+        </div>
+      ) : null}
       <label className={`mt-3 flex cursor-pointer items-center justify-between gap-3 rounded-md border-2 border-dashed px-4 py-3 text-sm focus-within:ring-2 focus-within:ring-[#173c34] ${file ? "border-green-600 bg-green-50" : "border-neutral-300 hover:border-[#173c34]"}`}>
         <span className="min-w-0">
           {file ? <span className="block truncate font-black text-green-800">✓ {file.name}</span> : <span className="block font-black">Upload prescription <span className={required ? "text-red-700" : "font-semibold text-neutral-500"}>{required ? "(required)" : "(optional)"}</span></span>}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -59,7 +60,7 @@ func TestCheckoutPricesLensLines(t *testing.T) {
 		"power within limit": {CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHRight: power(-575), SPHLeft: power(600), Prescription: file}, 2500, true, "pending", "Blue-cut · with power", 1},
 		"power above limit":  {CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHRight: power(-1600), SPHLeft: power(-200), Prescription: file}, 2500, false, "pending", "Blue-cut · with power", 1},
 		"power not sure":     {CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHLeft: power(-200), Prescription: file}, 2500, false, "pending", "Blue-cut · with power", 1},
-		"custom lens":        {CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindCustom}, 0, false, "pending", "Custom lens · price after chat", 0},
+		"custom lens":        {CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindCustom, LensRequest: "  -16 both eyes, thin lens  "}, 0, false, "pending", "Custom lens · price confirmed by call", 0},
 	} {
 		tx, saver, receipt, err := lensCheckout(t, tc.item)
 		if err != nil {
@@ -71,6 +72,9 @@ func TestCheckoutPricesLensLines(t *testing.T) {
 		}
 		if line.LineTotal != 1000+tc.lensPrice || receipt.Total != 1000+tc.lensPrice+80 || len(saver.saved) != tc.savedFiles {
 			t.Fatalf("%s: total=%d line=%d files=%d", name, receipt.Total, line.LineTotal, len(saver.saved))
+		}
+		if tc.item.LensKind == LensKindCustom && line.LensRequest != "-16 both eyes, thin lens" {
+			t.Fatalf("%s: custom request stored as %q", name, line.LensRequest)
 		}
 		if tx.paymentMethod != "advance" || tx.paymentStatus != "advance_due" || receipt.PaymentMethod != "advance" {
 			t.Fatalf("%s: lens order must ask for an advance, got %s/%s", name, tx.paymentMethod, tx.paymentStatus)
@@ -98,7 +102,11 @@ func TestCheckoutRejectsBadLensRequests(t *testing.T) {
 		"missing power choice":      {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7},
 		"unknown lens kind":         {ProductID: 1, Quantity: 1, LensKind: "free"},
 		"file on a frame-only line": {ProductID: 1, Quantity: 1, Prescription: file},
-		"custom with a package":     {ProductID: 1, Quantity: 1, LensKind: LensKindCustom, LensPackageID: 7},
+		"custom with a package":     {ProductID: 1, Quantity: 1, LensKind: LensKindCustom, LensPackageID: 7, LensRequest: "thin"},
+		"custom without a request":  {ProductID: 1, Quantity: 1, LensKind: LensKindCustom, LensRequest: "   "},
+		"custom request too long":   {ProductID: 1, Quantity: 1, LensKind: LensKindCustom, LensRequest: strings.Repeat("x", 501)},
+		"request on a package line": {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower, LensRequest: "thin"},
+		"request on a frame line":   {ProductID: 1, Quantity: 1, LensRequest: "thin"},
 		"client-written lens label": {ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower, LensOption: "Free lens"},
 	} {
 		tx, saver, _, err := lensCheckout(t, item)
