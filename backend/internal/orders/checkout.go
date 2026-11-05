@@ -273,7 +273,8 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		lines := make([]OrderLine, len(request.Items))
 		subtotal := 0
 		for i, item := range request.Items {
-			line := OrderLine{}
+			// A frame-only line has no lens price to confirm, so it starts final; lens branches below decide their own.
+			line := OrderLine{LensPriceFinal: true}
 			if item.LensKind == LensKindPackage {
 				choice, err := tx.LensForProduct(ctx, item.LensPackageID, item.ProductID)
 				if err != nil {

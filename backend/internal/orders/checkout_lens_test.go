@@ -86,7 +86,7 @@ func TestCheckoutPricesLensLines(t *testing.T) {
 		t.Fatalf("two pairs: line=%+v total=%d files=%d err=%v", tx.lines, receipt.Total, len(saver.saved), err)
 	}
 	tx, _, _, err = lensCheckout(t, CheckoutItem{ProductID: 1, Quantity: 2})
-	if err != nil || tx.paymentMethod != "cash_on_delivery" || tx.paymentStatus != "unpaid" {
+	if err != nil || tx.paymentMethod != "cash_on_delivery" || tx.paymentStatus != "unpaid" || !tx.lines[0].LensPriceFinal {
 		t.Fatalf("frame-only order should stay cash on delivery: %s %v", tx.paymentMethod, err)
 	}
 }

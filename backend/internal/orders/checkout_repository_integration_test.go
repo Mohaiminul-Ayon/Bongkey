@@ -221,7 +221,8 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
 		t.Fatal("verified email could not access its stored invoice summary")
 	}
-	if len(order.Items) != 1 || order.Items[0].Quantity != 1 || order.Items[0].LensOption != frameOnlyLens || order.Items[0].TotalPrice != receipt.Subtotal {
+	if len(order.Items) != 1 || order.Items[0].Quantity != 1 || order.Items[0].LensOption != frameOnlyLens || order.Items[0].TotalPrice != receipt.Subtotal ||
+		!order.Items[0].LensPriceFinal || order.LensPricePending {
 		t.Fatalf("order detail did not include its item snapshot: %+v", order.Items)
 	}
 	if byNumber, err := access.Guest(ctx, receipt.OrderNumber, proof); err != nil || byNumber.ID != receipt.ID {
