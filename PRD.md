@@ -1,7 +1,7 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.27
-Last updated: 2026-10-26
+Version: 2.28
+Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
 
@@ -22,7 +22,7 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 - Customers may optionally create/access an account using verified email in R2.
 - Frames may be purchased alone or with optional lenses. Lenses cannot be purchased independently.
 - Sunglasses are supported. Lens compatibility is configured per applicable product.
-- Prices are fixed and administered in the panel; no prescription-based quotation workflow in the initial scope.
+- Lens type prices are fixed and administered in the panel. A "Customized lens" line has no fixed price: the customer describes the need, and the owner agrees and enters the price by phone/WhatsApp before any advance (decision 2026-11-05).
 - Store currency: BDT. Store dates persist consistently and display in the Bangladesh timezone.
 
 ## 3. Catalog and discovery
@@ -59,12 +59,12 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 ### 4.2 Prescription workflow
 
 - Frame-only orders require no prescription.
-- For lens selections requiring a prescription, customer can upload an image/PDF at checkout or select “Will provide via WhatsApp.”
+- "With power" lens lines require an image/PDF upload at checkout; there is no "send later" option. Custom lens lines upload optionally and describe the need in text. The owner can attach a file received on WhatsApp later (decision 2026-11-05).
 - Allow order submission while the prescription is pending; prevent production until required information is reviewed and accepted.
 - Admin can view/download a prescription, add an attachment received via WhatsApp, request clarification, and record review status/notes.
 - Track missing, received, clarification needed, and reviewed states separately from order/payment states.
-- Files must be private, authorized per customer/order/admin, and excluded from public image paths and invoices.
-- Validate file type/signature and size; safely handle previews/downloads. Exact permitted formats, size limits, and retention duration remain configuration/design decisions.
+- Files must be private, admin-only (customers cannot download them, decision 2026-11-05), and excluded from public image paths and invoices.
+- Validate file type/signature and size; safely handle previews/downloads. Accepted: PDF, JPEG/PNG (at least 400 px), HEIC, up to 5 MB. Files are deleted 180 days after the order is delivered or cancelled (decision 2026-11-05).
 - No automatic AI prescription interpretation or production decisions at launch.
 
 ## 5. Customer identity and checkout
@@ -271,7 +271,7 @@ The reduced release boundary above is the explicit scope change authorized in ve
 Apply each scenario to its enabled release scope. R2 scenarios do not block R1, but R1 must not expose their incomplete flows. The coupon and gateway-callback portions below are R2; stock/idempotency and basic offer protections apply from R0/R1.
 
 - Frame-only guest verifies an email, orders without an account/prescription, and securely downloads an unpaid COD invoice.
-- Frame-with-lens checkout computes valid option prices and accepts image/PDF or WhatsApp-later; production is blocked until required review/advance verification.
+- Frame-with-lens checkout computes valid option prices and requires an image/PDF for "with power"; production is blocked until the price is final, the prescription is accepted and the advance is recorded.
 - No standalone lens purchase or incompatible lens combination can be submitted through either UI or API.
 - Admin category/price/zone/policy changes affect new purchases while old order snapshots remain consistent.
 - Concurrent buyers cannot purchase more frames than stock; repeated checkout/payment callbacks cannot duplicate effects.
@@ -411,7 +411,7 @@ These ideas are recorded for later, not first-release requirements: wishlist, pu
 - Discount overlap/precedence, per-customer coupon restrictions if desired, and mixed-cart advance calculation.
 - Stock reservation duration and recovery of late successful payments; fulfillment cancellation rules.
 - Return condition criteria, outgoing/return/exchange shipping treatment, and refund deadline operational handling.
-- Prescription file limits, retention, and deletion policy; hosting/storage/backup providers.
+- Hosting/storage/backup providers, and whether prescriptions are encrypted at rest (limits and 180-day retention decided 2026-11-05).
 - Launch language, notification wording, performance/accessibility targets, and applicable tax/invoice/policy review.
 
 Do not silently invent these decisions in code. Propose a sensible default, document it, and resolve material business choices with the owner.
@@ -484,6 +484,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | FULFILL-01 | High / REQ-08,10 | Admin can view an order, apply only allowed fulfillment transitions, and cancel an eligible order; cancellation restores reserved stock exactly once in the same PostgreSQL transaction | Done 2026-10-23: unit/handler/full/race/build, migration startup, protected-route denial, real PostgreSQL concurrent cancellation, and owner valid-session browser `pending -> confirmed -> cancelled` walkthrough passed; UI showed no further action, stock restored once, and QA fixtures were removed |
 | IDEMP-01 | Critical / REQ-08 | A repeated checkout with the same idempotency key and payload returns the original receipt; it never creates a second order/invoice or decrements stock twice; reusing the key with a different payload is rejected safely | Done 2026-10-18: local PostgreSQL concurrent retries left one order/invoice and one stock reservation; restarted HTTP returned the same receipt on replay and 409 on changed payload; QA fixtures removed |
 | EMAIL-01 | High / REQ-05,08 | Required verified email at guest checkout and email OTP recovery of private order/invoice summary; PDF remains a separate story | Done 2026-10-20: real Gmail checkout/recovery, reload, tokenless denial, matching-email proof, abuse/single-use checks, provider-failure redaction, and the full supported race suite passed. Both exact browser fixtures were removed; order 20 stock was restored and fixture 21 had no stock item. The earlier one-off 503 was not reproduced and is covered by safe stage diagnostics; PDF remains separate work |
+| LENS-01 | High / REQ-03,04,07,08 | Admin lens types (fixed price, max power, categories); shopper picks frame only, a lens type with/without power, or a described custom lens; server prices lines; "with power" needs a private prescription; lens orders are advance-only; owner reviews file, price and advance before confirmation; files deleted 180 days after delivery/cancellation | Merged 2026-11-05 as PR #70 (closes #14, #15, #16): Go unit/handler tests, local PostgreSQL lifecycle (attach WhatsApp file, note, retention), CI, frontend type check, local API attack pass and browser checks of picker, bag, checkout cards and custom request. Owner real lens order with email code and real lens prices remain. Supersedes the FRAME-01 frame-only guard |
 | ACCOUNT-01 | R2 / REQ-05 | Explicit verified-email account signup/login; one customer table; orders use nullable `customer_id`; customer-confirmed historical linking updates eligible verified-email guest orders without copying data | Deferred until after pilot feedback; do not scaffold during R1 |
 
 ### Separate execution checklists (2026-10-15)
@@ -568,6 +569,10 @@ Use two independent fields going forward: implementation = Missing / Partial / I
 - Defects record reproduction, expected/actual result, impact, and verification. Critical: exposed private data, incorrect money/stock, or unavailable core purchase flow; high: major flow blocked without a practical workaround; normal: non-critical behavior/UI issues.
 - Critical/high launch defects must be resolved before pilot. Lower-impact deferred defects need an owner, workaround if relevant, and a backlog entry.
 - Track completed stories, carry-over, blockers, and escaped defects to improve estimates, not to maximize code volume or AI output.
+
+Decision entries:
+
+- 2026-11-05 (REQ-03, REQ-07, REQ-08): lens orders are advance-only with no COD; "with power" needs an uploaded prescription (no WhatsApp-later); custom lenses are priced by the owner after a phone/WhatsApp talk and the customer is told the price can change; prescriptions are admin-only and deleted 180 days after delivery or cancellation. Reason: lenses are made to order and cannot be returned, so the price and prescription must be settled before money is taken and production starts.
 
 ## 17. Non-functional requirements and project dependencies
 
