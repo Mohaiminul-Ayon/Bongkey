@@ -253,7 +253,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
    A bad value returns 400.
 5. [PostgresStore.Submit](../backend/internal/payments/repository.go:91) opens a transaction and locks the order row (`FOR UPDATE`). It then runs [checkPayable](../backend/internal/payments/payments.go:97). The order must be `advance`, `advance_due` and `pending`, with no open lens price; otherwise 409. An amount above the order total is refused. The insert uses `ON CONFLICT DO NOTHING` on the partial unique index `(order_id, method, trx_id) WHERE status <> 'rejected'`, so a double click returns the same payment. Ten payments per order is the limit.
 6. Admin: `GET /api/admin/payments?status=pending` → `AdminAuth` → [AdminPayments](../backend/internal/handlers/payment_handler.go:82). Each row lists other orders that used the same TrxID, and the [review list](../frontend/src/components/PaymentReviewList.tsx) shows that as a red warning.
-7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved`, the reviewer and time are recorded, and the order becomes `advance_received`.
+7. Approve: `POST /api/admin/payments/:id/approve` → `AdminAuth` → [ApprovePayment](../backend/internal/handlers/payment_handler.go:109) → [PostgresStore.Approve](../backend/internal/payments/repository.go:206). `review` (line 182) locks the order first and then the payment, which must still be `pending`. [checkApprovable](../backend/internal/payments/payments.go:109) also accepts `advance_received`, so an advance sent in two parts can be approved twice. In one transaction the payment becomes `approved` and the reviewer and time are recorded. [settles](../backend/internal/payments/payments.go) then decides whether the order becomes `advance_received`. Any approved part settles a lens advance. A frame order settles only when its approved payments reach the total, so a small payment cannot let it be confirmed and shipped; until then it stays `advance_due`. A new submission may not be more than the amount still owed (total minus approved).
 8. Reject needs a reason of up to 200 characters, which the customer sees. The same TrxID can then be sent again.
 
 **Failure paths:**
@@ -265,7 +265,8 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Limits:**
 - Nothing checks bKash itself; the owner confirms each TrxID in the bKash app. A reused TrxID is only warned about, not blocked.
-- The invoice does not show paid and due amounts yet; that is #19.
+- The invoice shows plain payment words, but not paid and due amounts yet; that is #19. A due bKash order no longer prints "Paid: BDT 0", because it may be part paid.
+- An unpaid bKash order keeps its stock reserved until the owner cancels it. Cancelling a paid order does not record the refund (returns, #22/#23).
 - The manual "Advance received" button stays for advances paid in other ways.
 
 **Evidence:**
@@ -277,6 +278,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
   - an amount above the total is refused;
   - a reused TrxID is flagged;
   - two parts are approved;
+  - a frame order stays due after a ৳2,000 part, refuses ৳3,001 when ৳3,000 is owed, and is paid after the rest;
   - a second approval is refused;
   - submitting after the advance is received is refused;
   - after a reject, the same TrxID can be sent again.

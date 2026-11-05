@@ -55,7 +55,7 @@ export default function AdminPaymentsPage() {
         {method ? (
           <form key={`${method.enabled}-${method.account_number}`} onSubmit={saveSettings} className="mt-5 grid gap-3 rounded-xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-black">bKash settings</h2>
-            <label className="flex items-center gap-2 font-bold"><input type="checkbox" name="enabled" defaultChecked={method.enabled} />Customers can pay lens advances by bKash</label>
+            <label className="flex items-center gap-2 font-bold"><input type="checkbox" name="enabled" defaultChecked={method.enabled} />Customers can pay by bKash (frame orders in full, lens orders as an advance)</label>
             <label className="grid gap-1 font-bold">Receiving bKash number (personal, "Send Money")
               <input name="account_number" defaultValue={method.account_number} inputMode="tel" placeholder="01XXXXXXXXX" className={`${inputClass} max-w-xs`} />
             </label>

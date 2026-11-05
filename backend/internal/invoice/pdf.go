@@ -59,15 +59,16 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 		"Discount: BDT 0",
 		fmt.Sprintf("Delivery: BDT %d", order.DeliveryFee),
 		fmt.Sprintf("Total: BDT %d", order.Total),
-		"Payment method: " + order.PaymentMethod,
-		"Payment status: " + order.PaymentStatus,
+		"Payment method: " + label(paymentMethodLabel, order.PaymentMethod),
+		"Payment status: " + label(paymentStatusLabel, order.PaymentStatus),
 	} {
 		if err := layout.line(entry, 11); err != nil {
 			return nil, err
 		}
 	}
-	// Only unpaid states have a known collected amount (zero); others must not invent one.
-	if order.PaymentStatus == "unpaid" || order.PaymentStatus == "advance_due" {
+	// Only an unpaid cash-on-delivery order has a known collected amount (zero); a due bKash or advance order
+	// may already be part paid, so it must not claim zero.
+	if order.PaymentStatus == "unpaid" {
 		if err := layout.line(fmt.Sprintf("Paid: BDT 0 | Balance: BDT %d", order.Total), 11); err != nil {
 			return nil, err
 		}
@@ -108,4 +109,18 @@ func (l *pdfLayout) line(value string, size int) error {
 		l.y += float64(size) + 8
 	}
 	return nil
+}
+
+// Customer-facing words for the stored payment values; the invoice is read by customers, not developers.
+var (
+	paymentMethodLabel = map[string]string{"cash_on_delivery": "Cash on delivery", "advance": "Paid before delivery (bKash)"}
+	paymentStatusLabel = map[string]string{"unpaid": "Not paid yet", "advance_due": "Payment due", "advance_received": "Payment received"}
+)
+
+// label returns the readable word for value, or value itself if it has none.
+func label(labels map[string]string, value string) string {
+	if word, ok := labels[value]; ok {
+		return word
+	}
+	return value
 }

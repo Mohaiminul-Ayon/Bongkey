@@ -17,10 +17,12 @@ type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// orderStateSQL reads what checkPayable needs; an open lens price is any line whose price is not final.
+// orderStateSQL reads what checkPayable and settles need; an open lens price is any line whose price is not final.
 const orderStateSQL = `
 	SELECT o.payment_method, o.payment_status, o.order_status, o.total,
-		EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND NOT i.lens_price_final)
+		EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND NOT i.lens_price_final),
+		EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = o.id AND i.lens_kind <> 'none'),
+		COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id AND p.status = 'approved'), 0)
 	FROM orders o WHERE o.id = $1`
 
 // readOrderState reads an order's payable state, locking the order row when lock is true.
@@ -30,7 +32,7 @@ func readOrderState(ctx context.Context, q queryer, orderID int, lock bool) (Ord
 		query += " FOR UPDATE OF o"
 	}
 	var state OrderState
-	err := q.QueryRowContext(ctx, query, orderID).Scan(&state.PaymentMethod, &state.PaymentStatus, &state.OrderStatus, &state.Total, &state.PriceOpen)
+	err := q.QueryRowContext(ctx, query, orderID).Scan(&state.PaymentMethod, &state.PaymentStatus, &state.OrderStatus, &state.Total, &state.PriceOpen, &state.HasLens, &state.Paid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OrderState{}, ErrNotFound
 	}
@@ -98,7 +100,8 @@ func (s PostgresStore) Submit(ctx context.Context, orderID int, sub Submission) 
 		if err := checkPayable(state); err != nil {
 			return err
 		}
-		if sub.Amount > state.Total {
+		// More than is still owed is a typo or a mistake; the customer would need a refund.
+		if sub.Amount > state.Total-state.Paid {
 			return ErrInvalidPayment
 		}
 		err = tx.QueryRowContext(ctx, `
@@ -202,15 +205,20 @@ func (s PostgresStore) review(ctx context.Context, paymentID int, decide func(tx
 	})
 }
 
-// Approve marks the payment approved and the order's advance received, both or neither.
+// Approve marks the payment approved and, once settles says the order is paid, the order's payment received;
+// both writes happen in one transaction.
 func (s PostgresStore) Approve(ctx context.Context, paymentID int, adminID int64) error {
 	return s.review(ctx, paymentID, func(tx *sql.Tx, orderID int, state OrderState) error {
 		if err := checkApprovable(state); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1`, paymentID, adminID); err != nil {
+		var amount int
+		if err := tx.QueryRowContext(ctx, `
+			UPDATE payments SET status = 'approved', reviewed_by = $2, reviewed_at = NOW() WHERE id = $1 RETURNING amount`, paymentID, adminID).Scan(&amount); err != nil {
 			return err
+		}
+		if !settles(state, amount) {
+			return nil
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE orders SET payment_status = $2, updated_at = NOW() WHERE id = $1`, orderID, orderAdvanceDone)
 		return err

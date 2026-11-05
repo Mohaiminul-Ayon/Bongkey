@@ -84,12 +84,25 @@ func TestManualPaymentLifecyclePostgres(t *testing.T) {
 		return id
 	}
 	orderA, orderB := newOrder("A", true), newOrder("B", false)
+	// orderC is a frame-only order the customer chose to pay by bKash, so it must be paid in full.
+	var orderC int
+	if err := db.QueryRowContext(ctx, `
+		INSERT INTO orders (order_number, customer_name, customer_phone, shipping_address, city, subtotal, delivery_fee, total, payment_method, payment_status)
+		VALUES ($1, 'QA', '01700000000', 'Local', 'Dhaka', 4920, 80, 5000, 'advance', 'advance_due') RETURNING id`, "PAY-QA-C-"+suffix).Scan(&orderC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO order_items (order_id, product_name, quantity, unit_price, total_price) VALUES ($1, 'QA frame', 1, 4920, 4920)`, orderC); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
-		db.Exec(`DELETE FROM orders WHERE id IN ($1, $2)`, orderA, orderB)
+		db.Exec(`DELETE FROM orders WHERE id IN ($1, $2, $3)`, orderA, orderB, orderC)
 		db.Exec(`DELETE FROM admins WHERE id = $1`, adminID)
 	})
 
 	service := Service{Store: PostgresStore{DB: db}}
+	if err := service.SaveMethod(ctx, Method{Code: "bkash"}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.Submit(ctx, orderA, Submission{Method: "bkash", TrxID: "QA0000001", SenderNumber: "01712345678", Amount: 1000}); !errors.Is(err, ErrMethodOff) {
 		t.Fatalf("submitted while bKash is off: %v", err)
 	}
@@ -153,6 +166,31 @@ func TestManualPaymentLifecyclePostgres(t *testing.T) {
 	}
 	if _, err := service.Submit(ctx, orderA, Submission{Method: "bkash", TrxID: "QALATE0001", SenderNumber: "01712345678", Amount: 100}); !errors.Is(err, ErrNotPayable) {
 		t.Fatalf("submitted after the advance was received: %v", err)
+	}
+
+	// A frame order stays due after a part payment, refuses more than is owed, and is paid once the rest arrives.
+	part, err := service.Submit(ctx, orderC, Submission{Method: "bkash", TrxID: "QC" + suffix[len(suffix)-8:], SenderNumber: "01712345678", Amount: 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Approve(ctx, part.ID, adminID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT payment_status FROM orders WHERE id = $1`, orderC).Scan(&paymentStatus); err != nil || paymentStatus != "advance_due" {
+		t.Fatalf("frame order after a part payment = %q %v", paymentStatus, err)
+	}
+	if _, err := service.Submit(ctx, orderC, Submission{Method: "bkash", TrxID: "QCTOOMUCH1", SenderNumber: "01712345678", Amount: 3001}); !errors.Is(err, ErrInvalidPayment) {
+		t.Fatalf("more than owed: %v", err)
+	}
+	rest, err := service.Submit(ctx, orderC, Submission{Method: "bkash", TrxID: "QD" + suffix[len(suffix)-8:], SenderNumber: "01712345678", Amount: 3000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Approve(ctx, rest.ID, adminID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT payment_status FROM orders WHERE id = $1`, orderC).Scan(&paymentStatus); err != nil || paymentStatus != "advance_received" {
+		t.Fatalf("frame order paid in full = %q %v", paymentStatus, err)
 	}
 
 	// A rejected payment keeps its reason, and the customer may send the same ID again after a mistake.

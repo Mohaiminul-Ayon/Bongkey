@@ -90,6 +90,10 @@ type OrderState struct {
 	OrderStatus   string
 	Total         int
 	PriceOpen     bool
+	// HasLens means the order has a lens line; its "advance" is a part payment agreed by phone.
+	HasLens bool
+	// Paid is the sum of approved payments so far.
+	Paid int
 }
 
 // checkPayable is the one rule for "may this order take a payment now", used both for the
@@ -111,6 +115,13 @@ func checkApprovable(state OrderState) error {
 		state.PaymentStatus = orderAdvanceDue
 	}
 	return checkPayable(state)
+}
+
+// settles reports whether approving amount finishes the order's payment step.
+// A lens advance is any agreed part, so one approval is enough; a frame order paid by bKash
+// must be paid in full, otherwise a small payment would let the order be confirmed and shipped.
+func settles(state OrderState, amount int) bool {
+	return state.HasLens || state.Paid+amount >= state.Total
 }
 
 // Store persists methods and payments; each write that touches an order locks it and rechecks checkPayable.

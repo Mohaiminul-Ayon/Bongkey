@@ -112,6 +112,24 @@ func TestGuestViewShowsNumberOnlyWhenPayable(t *testing.T) {
 	}
 }
 
+// TestSettles keeps a frame order due until it is paid in full, while any approved lens advance is enough.
+func TestSettles(t *testing.T) {
+	for name, tc := range map[string]struct {
+		state  OrderState
+		amount int
+		want   bool
+	}{
+		"frame part payment":       {OrderState{Total: 2370}, 500, false},
+		"frame second part fills":  {OrderState{Total: 2370, Paid: 500}, 1870, true},
+		"frame paid in one":        {OrderState{Total: 2370}, 2370, true},
+		"lens advance is any part": {OrderState{Total: 6500, HasLens: true}, 2000, true},
+	} {
+		if got := settles(tc.state, tc.amount); got != tc.want {
+			t.Fatalf("%s: settles = %v", name, got)
+		}
+	}
+}
+
 // TestSaveMethodNeedsANumberToTurnOn refuses turning bKash on without a valid receiving number.
 func TestSaveMethodNeedsANumberToTurnOn(t *testing.T) {
 	store := &storeStub{}

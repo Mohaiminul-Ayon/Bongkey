@@ -11,6 +11,8 @@ import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
 const prescriptionLabel: Record<string, string> = { pending: "Waiting check", accepted: "Accepted", needs_new: "Asked for a new one" };
+const paymentMethodLabel: Record<string, string> = { cash_on_delivery: "Cash on delivery", advance: "Pays before shipping (bKash)" };
+const paymentStatusLabel: Record<string, string> = { unpaid: "Not paid yet", advance_due: "Payment due", advance_received: "Payment received" };
 
 // AdminOrderPage mounts the private detail request only after AdminGuard accepts the session.
 export default function AdminOrderPage() {
@@ -65,6 +67,7 @@ function OrderDetails({ id }: { id: string }) {
   const orderId = order?.id;
   // Lens orders and frame orders paid by bKash both pay before the order is confirmed.
   const payInAdvance = order?.payment_method === "advance";
+  const paid = payments.filter((p) => p.status === "approved").reduce((sum, p) => sum + p.amount, 0);
   // reloadPayments reads this order's bKash payments; an approval also changes the order, so it reloads both.
   const reloadPayments = useCallback(() => {
     if (!orderId) return;
@@ -85,7 +88,7 @@ function OrderDetails({ id }: { id: string }) {
         <div className="rounded-xl bg-white p-6 shadow-sm">
           <h1 className="text-3xl font-black">{order.order_number}</h1>
           <p className="mt-2 text-sm text-neutral-600">Invoice {order.invoice_number || "Pending"} · {new Date(order.created_at).toLocaleString("en-BD")}</p>
-          <p className="mt-3 font-bold">Order: {order.order_status} · Payment: {order.payment_status} ({order.payment_method})</p>
+          <p className="mt-3 font-bold">Order: {order.order_status} · Payment: {paymentStatusLabel[order.payment_status] ?? order.payment_status} · {paymentMethodLabel[order.payment_method] ?? order.payment_method}</p>
           <button type="button" disabled={busy} onClick={saveInvoice} className="site-button button-primary mt-4 disabled:opacity-50">Download invoice PDF</button>
         </div>
 
@@ -115,7 +118,8 @@ function OrderDetails({ id }: { id: string }) {
         ) : payInAdvance ? (
           <div className="rounded-xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-black">bKash payment</h2>
-            <p className="mt-2 text-sm leading-6">The customer chose to pay the full total by bKash. Approve the payment once you find it in your bKash app, then mark the order Confirmed.</p>
+            <p className="mt-2 text-sm leading-6">The customer chose to pay the full total by bKash. Approve each payment once you find it in your bKash app. The order counts as paid only when approved payments reach the total; then mark it Confirmed.</p>
+            <p className="mt-2 font-bold">Received {formatPrice(paid)} of {formatPrice(order.total)}{paid < order.total ? ` · ${formatPrice(order.total - paid)} still due` : ""}</p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {order.payment_status === "advance_received" ? <strong className="text-green-800">Payment received</strong> : (
                 <button type="button" disabled={busy || order.order_status !== "pending"} onClick={() => run(() => markAdvanceReceived(order.id))} className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-bold disabled:opacity-50">Paid another way</button>
