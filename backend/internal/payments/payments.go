@@ -209,6 +209,12 @@ func (s Service) Method(ctx context.Context, code string) (Method, error) {
 	return s.Store.Method(ctx, code)
 }
 
+// Enabled reports whether customers can choose a method at checkout.
+func (s Service) Enabled(ctx context.Context, code string) (bool, error) {
+	method, err := s.Method(ctx, code)
+	return method.Enabled, err
+}
+
 // List returns payments for the owner, newest first; status "" means every status.
 func (s Service) List(ctx context.Context, status string) ([]Payment, error) {
 	if status != "" && status != StatusPending && status != StatusApproved && status != StatusRejected {

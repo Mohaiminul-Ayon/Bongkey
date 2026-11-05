@@ -22,6 +22,7 @@ type Order = {
   total: number;
   order_status: string;
   lens_order: boolean;
+  pay_in_advance: boolean;
   lens_price_pending: boolean;
 };
 
@@ -130,8 +131,8 @@ export default function OrderSuccessPage() {
                 {whatsAppNumber ? <a className="site-button button-primary mt-3 inline-block" href={orderChatLink(order)} target="_blank" rel="noopener noreferrer">Chat on WhatsApp about order {order.order_number}</a> : <p className="mt-2">We will contact you on your phone number.</p>}
               </div>
             ) : null}
-            {order.lens_order && accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} /> : null}
-            {!order.lens_order ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p> : null}
+            {order.pay_in_advance && accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} lensOrder={order.lens_order} /> : null}
+            {!order.pay_in_advance ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p> : null}
             <button type="button" disabled={busy || !accessToken} onClick={saveInvoice} className="site-button button-primary w-fit disabled:opacity-50">Download invoice PDF</button>
             {error ? <p role="alert" className="text-red-700">{error}</p> : null}
           </div>

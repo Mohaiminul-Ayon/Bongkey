@@ -31,6 +31,7 @@ type orderRequest struct {
 	City                string             `json:"city"`
 	DeliveryNote        string             `json:"delivery_note"`
 	ExpectedDeliveryFee *int               `json:"expected_delivery_fee"`
+	PaymentMethod       string             `json:"payment_method"`
 	Items               []orderItemRequest `json:"items"`
 }
 
@@ -90,7 +91,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		CustomerName:   req.CustomerName, CustomerPhone: req.CustomerPhone,
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
-		ExpectedDeliveryFee: req.ExpectedDeliveryFee, Items: items,
+		ExpectedDeliveryFee: req.ExpectedDeliveryFee, PaymentMethod: req.PaymentMethod, Items: items,
 	})
 	if err != nil {
 		switch {
@@ -102,6 +103,8 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "item unavailable or out of stock"})
 		case errors.Is(err, orders.ErrLensUnavailable):
 			c.JSON(http.StatusConflict, gin.H{"error": "a lens type in your bag is no longer available for that frame; please choose again"})
+		case errors.Is(err, orders.ErrPaymentUnavailable):
+			c.JSON(http.StatusConflict, gin.H{"error": "bKash is not available right now; please choose cash on delivery"})
 		case errors.Is(err, orders.ErrIdempotencyConflict):
 			c.JSON(http.StatusConflict, gin.H{"error": "idempotency key was reused with different order data"})
 		case errors.Is(err, orders.ErrDeliveryUnavailable):

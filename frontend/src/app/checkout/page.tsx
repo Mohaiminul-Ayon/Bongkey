@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { createOrder, fetchLensPackages, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type LensPackage, type OrderPayload } from "@/lib/api";
+import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
@@ -81,6 +81,8 @@ export default function CheckoutPage() {
   const [email, setEmail] = useState("");
   const [emailCode, setEmailCode] = useState("");
   const [emailProof, setEmailProof] = useState("");
+  const [bkashOn, setBkashOn] = useState(false);
+  const [payWith, setPayWith] = useState<"cash_on_delivery" | "bkash">("cash_on_delivery");
   const [emailBusy, setEmailBusy] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
   // Prescription files by bag line; files stay in memory and are sent only with the order.
@@ -100,6 +102,11 @@ export default function CheckoutPage() {
       setPriceCheck("failed");
     }
   }
+
+  useEffect(() => {
+    // If this fails, only cash on delivery is offered; the server refuses bKash while it is off anyway.
+    fetchPaymentOptions().then((options) => setBkashOn(options.bkash)).catch(() => setBkashOn(false));
+  }, []);
 
   useEffect(() => {
     if (ready) void checkCurrentPrices();
@@ -189,6 +196,7 @@ export default function CheckoutPage() {
         city: district,
         delivery_note: String(form.get("note") ?? ""),
         expected_delivery_fee: deliveryFee,
+        ...(hasLens ? {} : { payment_method: bkashOn ? payWith : "cash_on_delivery" }),
         items: items.map((item) => ({
           product_id: item.product.id!,
           quantity: item.quantity,
@@ -264,12 +272,23 @@ export default function CheckoutPage() {
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
             {hasLens ? <>
               <p className="text-sm font-black text-[#173c34]">Payment: advance before we make your lenses (no cash on delivery)</p>
-              <p className="mt-1 text-sm leading-6 text-[#173c34]">We check your prescription{pricePending ? ", confirm the final lens price" : ""} and call you to collect the advance by bKash. Nothing is made before that.</p>
+              <p className="mt-1 text-sm leading-6 text-[#173c34]">We check your prescription{pricePending ? " and confirm the final lens price by phone" : ""}. Then you pay the advance by bKash on the order page. Nothing is made before that.</p>
               <p className="mt-2 text-sm leading-6 text-[#173c34]">Lenses are made for you and can&apos;t be returned. The frame can be exchanged; a new lens is paid again.</p>
-            </> : <>
-              <p className="text-sm font-black text-[#173c34]">Payment method: Cash on Delivery</p>
-              <p className="mt-1 text-sm leading-6 text-[#173c34]">Invoice will be generated after order confirmation.</p>
-            </>}
+            </> : (
+              <fieldset className="grid gap-2">
+                <legend className="text-sm font-black text-[#173c34]">Payment method</legend>
+                <label className="flex items-start gap-2 text-sm text-[#173c34]">
+                  <input type="radio" name="pay_with" className="mt-1" checked={!bkashOn || payWith === "cash_on_delivery"} onChange={() => setPayWith("cash_on_delivery")} />
+                  <span><strong>Cash on delivery</strong> — pay when you receive the order.</span>
+                </label>
+                {bkashOn ? (
+                  <label className="flex items-start gap-2 text-sm text-[#173c34]">
+                    <input type="radio" name="pay_with" className="mt-1" checked={payWith === "bkash"} onChange={() => setPayWith("bkash")} />
+                    <span><strong>bKash now</strong> — send the total by bKash on the next page. We ship after we check your payment.</span>
+                  </label>
+                ) : null}
+              </fieldset>
+            )}
           </div>
           {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : "Place order"}</Button> : null}
         </form>

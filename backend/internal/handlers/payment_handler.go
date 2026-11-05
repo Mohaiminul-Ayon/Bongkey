@@ -133,6 +133,16 @@ func (h PaymentHandler) RejectPayment(c *gin.Context) {
 	respondPaymentReview(c, h.Service.Reject(c.Request.Context(), paymentID, c.GetInt64("admin_id"), req.Reason))
 }
 
+// PaymentOptions tells the checkout page which online payments it may offer; it never returns the receiving number.
+func (h PaymentHandler) PaymentOptions(c *gin.Context) {
+	enabled, err := h.Service.Enabled(c.Request.Context(), payments.MethodBkash)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load payment options"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"bkash": enabled})
+}
+
 // PaymentMethod returns one method's settings for the owner.
 func (h PaymentHandler) PaymentMethod(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")

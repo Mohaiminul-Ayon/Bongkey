@@ -11,14 +11,16 @@ type BkashPaymentBoxProps = {
   token: string;
   orderNumber: string;
   total: number;
+  /** lensOrder pays an advance agreed by phone; other orders pay the full total */
+  lensOrder: boolean;
 };
 
 const statusLabel = { pending: "Waiting for our check", approved: "Received", rejected: "Not accepted" } as const;
 const statusClass = { pending: "bg-amber-50 text-[#7b531c]", approved: "bg-green-50 text-green-800", rejected: "bg-red-50 text-red-700" } as const;
 
-/** BkashPaymentBox lets a lens-order customer send the advance by bKash and report the transaction ID.
+/** BkashPaymentBox lets a customer who pays before shipping send money by bKash and report the transaction ID.
  * Nothing shown here means "paid" until the owner approves it. */
-export function BkashPaymentBox({ orderId, token, orderNumber, total }: BkashPaymentBoxProps) {
+export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder }: BkashPaymentBoxProps) {
   const [view, setView] = useState<GuestPaymentView | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,10 +64,10 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total }: BkashPay
 
   return (
     <div className="mt-4 rounded-md border border-[#e2136e]/30 bg-[#fdf2f7] p-4 text-sm text-neutral-900">
-      <h2 className="text-lg font-black text-[#b0105a]">Pay the advance by bKash</h2>
+      <h2 className="text-lg font-black text-[#b0105a]">{lensOrder ? "Pay the advance by bKash" : "Pay by bKash"}</h2>
       {view.payable === "price_pending" ? <p className="mt-2">We first confirm your lens price by phone. After that you can pay the advance here.</p> : null}
-      {view.payable === "off" ? <p className="mt-2">We will call you to collect the advance.</p> : null}
-      {view.payable === "not_due" && received ? <p className="mt-2 font-bold text-green-800">Advance received. Thank you! We start making your lenses now.</p> : null}
+      {view.payable === "off" ? <p className="mt-2">We will call you about the payment.</p> : null}
+      {view.payable === "not_due" && received ? <p className="mt-2 font-bold text-green-800">Payment received. Thank you! {lensOrder ? "We start making your lenses now." : "We will ship your order soon."}</p> : null}
       {view.payable === "yes" && view.method ? (
         <>
           <ol className="mt-3 list-decimal space-y-1 pl-5">
@@ -74,7 +76,7 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total }: BkashPay
               Send to <strong className="font-mono text-base">{view.method.account_number}</strong>{" "}
               <button type="button" onClick={() => copyNumber(view.method!.account_number)} className="rounded border border-neutral-300 bg-white px-2 py-0.5 text-xs font-bold">{copied ? "Copied" : "Copy"}</button>
             </li>
-            <li>Amount: the advance we agreed on the phone (order total {formatPrice(total)}).</li>
+            <li>Amount: {lensOrder ? <>the advance we agreed on the phone (order total {formatPrice(total)})</> : <strong>{formatPrice(total)}</strong>}.</li>
             <li>Reference: <strong>{orderNumber}</strong></li>
             <li>Type the <strong>TrxID</strong> from your bKash SMS below.</li>
           </ol>

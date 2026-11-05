@@ -229,14 +229,19 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence:** unit tests in [checkout_lens_test.go](../backend/internal/orders/checkout_lens_test.go), [prescriptions_test.go](../backend/internal/lens/prescriptions_test.go), [lens_order_handler_test.go](../backend/internal/handlers/lens_order_handler_test.go); local PostgreSQL [TestLensOrderLifecyclePostgres](../backend/internal/orders/lens_order_integration_test.go) runs checkout → price above limit stays open → owner price updates order and invoice → confirm blocked at each step → confirmed. Browser: lens chooser, custom lens through bag to checkout.
 
-## PAY-01 — Manual bKash advance (#18)
+## PAY-01 — Manual bKash payment (#18)
 
 **Status:** Built 2026-11-05 on `feat/payment-manual`. The owner has not yet entered the real receiving number or approved a real payment.
 
-**Owner decisions:** bKash only, to the owner's personal number by **Send Money**, for now. The number and instructions are set in Admin → Payments, not in code or `.env`. Only lens (advance) orders pay online; frame-only orders stay COD. SSLCOMMERZ comes in phase 2, after the TIN and trade license.
+**Owner decisions:** bKash only, to the owner's personal number by **Send Money**, for now. The number and instructions are set in Admin → Payments, not in code or `.env`. Every frame-only order offers **cash on delivery or bKash now**. Lens orders never offer cash on delivery: they always pay an advance. SSLCOMMERZ comes in phase 2, after the TIN and trade license.
 
 **Request:** `POST /api/orders/106/payments` with `Authorization: Bearer <guest token>` and `{"method":"bkash","trx_id":"9abc12xy34","sender_number":"+8801712345678","amount":2000}`.
 
+0. **Choice at checkout:** the [checkout page](../frontend/src/app/checkout/page.tsx) calls `GET /api/payment-options` ([PaymentOptions](../backend/internal/handlers/payment_handler.go)) and shows the bKash choice only while it is on. Lens carts send no choice. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go) passes `payment_method` to [CheckoutService.Place](../backend/internal/orders/checkout.go), whose `paymentFor` decides:
+   - a lens order with `cash_on_delivery`, or an unknown method, gets 400;
+   - a lens order is always saved as `advance` / `advance_due`, even while bKash is off, because the advance can be collected by phone;
+   - a frame order choosing `bkash` while it is off gets 409, and otherwise it is saved as `advance` / `advance_due`.
+   The choice is part of the retry fingerprint, so changing it on a retry is a 409, not a second order. The order page now reads `pay_in_advance` (payment method) and `lens_order` (any lens line) separately, so a frame paid by bKash is not treated as a lens order. Confirming any `advance` order still waits for the payment ([LensReadiness](../backend/internal/orders/fulfillment_repository.go)).
 1. [BkashPaymentBox](../frontend/src/components/BkashPaymentBox.tsx) on the [order page](../frontend/src/app/order-success/[orderId]/page.tsx) first loads `GET /api/orders/:id/payments`. It shows the receiving number only when the answer says `payable: "yes"`.
 2. [routes.go](../backend/internal/routes/routes.go:84) registers both guest routes with no admin middleware. Order access is checked inside the handler.
 3. [PaymentHandler.SubmitPayment](../backend/internal/handlers/payment_handler.go:56) → `guestOrderID` (line 22) checks the Bearer token with `orders.AccessService.Guest`. A missing or wrong token gets 404, so an outsider cannot tell whether the order exists. The body is limited to 2 KB. Only `method`, `trx_id`, `sender_number` and `amount` are read; an extra `status` is ignored.
@@ -253,7 +258,8 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Failure paths:**
 - Lens price still open: the box shows "we first confirm your lens price", and a direct POST gets 409.
-- bKash turned off: the box says "we will call you", and a POST gets 409.
+- bKash turned off: the checkout shows only cash on delivery, a forced `bkash` choice on a frame order gets 409, and the order page box says "we will call you".
+- A lens cart that sends `cash_on_delivery`: 400.
 - Second approval of the same payment: 409.
 - Admin routes without login: 401 from `AdminAuth` before any handler runs.
 
@@ -280,6 +286,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
   - an extra `status: approved` field: ignored, the payment stays pending;
   - a repeat submit: same id.
 - Browser: the box showed the number, instructions and steps, and a lowercase TrxID sent from the form came back uppercased as "Waiting for our check".
+- Checkout choice: unit test `TestCheckoutPaymentChoice` covers every frame/lens and on/off case. In the browser, a lens bag showed only the advance text, and a frame bag showed both choices. A frame order paid by bKash showed "Pay by bKash" with the full total. No real order was placed, because checkout needs an email code.
 
 ## Stories without a completed request flow
 

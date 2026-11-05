@@ -46,7 +46,20 @@ var (
 	ErrDeliveryFeeChanged = errors.New("delivery fee changed")
 	// ErrLensUnavailable means the lens type is disabled or does not fit the chosen frame.
 	ErrLensUnavailable = errors.New("lens type unavailable for this frame")
+	// ErrPaymentUnavailable means the customer chose an online payment the owner has turned off.
+	ErrPaymentUnavailable = errors.New("payment method unavailable")
 )
+
+// Checkout payment choices. An empty choice keeps the old default: cash on delivery, or an advance for lenses.
+const (
+	PayCashOnDelivery = "cash_on_delivery"
+	PayBkash          = "bkash"
+)
+
+// PaymentOptions tells checkout whether an online payment method is turned on.
+type PaymentOptions interface {
+	Enabled(ctx context.Context, code string) (bool, error)
+}
 
 // CheckoutItem is one requested product and lens choice.
 // Empty lens fields are left out of the retry fingerprint, so frame-only retries still match orders placed before lenses existed.
@@ -103,7 +116,9 @@ type CheckoutRequest struct {
 	City                string
 	DeliveryNote        string
 	ExpectedDeliveryFee *int
-	Items               []CheckoutItem
+	// PaymentMethod is the customer's choice: "", PayCashOnDelivery or PayBkash.
+	PaymentMethod string
+	Items         []CheckoutItem
 }
 
 // CheckoutReceipt contains the accepted order totals and one-time guest token.
@@ -152,6 +167,8 @@ type CheckoutService struct {
 	OrderTokenSecret    string
 	DeliveryFeeProvider DeliveryFeeProvider
 	Prescriptions       PrescriptionSaver
+	// PaymentOptions may be nil; then no online payment can be chosen for a frame-only order.
+	PaymentOptions PaymentOptions
 }
 
 // Place reserves products in a stable order and commits the order and invoice together.
@@ -176,10 +193,9 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 	if prescriptions > maxPrescriptionLines {
 		return CheckoutReceipt{}, ErrInvalidCheckout
 	}
-	// Lenses are cut to one customer's prescription, so lens orders need an advance instead of cash on delivery.
-	paymentMethod, paymentStatus := "cash_on_delivery", "unpaid"
-	if hasLens {
-		paymentMethod, paymentStatus = "advance", "advance_due"
+	paymentMethod, paymentStatus, err := s.paymentFor(ctx, request.PaymentMethod, hasLens)
+	if err != nil {
+		return CheckoutReceipt{}, err
 	}
 	productIDs := make([]int, 0, len(quantities))
 	for id := range quantities {
@@ -390,6 +406,33 @@ func ValidIdempotencyKey(key string) bool {
 	return true
 }
 
+// paymentFor turns the customer's choice into the saved payment method and status.
+// Lenses are cut to one customer's prescription, so lens orders always pay an advance and never cash on delivery;
+// their advance may still be collected by phone, so bKash being off does not block them.
+// A frame-only order may choose bKash only while the owner has it turned on, and is then paid in full before shipping.
+func (s CheckoutService) paymentFor(ctx context.Context, choice string, hasLens bool) (string, string, error) {
+	switch {
+	case choice != "" && choice != PayCashOnDelivery && choice != PayBkash:
+		return "", "", ErrInvalidCheckout
+	case hasLens && choice == PayCashOnDelivery:
+		return "", "", ErrInvalidCheckout
+	case hasLens:
+		return "advance", "advance_due", nil
+	case choice != PayBkash:
+		return "cash_on_delivery", "unpaid", nil
+	case s.PaymentOptions == nil:
+		return "", "", ErrPaymentUnavailable
+	}
+	enabled, err := s.PaymentOptions.Enabled(ctx, PayBkash)
+	if err != nil {
+		return "", "", err
+	}
+	if !enabled {
+		return "", "", ErrPaymentUnavailable
+	}
+	return "advance", "advance_due", nil
+}
+
 // checkoutRequestHash excludes proof and expected fee so accepted retries retain the original receipt after either changes.
 func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	// PrescriptionFileURL stays empty in the fingerprint so retries of orders accepted before it was removed still match.
@@ -397,10 +440,12 @@ func checkoutRequestHash(request CheckoutRequest) (string, error) {
 		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
 		EmailVerified                                                                                        bool
 		Items                                                                                                []CheckoutItem
+		// PaymentMethod is left out when empty so retries of orders placed before the choice existed still match.
+		PaymentMethod string `json:",omitempty"`
 	}{
 		CustomerName: request.CustomerName, CustomerPhone: request.CustomerPhone, CustomerEmail: request.CustomerEmail,
 		ShippingAddress: request.ShippingAddress, City: request.City, DeliveryNote: request.DeliveryNote,
-		EmailVerified: request.EmailVerified, Items: request.Items,
+		EmailVerified: request.EmailVerified, Items: request.Items, PaymentMethod: request.PaymentMethod,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

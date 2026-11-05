@@ -44,6 +44,8 @@ export type OrderPayload = {
   city: string;
   delivery_note: string;
   expected_delivery_fee: number;
+  /** payment_method is sent only for frame-only carts; lens orders always pay an advance. */
+  payment_method?: "cash_on_delivery" | "bkash";
   items: OrderItemPayload[];
 };
 
@@ -246,6 +248,11 @@ export async function fetchCategories() {
 }
 
 /** fetchDeliverySettings keeps the cart estimate aligned with the server setting. */
+/** fetchPaymentOptions tells checkout whether bKash can be offered right now. */
+export async function fetchPaymentOptions() {
+  return request<{ bkash: boolean }>("/api/payment-options", { cache: "no-store" });
+}
+
 export async function fetchDeliverySettings() {
   return request<DeliverySettings>("/api/delivery-settings", { cache: "no-store" });
 }
@@ -368,6 +375,7 @@ export async function fetchOrder(id: string, token: string) {
     total: number;
     order_status: string;
     lens_order: boolean;
+    pay_in_advance: boolean;
     lens_price_pending: boolean;
   }>(`/api/orders/${id}`, {
     headers: { Authorization: `Bearer ${token}` },

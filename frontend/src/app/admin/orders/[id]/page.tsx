@@ -63,13 +63,14 @@ function OrderDetails({ id }: { id: string }) {
   }, [id]);
 
   const orderId = order?.id;
-  const lensOrder = order?.payment_method === "advance";
+  // Lens orders and frame orders paid by bKash both pay before the order is confirmed.
+  const payInAdvance = order?.payment_method === "advance";
   // reloadPayments reads this order's bKash payments; an approval also changes the order, so it reloads both.
   const reloadPayments = useCallback(() => {
     if (!orderId) return;
     fetchAdminOrderPayments(orderId).then(setPayments).catch(() => setPayments([]));
   }, [orderId]);
-  useEffect(() => { if (lensOrder) reloadPayments(); }, [lensOrder, reloadPayments]);
+  useEffect(() => { if (payInAdvance) reloadPayments(); }, [payInAdvance, reloadPayments]);
 
   const lensItems = order?.items.filter((item) => item.lens_kind !== "none") ?? [];
   const openPrices = lensItems.some((item) => !item.lens_price_final);
@@ -108,6 +109,19 @@ function OrderDetails({ id }: { id: string }) {
             </div>
             <div className="mt-5 border-t pt-4">
               <h3 className="mb-3 font-black">bKash payments</h3>
+              <PaymentReviewList payments={payments} onChanged={() => void run(async () => reloadPayments())} />
+            </div>
+          </div>
+        ) : payInAdvance ? (
+          <div className="rounded-xl bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-black">bKash payment</h2>
+            <p className="mt-2 text-sm leading-6">The customer chose to pay the full total by bKash. Approve the payment once you find it in your bKash app, then mark the order Confirmed.</p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {order.payment_status === "advance_received" ? <strong className="text-green-800">Payment received</strong> : (
+                <button type="button" disabled={busy || order.order_status !== "pending"} onClick={() => run(() => markAdvanceReceived(order.id))} className="rounded-md border border-neutral-300 px-3 py-2 text-sm font-bold disabled:opacity-50">Paid another way</button>
+              )}
+            </div>
+            <div className="mt-4">
               <PaymentReviewList payments={payments} onChanged={() => void run(async () => reloadPayments())} />
             </div>
           </div>

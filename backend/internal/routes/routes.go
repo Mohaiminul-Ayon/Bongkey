@@ -43,13 +43,15 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
 	}}
-	paymentHandler := handlers.PaymentHandler{Service: payments.Service{Store: payments.PostgresStore{DB: database.DB}}, Orders: orderAccess.Service}
+	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}}
+	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
 		Store:               orders.PostgresCheckoutStore{DB: database.DB},
 		EmailProofSecret:    cfg.JWTSecret,
 		OrderTokenSecret:    cfg.JWTSecret,
 		DeliveryFeeProvider: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}},
 		Prescriptions:       prescriptions,
+		PaymentOptions:      paymentService,
 	}}
 	deliverySettings := handlers.DeliverySettingsHandler{Service: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}}}
 	emailCodes := handlers.EmailOTPHandler{Service: emailotp.Service{
@@ -81,6 +83,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/orders", checkout.CreateOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
+	router.GET("/api/payment-options", paymentHandler.PaymentOptions)
 	router.GET("/api/orders/:id/payments", paymentHandler.GuestPayments)
 	router.POST("/api/orders/:id/payments", paymentHandler.SubmitPayment)
 	router.POST("/api/email-otp/request", emailCodes.Request)
