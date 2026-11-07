@@ -33,4 +33,6 @@ type Product struct {
 	IsFeatured      bool      `json:"is_featured"`
 	IsActive        bool      `json:"is_active"`
 	Variants        []Product `json:"variants,omitempty"`
+	// LowStockThreshold puts the item on the owner's low-stock list once stock falls to it; 0 means no alert.
+	LowStockThreshold int `json:"low_stock_threshold"`
 }

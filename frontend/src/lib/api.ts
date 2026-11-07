@@ -31,6 +31,7 @@ export type ApiProduct = {
   stock_quantity: number;
   image_url: string;
   try_on_image_url: string;
+  low_stock_threshold?: number;
   is_featured: boolean;
   is_active: boolean;
 };
@@ -530,6 +531,22 @@ export async function downloadInvoice(id: string, token: string, admin = false) 
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** LowStockItem is a frame or option at or below the owner's alert level. */
+export type LowStockItem = { id: number; root_id: number; name: string; sku: string; color: string; size: string; stock_quantity: number; low_stock_threshold: number };
+
+/** StockChange is one stock history row; order_number is set when an order caused it. */
+export type StockChange = { change: number; stock_after: number; reason: string; order_number: string; created_at: string };
+
+/** fetchLowStock lists items at or below their alert level, for the owner. */
+export function fetchLowStock() {
+  return adminRequest<LowStockItem[]>("/api/admin/stock/low", { cache: "no-store" });
+}
+
+/** fetchStockHistory lists one item's latest stock changes, for the owner. */
+export function fetchStockHistory(productId: number) {
+  return adminRequest<StockChange[]>(`/api/admin/products/${productId}/stock-history`, { cache: "no-store" });
+}
+
 function title(value: string) {
   return value
     .replaceAll("_", " ")
@@ -568,6 +585,7 @@ export function toProduct(product: ApiProduct): Product {
     description: product.description,
     imageUrl: product.image_url,
     tryOnImageUrl: product.try_on_image_url,
+    lowStockThreshold: product.low_stock_threshold ?? 0,
     isFeatured: product.is_featured,
     isActive: product.is_active,
   };

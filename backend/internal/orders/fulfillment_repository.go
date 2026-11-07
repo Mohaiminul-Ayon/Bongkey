@@ -54,6 +54,10 @@ func (p postgresFulfillmentTx) RestoreStock(ctx context.Context, orderID int) er
 	`, orderID); err != nil {
 		return err
 	}
+	// Labels the restock for the stock_history trigger; the settings end with this transaction.
+	if _, err := p.Tx.ExecContext(ctx, `SELECT set_config('bongkey.stock_reason', 'order_cancelled', true), set_config('bongkey.stock_order', $1::TEXT, true)`, orderID); err != nil {
+		return err
+	}
 	_, err := p.Tx.ExecContext(ctx, `
 		WITH restored AS (
 			SELECT product_id, SUM(quantity)::INTEGER AS quantity

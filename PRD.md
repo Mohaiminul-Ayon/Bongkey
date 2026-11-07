@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.32
+Version: 2.38
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -514,6 +514,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | ADV-01 | High / REQ-07,08 | Owner sets one advance rule for frame-only cash-on-delivery orders (none, delivery charge, percent, fixed) and one for lens orders (full, percent, fixed); any lens makes the whole order a lens order; each order saves its rule, required advance and paid amount; confirmation waits for the advance; invoice shows paid, balance and due | Built 2026-11-05 (#19): Go unit tests, local PostgreSQL lens 50% rule with price change and rule-change isolation, browser checkout preview, order page and invoice PDF. Defaults: lens full, frame delivery charge first. No real order yet |
 | TRACK-01 | High / REQ-08,09 | Each status step saves its time once (delivered after shipped, never overwritten); owner records courier, tracking code and https link; public Track page by order number + checkout phone (rate limited, masked name, city only); private order page shows the timeline; any unpaid balance may be paid by bKash until delivery | Built 2026-11-05 (#21): Go unit tests, local PostgreSQL step times/constraint/lookup, HTTP privacy checks, browser Track page, order page and phone-width header. Courier API automation out of scope |
 | ACCOUNT-01 | R2 / REQ-05 | Explicit verified-email account signup/login; one customer table; orders use nullable `customer_id`; customer-confirmed historical linking updates eligible verified-email guest orders without copying data | Deferred until after pilot feedback; do not scaffold during R1 |
+| STOCK-01 | High / REQ-02 | Low-stock alert level per frame/option, dashboard low-stock list, stock history with reason and order for every change (checkout, cancellation, admin edit, new item) written in the same transaction (#20) | Built 2026-11-07: local PostgreSQL race, rollback, checkout link, cancellation and admin-edit history tests; live admin check with a temporary QA owner. Low-stock email not included |
 
 ### Separate execution checklists (2026-10-15)
 
@@ -716,3 +717,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-05 | 2.30 | ADV-01: configurable advance rules (lens full, frame delivery charge first by default), saved per order with paid amount; confirmation waits for the advance; invoice paid/balance/due. Owner chose bKash only: Nagad leaves R1. |
 | 2026-11-05 | 2.31 | TRACK-01: delivery step times, courier tracking, public Track page (order number + phone, masked), and optional bKash payment of the remaining balance until delivery. |
 | 2026-11-07 | 2.32 | Pilot scope decisions (13.2): Brevo emails with database-first sending, owner 9 PM summary and instant bKash alert, invoice email after a confirmed address; guest checkout without email code, with honeypot, red flags and an order slip; Google sign-in before the pilot with phone-checked order linking; browser wishlist, price highlight, card add-to-cart, gradual shadcn/ui; RAG chatbot and AR/3D try-on after the pilot; Oracle Cloud hosting. |
+| 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |

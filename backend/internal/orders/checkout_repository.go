@@ -27,6 +27,10 @@ func (s PostgresCheckoutStore) InTransaction(ctx context.Context, work func(Chec
 			resultErr = fmt.Errorf("rollback checkout: %w", err)
 		}
 	}()
+	// Labels this transaction's stock reservations for the stock_history trigger (021_stock_history.sql).
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('bongkey.stock_reason', 'order_placed', true)`); err != nil {
+		return err
+	}
 	if err := work(postgresCheckoutTx{Tx: tx}); err != nil {
 		return err
 	}
@@ -99,6 +103,11 @@ func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutReq
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash,
 		terms.Method, terms.Status, terms.AdvanceMode, terms.AdvanceValue, terms.AdvanceRequired)
+	if err != nil {
+		return 0, "", err
+	}
+	// Stock was reserved before the order existed; link those history rows from this transaction to it now.
+	_, err = p.Tx.ExecContext(ctx, `UPDATE stock_history SET order_id = $1 WHERE tx_id = txid_current() AND order_id IS NULL AND reason = 'order_placed'`, id)
 	return id, number, err
 }
 
