@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/lib/pq"
 )
 
 // PostgresReader reads order details and the guest access hash from PostgreSQL.
@@ -25,6 +27,8 @@ type AdminOrder struct {
 	Total         int    `json:"total"`
 	OrderStatus   string `json:"order_status"`
 	CreatedAt     string `json:"created_at"`
+	// RiskFlags are the red-flag codes from checkout; staff look twice at these orders.
+	RiskFlags []string `json:"risk_flags"`
 }
 
 // AdminOrderPageSize bounds one admin order list response so the page stays fast as orders grow.
@@ -79,7 +83,7 @@ func (r PostgresReader) ListAdmin(ctx context.Context, beforeID int, filter Admi
 		return nil, errors.New("order storage unavailable")
 	}
 	rows, err := r.DB.QueryContext(ctx, `
-		SELECT id, order_number, customer_name, customer_phone, city, total, order_status, created_at
+		SELECT id, order_number, customer_name, customer_phone, city, total, order_status, created_at, risk_flags
 		FROM orders
 		WHERE ($1 = 0 OR id < $1)
 			AND ($3 = '' OR position(lower($3) IN lower(order_number)) > 0 OR position($3 IN customer_phone) > 0)
@@ -95,7 +99,7 @@ func (r PostgresReader) ListAdmin(ctx context.Context, beforeID int, filter Admi
 	orders := make([]AdminOrder, 0)
 	for rows.Next() {
 		var order AdminOrder
-		if err := rows.Scan(&order.ID, &order.OrderNumber, &order.CustomerName, &order.CustomerPhone, &order.City, &order.Total, &order.OrderStatus, &order.CreatedAt); err != nil {
+		if err := rows.Scan(&order.ID, &order.OrderNumber, &order.CustomerName, &order.CustomerPhone, &order.City, &order.Total, &order.OrderStatus, &order.CreatedAt, pq.Array(&order.RiskFlags)); err != nil {
 			return nil, err
 		}
 		orders = append(orders, order)
@@ -114,7 +118,7 @@ const findOrderSQL = `
 		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND x.lens_kind <> 'none'),
 		o.advance_mode, o.advance_required, o.amount_paid,
 		o.created_at, o.confirmed_at, o.preparing_at, o.shipped_at, o.delivered_at, o.cancelled_at,
-		o.courier_name, o.tracking_code, o.tracking_url
+		o.courier_name, o.tracking_code, o.tracking_url, o.risk_flags
 	FROM orders o LEFT JOIN invoices i ON i.order_id = o.id
 	WHERE `
 
@@ -138,7 +142,7 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 		&record.LensOrder, &record.AdvanceMode, &record.AdvanceRequired, &record.AmountPaid,
 		&record.Tracking.PlacedAt, &record.Tracking.ConfirmedAt, &record.Tracking.PreparingAt, &record.Tracking.ShippedAt,
 		&record.Tracking.DeliveredAt, &record.Tracking.CancelledAt,
-		&record.Tracking.Courier, &record.Tracking.TrackingCode, &record.Tracking.TrackingURL,
+		&record.Tracking.Courier, &record.Tracking.TrackingCode, &record.Tracking.TrackingURL, pq.Array(&record.RiskFlags),
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound

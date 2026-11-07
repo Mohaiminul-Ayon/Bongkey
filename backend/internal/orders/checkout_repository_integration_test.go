@@ -48,7 +48,7 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
 	}
 	// Status changes write the delivery-tracking times, so that migration is needed by every order test.
-	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql"} {
+	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql", "019_order_risk_flags.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -158,7 +158,7 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	}
 	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings}
 	request := CheckoutRequest{
-		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
 	}
@@ -220,7 +220,7 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	request.ExpectedDeliveryFee = &fee
 	access := AccessService{Reader: PostgresReader{DB: db}, EmailProofSecret: emailSecret}
 	orderID := fmt.Sprint(receipt.ID)
-	order, err := access.GuestInvoice(ctx, orderID, proof)
+	order, err := access.GuestDetail(ctx, orderID, proof)
 	if err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
 		t.Fatal("verified email could not access its stored invoice summary")
 	}
@@ -275,11 +275,11 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if _, err := access.Guest(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
 		t.Fatal("another email accessed the invoice summary")
 	}
-	guestInvoice, err := access.GuestInvoice(ctx, orderID, proof)
+	guestInvoice, err := access.GuestDetail(ctx, orderID, proof)
 	if err != nil || guestInvoice.InvoiceNumber != receipt.InvoiceNumber || guestInvoice.InvoiceIssuedAt == "" || len(guestInvoice.Items) != 1 || guestInvoice.Items[0].UnitPrice != 100 {
 		t.Fatalf("verified guest could not read saved invoice lines: %+v, %v", guestInvoice, err)
 	}
-	if _, err := access.GuestInvoice(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
+	if _, err := access.GuestDetail(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
 		t.Fatal("another email accessed saved invoice lines")
 	}
 	adminDetail, err := access.Admin(ctx, orderID)
@@ -336,7 +336,7 @@ func TestConcurrentIdempotentCheckoutPostgres(t *testing.T) {
 	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}
 	fee := 80
 	request := CheckoutRequest{
-		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: productID, Quantity: 1}},
 	}

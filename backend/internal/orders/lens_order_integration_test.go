@@ -73,7 +73,7 @@ func TestLensOrderLifecyclePostgres(t *testing.T) {
 		PaymentOptions: paymentOptionsStub{on: true, frameMode: AdvanceDeliveryFee, lensMode: AdvancePercent, lensValue: 50}}
 	high := -1600
 	receipt, err := checkout.Place(ctx, CheckoutRequest{
-		IdempotencyKey: "lens-order-qa-" + suffix, CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "lens-order-qa-" + suffix, CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		CustomerEmail: "qa-lens@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: productID, Quantity: 1, LensKind: LensKindPackage, LensPackageID: packageID, LensPower: LensWithPower, SPHRight: &high, Prescription: []byte("%PDF-1.7 qa")}},
 	})

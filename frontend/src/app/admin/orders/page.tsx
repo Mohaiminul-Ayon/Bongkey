@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
+import { RiskFlags } from "@/components/RiskFlags";
 import { adminRequest, updateAdminOrderStatus } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 
@@ -15,6 +16,7 @@ type OrderRow = {
   city: string;
   total: number;
   order_status: string;
+  risk_flags?: string[];
 };
 
 // orderPageSize matches the backend AdminOrderPageSize so a full page means older orders may exist.
@@ -137,6 +139,7 @@ export default function AdminOrdersPage() {
                       <strong>{order.order_number}</strong>
                       <p className="mt-1 text-sm text-neutral-600">{order.customer_name} · {order.customer_phone} · {order.city}</p>
                       <p className="mt-1 font-bold">{formatPrice(order.total)}</p>
+                      <RiskFlags flags={order.risk_flags} />
                       <Link className="mt-2 inline-block text-sm font-black text-[#173c34] underline" href={`/admin/orders/${order.id}`}>View details</Link>
                     </div>
                     <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black uppercase tracking-wide">

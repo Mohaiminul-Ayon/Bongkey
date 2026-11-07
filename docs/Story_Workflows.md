@@ -433,6 +433,71 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the private order page showed the timeline and the optional pay box;
   - all four header links fit at 375 px.
 
+## GUEST-01 — Guest checkout without an email code (#78)
+
+**Status:** Built 2026-11-07 on `feat/guest-checkout-simple`. One follow-up waits for #83 (see Limits).
+
+**Owner decisions (2026-11-07, PRD 13.2):**
+- No email code at checkout; the owner confirms every order by phone.
+- Bot handling: a hidden field plus a fill time.
+- Red flags warn staff but never block an order.
+- The customer gets an order slip at checkout; the invoice comes only after confirmation.
+
+**Data:** migration `019_order_risk_flags.sql` adds `orders.risk_flags TEXT[]`.
+
+**Request:** `POST /api/orders` `{"customer_phone":"+880 1712-345678","customer_email":"buyer@example.com",…,"website":"","fill_ms":41000}`. There is no `email_proof`.
+
+1. The [checkout page](../frontend/src/app/checkout/page.tsx):
+   - checks the phone with `validBangladeshMobile`;
+   - sends the hidden `bk_extra_url` input as `website` (off-screen, `aria-hidden`, `tabIndex=-1`, `autoComplete=off`);
+   - sends `fill_ms`, the time since the form appeared.
+
+   Neither of those two is part of the retry key.
+2. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go:69) parses the body. Then [botSigns](../backend/internal/handlers/order_handler.go:96) decides:
+   - **honeypot and fast:** `200 {"received":true}` and nothing saved, so the bot learns nothing;
+   - **honeypot only:** 400 "please try again or message us on WhatsApp";
+   - **fast only:** goes on, with `FastSubmit` set.
+
+   It passes `c.ClientIP()` to the service.
+3. [CheckoutService.Place](../backend/internal/orders/checkout.go:201):
+   - normalizes the phone with `NormalizeMobile` ([phone.go](../backend/internal/orders/phone.go), now shared with payments) and refuses anything that is not `01[3-9]` plus 8 digits (`ErrInvalidPhone`, 400);
+   - marks the email verified only if an old client sent a matching proof;
+   - counts the order in [limit](../backend/internal/orders/checkout.go:461): at most 5 per phone and 10 per client in 15 minutes, otherwise `ErrCheckoutLimited` and 429. The keys are HMACs, so no phone or IP is stored.
+4. Inside the transaction, after the retry lookup (so old accepted retries keep their receipt), the email must be one plain address ([line 274](../backend/internal/orders/checkout.go:274), `ErrInvalidEmail`, 400).
+5. [PhoneHistory](../backend/internal/orders/checkout_repository.go:146) reads earlier orders with the same last 11 digits **before** the insert: how many were placed today (Bangladesh time) and whether a different name was used in the last 30 days.
+6. [riskFlags](../backend/internal/orders/risk.go:43) can set: `disposable_email`, `short_address` (fewer than 10 letters or a single word), `odd_name`, `repeat_phone` (2 earlier orders today), `phone_other_name`, `high_value_cod` (৳10,000 or more cash on delivery) and `fast_submit`. Bangla vowel signs count as letters. `FlagOrder` saves them in the same transaction.
+7. The admin list and the order page show them in red through [RiskFlags](../frontend/src/components/RiskFlags.tsx).
+8. The order page offers **Download order slip**: `GET /api/orders/:id/slip.pdf` with the order token → [GetSlip](../backend/internal/handlers/order_access_handler.go:39) → `GuestDetail` → `invoice.RenderSlip`. The slip says "This is not an invoice". `GET /api/orders/:id/invoice.pdf` now goes through [GuestInvoice](../backend/internal/orders/access.go:129) and answers 409 until the order is confirmed; only then does the page show **Download invoice PDF**. The admin invoice is unchanged.
+
+**Failure paths:**
+- A wrong phone: 400 with an example number.
+- A bad email: 400.
+- A flood: 429.
+- Honeypot only: 400.
+- Both bot signs: silent 200, nothing saved.
+- A guest invoice before confirmation: 409 with a pointer to the slip.
+
+**Limits:**
+- After #83 merges, email-code access to the private order page should also accept an order whose email staff ticked as confirmed (`EmailVerified || EmailConfirmed` in `guestRecord`). Until then, an unverified order opened on another device must use the Track page.
+- The fill time is sent by the browser, so a careful bot can fake it. The phone limit and the confirmation call remain the real protection.
+- The throwaway-domain list is short (`shortcut:` in risk.go).
+- Phone history scans without an index (`shortcut:`).
+
+**Evidence:**
+- Unit tests:
+  - `TestCheckoutEmailWithoutCode`;
+  - `TestCheckoutPhoneRules`;
+  - `TestCheckoutLimits` (6th per phone, 11th per client, no raw phone or IP in keys);
+  - `TestRiskFlags` (including Bangla names and addresses);
+  - `TestCheckoutSavesFlags`;
+  - `TestStartOfDhakaDay`;
+  - `TestCheckoutHTTPBotSigns`;
+  - `TestGuestInvoiceResponse` (invoice 409 before confirmation, slip 200, wrong token 404);
+  - `TestReadableDate`;
+  - `TestRenderSlip`.
+- Local HTTP: the bot case gave 200 and saved nothing; the honeypot gave 400; a bad phone gave 400; orders without a code were accepted with the phone saved as `01712000004`; the slip PDF downloaded; the invoice gave 409; the flags were saved (`short_address odd_name phone_other_name fast_submit`).
+- Browser: the checkout has no email-code step and the honeypot is off-screen; a browser order reached its order page, which showed **Download order slip** and no invoice button.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.
