@@ -19,17 +19,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// logWithoutQuery formats one access-log line without the query string, because admin searches carry customer phone numbers.
+// logWithoutQuery formats one access-log line with the request ID and without the query string,
+// because admin searches carry customer phone numbers.
 func logWithoutQuery(p gin.LogFormatterParams) string {
 	path, _, _ := strings.Cut(p.Path, "?")
-	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n%s",
-		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, p.Method, path, p.ErrorMessage)
+	id, _ := p.Keys[middleware.RequestIDKey].(string)
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %s | %-7s %s\n%s",
+		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, id, p.Method, path, p.ErrorMessage)
 }
 
 // SetupRouter configures direct-client trust and registers routes for later HTTP requests.
 func SetupRouter(cfg config.Config) *gin.Engine {
 	router := gin.New()
-	router.Use(gin.LoggerWithFormatter(logWithoutQuery), gin.Recovery())
+	// Order matters: RequestID first so both read the ID; the logger wraps Recovery so a recovered panic is still logged as a 500.
+	router.Use(middleware.RequestID(), gin.LoggerWithFormatter(logWithoutQuery), middleware.Recovery(gin.DefaultErrorWriter))
 	// Direct deployments must ignore forwarded client IP headers until an exact reverse proxy is configured.
 	if err := router.SetTrustedProxies(nil); err != nil {
 		panic("disable trusted proxies: " + err.Error())
