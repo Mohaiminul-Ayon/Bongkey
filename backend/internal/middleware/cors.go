@@ -18,6 +18,8 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 			c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, Idempotency-Key")
+			// The shop's pages may read the request ID to show it next to an error.
+			c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		}
 
 		if c.Request.Method == http.MethodOptions {
