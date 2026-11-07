@@ -17,7 +17,8 @@ const productSelectSQL = `
 SELECT p.id, COALESCE(p.parent_product_id, 0), p.sku, COALESCE(p.category_id, 0), COALESCE(c.name, ''), p.name, p.slug, p.description,
 	p.price, p.old_price, p.brand_tier, p.frame_type, p.gender, p.material, p.color, p.size,
 	p.lens_width, p.bridge_width, p.temple_length, p.stock_quantity, p.image_url,
-	p.try_on_image_url, p.is_featured, p.is_active
+	p.try_on_image_url, p.is_featured, p.is_active,
+	(SELECT COUNT(*) FROM products o WHERE o.parent_product_id = p.id AND o.is_active) AS option_count
 FROM products p
 LEFT JOIN categories c ON c.id = p.category_id
 `
@@ -182,7 +183,7 @@ type productScanner interface{ Scan(...any) error }
 // scanProduct keeps the read column mapping next to its SQL definition.
 func scanProduct(row productScanner) (models.Product, error) {
 	var product models.Product
-	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive)
+	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive, &product.OptionCount)
 	return product, err
 }
 

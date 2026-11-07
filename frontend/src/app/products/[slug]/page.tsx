@@ -10,7 +10,7 @@ import { TryOnModal } from "@/components/TryOnModal";
 import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { lensPrice, lensPriceKnown, type CartLens } from "@/lib/lens";
-import { formatPrice, type Product } from "@/lib/products";
+import { discountPercent, formatPrice, type Product } from "@/lib/products";
 
 /** ProductDetailsPage renders only products returned by the live catalog. */
 export default function ProductDetailsPage() {
@@ -64,9 +64,9 @@ export default function ProductDetailsPage() {
           <p className="eyebrow">{product.category}</p>
           <h1>{product.name}</h1>
           <p className="product-tags">{product.gender} · {product.frameType} · {product.brandTier}</p>
-          <div className="product-price">
+          <div className={`product-price${discountPercent(variant.price, variant.oldPrice) ? " on-sale" : ""}`}>
             <strong>{formatPrice(variant.price)}</strong>
-            {variant.oldPrice ? <del>{formatPrice(variant.oldPrice)}</del> : null}
+            {discountPercent(variant.price, variant.oldPrice) ? <><del>{formatPrice(variant.oldPrice ?? 0)}</del><span className="sale-badge">-{discountPercent(variant.price, variant.oldPrice)}%</span></> : null}
             <span className="pill">{lens.choice ? "Advance payment" : "Cash on delivery"}</span>
           </div>
 
