@@ -433,6 +433,72 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the private order page showed the timeline and the optional pay box;
   - all four header links fit at 375 px.
 
+## NOTIFY-01 — Order emails and owner summary (#24)
+
+**Status:** Built 2026-11-07 on `feat/notifications-email`. Real delivery through Brevo or Gmail still needs the owner's test with a real address.
+
+**Owner decisions (2026-11-07, PRD 13.2):**
+- Brevo on the server, Gmail locally.
+- Customer emails: order placed (no address or phone), payment approved or rejected, shipped, delivered, and the invoice after staff tick "email confirmed".
+- Owner emails: a 9 PM summary plus an instant email for each bKash payment.
+
+**Data:** migration `018_notifications.sql` adds:
+- the `notifications` queue, one row per email with a unique `event_key` such as `order_placed:160`;
+- `orders.email_confirmed`.
+
+**Request (order placed):** `POST /api/orders` as before.
+1. [CheckoutService.Place](../backend/internal/orders/checkout.go:339) commits the order, then calls `Notifier.OrderPlaced`. The interface lives in [orders/notifier.go](../backend/internal/orders/notifier.go), so orders does not import the email code.
+2. [Service.OrderPlaced](../backend/internal/notifications/notifications.go:65):
+   - uses a [detached](../backend/internal/notifications/notifications.go:59) 5-second context, so a customer who closes the page right after ordering still gets the email;
+   - loads the order through `orders.AccessService.Admin`;
+   - writes the text: order number, products, totals, the next step and the Track link, with no name, phone or address.
+3. [PostgresStore.Enqueue](../backend/internal/notifications/repository.go:20) inserts it with `ON CONFLICT (event_key) DO NOTHING`, so a repeated event never queues a second email. Nothing here returns an error to checkout; a failure is logged as `notification not queued: event=order_placed:160`, without customer data.
+4. The worker that [serve](../backend/cmd/server/server.go:63) starts ([Worker.Tick](../backend/internal/notifications/worker.go:113) every 30 seconds):
+   - [ClaimDue](../backend/internal/notifications/repository.go:56) marks up to 20 due rows `sending` with `FOR UPDATE SKIP LOCKED`, so two servers never claim the same row;
+   - [send](../backend/internal/notifications/worker.go:137) sends each one through [mail.Brevo](../backend/internal/mail/brevo.go) or [mail.Gmail](../backend/internal/mail/gmail.go) and records `sent`;
+   - on a failure it retries after 1 min, 5 min, 30 min, 2 h, then 6 h, and marks the row `failed` after 8 attempts (about a day);
+   - addresses on `@example.test` are recorded as `skipped`, never sent.
+
+**Other events:**
+- `Submit`, `Approve` and `Reject` in [payments.go](../backend/internal/payments/payments.go:259) call `PaymentSubmitted` (the owner alert, with order, amount and TrxID) and `PaymentReviewed` (approved, or rejected with the reason).
+- [FulfillmentService.ChangeStatus](../backend/internal/orders/fulfillment.go:77) calls `StatusChanged` only when the status really changed:
+  - **shipped** includes the courier and the cash still due;
+  - **delivered** is a thank-you;
+  - **confirmed** tries the invoice.
+- **Invoice:** `PUT /api/admin/orders/:id/email-confirmed` `{"confirmed":true}` → `AdminAuth` → [SetEmailConfirmed](../backend/internal/handlers/order_fulfillment_handler.go:20) → `EmailConfirmationService` saves the tick → [invoiceIfReady](../backend/internal/notifications/notifications.go:141). The invoice is queued only when the order is confirmed (or later) **and** ticked. Whichever comes second sends it; the key `invoice:<id>` keeps it to one email. The PDF is rendered when the email is sent, so it shows the current paid amount.
+- **Daily summary:** [queueSummary](../backend/internal/notifications/worker.go:185) runs at or after 21:00 Bangladesh time and checks the key `owner_summary:YYYY-MM-DD`:
+  - it reports new orders, payments waiting, prescriptions, open lens prices, confirmed orders not shipped, and failed emails;
+  - a quiet day is recorded as `skipped`, without an email;
+  - a server that starts later that evening still sends it, and a restart never sends it twice.
+
+**Failure paths:**
+- The provider is down: the row goes back to `pending` with its next attempt time; the order is unaffected.
+- After 8 attempts the row is `failed`, and the next summary counts it.
+- A crash while a row is `sending`: the row is retried after 10 minutes. That can send that one email twice (a `shortcut:` in the repository).
+- `MAIL_PROVIDER=brevo` without `BREVO_API_KEY` or `MAIL_FROM`: startup fails.
+- The admin tick without login: 401 from `AdminAuth`.
+
+**Limits:**
+- Old sent rows are not purged yet.
+- Owner alerts go to one address.
+- Templates are English plain text.
+- There is no cancellation email.
+
+**Evidence:**
+- Unit tests in [notifications_test.go](../backend/internal/notifications/notifications_test.go):
+  - the order-placed email shows no phone, address or name, and is queued once;
+  - the invoice waits for both the confirmation and the tick;
+  - shipped and delivered only;
+  - the owner alert only when set, and the rejection reason;
+  - retry delays and the final failure;
+  - test addresses skipped;
+  - the summary at 21:00, once, with a quiet day skipped.
+- [gmail_test.go](../backend/internal/mail/gmail_test.go): header injection refused for both providers; multipart attachment; the Brevo request shape; logs that hide the Brevo response body.
+- `TestMailProviderSettings`: the configuration checks.
+- Local PostgreSQL `TestNotificationQueuePostgres`: a duplicate key ignored, claim once, a retry not early, a stale claim retried, a sent row not claimed again, the summary query.
+- The route protection test covers the admin route.
+- Local end-to-end: a test-mode frame order went through bKash, approve, confirm, tick, courier details, shipped and delivered. It queued exactly six emails (placed, owner alert, approved, invoice with attachment flag, shipped, delivered), each with the expected text, and the running worker processed them all.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

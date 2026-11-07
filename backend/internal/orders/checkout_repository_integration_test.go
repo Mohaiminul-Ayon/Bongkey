@@ -47,8 +47,8 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
 	}
-	// Status changes write the delivery-tracking times, so that migration is needed by every order test.
-	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql"} {
+	// Status changes write the delivery-tracking times and order reads include the email tick, so every order test needs those migrations.
+	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql", "018_notifications.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)

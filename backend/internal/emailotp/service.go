@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"bongkey/backend/internal/mail"
 	"bongkey/backend/internal/security"
 )
 
@@ -97,5 +98,5 @@ func (s Service) Verify(ctx context.Context, rawEmail, code string) (string, err
 // normalizeEmail accepts one ordinary mailbox and uses the same identity at checkout.
 func normalizeEmail(raw string) (string, bool) {
 	email := strings.ToLower(strings.TrimSpace(raw))
-	return email, validAddress(email)
+	return email, mail.ValidAddress(email)
 }
