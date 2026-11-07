@@ -67,6 +67,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	products := handlers.ProductHandler{Service: catalog.ProductService{
 		Repository: catalog.PostgresProductRepository{DB: database.DB},
 	}}
+	stock := handlers.StockHandler{Service: catalog.StockService{Store: catalog.PostgresProductRepository{DB: database.DB}}}
 	lensPackages := handlers.LensHandler{Service: lens.Service{Repository: lens.PostgresRepository{DB: database.DB}}}
 	categories := handlers.CategoryHandler{Service: catalog.CategoryService{Repository: catalog.PostgresCategoryRepository{DB: database.DB}}}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
@@ -102,6 +103,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/products", products.AdminListProducts)
 	admin.POST("/products", products.CreateProduct)
 	admin.GET("/products/:id/variants", products.ListVariants)
+	admin.GET("/products/:id/stock-history", stock.History)
+	admin.GET("/stock/low", stock.LowStock)
 	admin.POST("/products/:id/variants", products.CreateVariant)
 	admin.PUT("/products/:id", products.UpdateProduct)
 	admin.DELETE("/products/:id", products.DeleteProduct)

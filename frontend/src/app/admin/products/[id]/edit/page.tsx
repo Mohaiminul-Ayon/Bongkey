@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { ProductForm } from "@/components/ProductForm";
-import { adminRequest, toProduct, type ApiProduct } from "@/lib/api";
+import { adminRequest, fetchStockHistory, toProduct, type ApiProduct, type StockChange } from "@/lib/api";
 import type { Product } from "@/lib/products";
 import { formatPrice } from "@/lib/products";
 
@@ -22,7 +22,37 @@ export default function EditProductPage() {
     });
   }, [params.id]);
 
-  return <AdminGuard><section className="mx-auto max-w-5xl px-4 py-8 md:px-6"><AdminNav /><h1 className="mb-6 text-3xl font-black">Edit product</h1>{product ? <><ProductForm product={product} />{!product.parentProductId ? <VariantEditor productId={product.id!} /> : <p className="mt-5 text-sm">This variant belongs to <Link className="underline" href={`/admin/products/${product.parentProductId}/edit`}>its parent product</Link>.</p>}</> : <p>Loading product...</p>}</section></AdminGuard>;
+  return <AdminGuard><section className="mx-auto max-w-5xl px-4 py-8 md:px-6"><AdminNav /><h1 className="mb-6 text-3xl font-black">Edit product</h1>{product ? <><ProductForm product={product} /><StockHistory productId={product.id!} />{!product.parentProductId ? <VariantEditor productId={product.id!} /> : <p className="mt-5 text-sm">This variant belongs to <Link className="underline" href={`/admin/products/${product.parentProductId}/edit`}>its parent product</Link>.</p>}</> : <p>Loading product...</p>}</section></AdminGuard>;
+}
+
+const reasonNames: Record<string, string> = {
+  created: "Added",
+  order_placed: "Order placed",
+  order_cancelled: "Order cancelled (restocked)",
+  admin_edit: "Edited by owner",
+  unlabelled: "Changed outside the app",
+};
+
+/** StockHistory shows the latest stock changes of this one frame or option, newest first. */
+function StockHistory({ productId }: { productId: number }) {
+  const [changes, setChanges] = useState<StockChange[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchStockHistory(productId).then(setChanges).catch((err: Error) => setError(err.message));
+  }, [productId]);
+
+  return <section className="mt-8 rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+    <h2 className="text-xl font-black">Stock history</h2>
+    {error ? <p role="alert" className="mt-3 text-sm text-red-700">{error}</p> : null}
+    {changes && changes.length === 0 ? <p className="mt-2 text-sm text-neutral-600">No stock changes recorded yet.</p> : null}
+    <ul className="mt-3 grid gap-2 text-sm">
+      {changes?.map((row, index) => <li key={index} className="flex flex-wrap justify-between gap-2 border-b pb-2 last:border-0">
+        <span>{new Date(row.created_at).toLocaleString("en-BD", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })} · {reasonNames[row.reason] ?? row.reason}{row.order_number ? ` · ${row.order_number}` : ""}</span>
+        <span className={row.change < 0 ? "font-bold text-red-700" : "font-bold text-green-800"}>{row.change > 0 ? "+" : ""}{row.change} → {row.stock_after}</span>
+      </li>)}
+    </ul>
+  </section>;
 }
 
 /** VariantEditor lists stock per SKU and creates one distinct color/size option. */

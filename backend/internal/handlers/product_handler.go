@@ -29,6 +29,7 @@ type productRequest struct {
 	TempleLength          string `json:"temple_length"`
 	StockQuantity         int    `json:"stock_quantity"`
 	ExpectedStockQuantity *int   `json:"expected_stock_quantity"`
+	LowStockThreshold     int    `json:"low_stock_threshold"`
 	ImageURL              string `json:"image_url"`
 	TryOnImageURL         string `json:"try_on_image_url"`
 	IsFeatured            bool   `json:"is_featured"`
@@ -162,8 +163,8 @@ func (h ProductHandler) saveProduct(c *gin.Context, id int) {
 	product, err := h.Service.Save(c.Request.Context(), id, catalog.ProductInput{
 		CategoryID: req.CategoryID, Name: req.Name, Slug: req.Slug, Description: req.Description, SKU: req.SKU,
 		Price: req.Price, OldPrice: req.OldPrice, StockQuantity: req.StockQuantity,
-		ExpectedStockQuantity: req.ExpectedStockQuantity,
-		BrandTier:             req.BrandTier, FrameType: req.FrameType, Gender: req.Gender,
+		ExpectedStockQuantity: req.ExpectedStockQuantity, LowStockThreshold: req.LowStockThreshold,
+		BrandTier: req.BrandTier, FrameType: req.FrameType, Gender: req.Gender,
 		Material: req.Material, Color: req.Color, Size: req.Size,
 		LensWidth: req.LensWidth, BridgeWidth: req.BridgeWidth, TempleLength: req.TempleLength,
 		ImageURL: req.ImageURL, TryOnImageURL: req.TryOnImageURL,
@@ -237,6 +238,8 @@ func productError(c *gin.Context, err error, fallback string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "product name and price are required"})
 	case errors.Is(err, catalog.ErrNegativeStock):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "stock quantity cannot be negative"})
+	case errors.Is(err, catalog.ErrInvalidThreshold):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "low-stock alert must be between 0 and 100000"})
 	case errors.Is(err, catalog.ErrExpectedStockMissing):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "expected stock quantity is required"})
 	case errors.Is(err, catalog.ErrInvalidVariant):

@@ -433,6 +433,50 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the private order page showed the timeline and the optional pay box;
   - all four header links fit at 375 px.
 
+## STOCK-01 — Low-stock alerts and stock history (#20)
+
+**Status:** Built 2026-11-07 on `feat/stock-alerts-history`. The low-stock email is not included (it belongs to the notifications work).
+
+**Data:** migration `021_stock_history.sql` adds:
+- `products.low_stock_threshold` (0 = off, 0–100000 checked by the database);
+- `stock_history` (change, stock after, reason, order, time);
+- the trigger `products_stock_history`.
+
+Existing stock is untouched.
+
+**How history is written:** a PostgreSQL trigger runs after any insert, or any update of `stock_quantity`. It writes one row in the same transaction, so a rolled-back change leaves no row, and a statement that changes nothing (a losing reservation, a save with the same stock) writes nothing. The Go code only labels the transaction with `set_config(..., true)`:
+- checkout: [PostgresCheckoutStore.InTransaction](../backend/internal/orders/checkout_repository.go) sets `order_placed`. Stock is reserved before the order exists, so [InsertOrder](../backend/internal/orders/checkout_repository.go) then links this transaction's rows to the new order through `tx_id = txid_current()`;
+- cancellation: [RestoreStock](../backend/internal/orders/fulfillment_repository.go) sets `order_cancelled` and the order ID;
+- admin edit: [PostgresProductRepository.update](../backend/internal/catalog/product_repository.go) now runs in a transaction labelled `admin_edit`;
+- a new product or option: `created`;
+- anything else, such as a hand-written SQL fix: `unlabelled`.
+
+**Owner request:** `GET /api/admin/stock/low` → `AdminAuth` → [StockHandler.LowStock](../backend/internal/handlers/stock_handler.go) → [StockService.LowStock](../backend/internal/catalog/stock.go) → `PostgresProductRepository.LowStock`. This lists active items whose threshold is above 0 and whose stock is at or below it, lowest first. The [dashboard](../frontend/src/app/admin/dashboard/page.tsx) shows the count on the Products card and a list linking to each edit page.
+
+`GET /api/admin/products/:id/stock-history` → `AdminAuth` → `StockHandler.History` returns the latest 100 rows with the order number. The [edit page](../frontend/src/app/admin/products/[id]/edit/page.tsx) shows them under the form. The form has a "Low-stock alert at (0 = off)" field.
+
+**Failure paths:**
+- No admin token: 401 from `AdminAuth` on both routes.
+- A threshold below 0 or above 100000: 400 from `ProductService.Save` (the database check is the second guard).
+- A bad product ID: 404.
+
+**Limits:**
+- The owner is the only admin, so a row says "Edited by owner" without an admin ID.
+- The lists are capped at 200 (low stock) and 100 (history).
+
+**Evidence:**
+- Local PostgreSQL:
+  - two racing buyers for the last item: one wins, history is exactly `created +1`, `order_placed -1 =0`;
+  - a forced rollback leaves no row, and a SQL reset is recorded as `unlabelled`;
+  - a full checkout links its row to the order;
+  - two racing cancellations write one `order_cancelled +2` row with the order ID;
+  - an admin edit writes `admin_edit -2 =1`, which puts the item on the low list, and a save without a stock change adds nothing.
+- Unit: negative and too-large thresholds refused. Route test: both admin routes need login.
+- Live with a temporary no-login QA owner:
+  - the save worked, and a -1 threshold gave 400;
+  - the low list, history and dashboard list showed it, and the edit page showed "Edited by owner -12 → 2";
+  - stock, threshold, QA history rows and the QA owner were then restored or removed.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

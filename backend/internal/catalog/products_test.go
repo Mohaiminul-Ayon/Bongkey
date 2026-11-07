@@ -19,6 +19,8 @@ func TestProductServiceRejectsInvalidEdits(t *testing.T) {
 		{"missing category", 0, ProductInput{Name: "Frame", Price: 100}, ErrCategoryRequired},
 		{"missing name", 0, ProductInput{CategoryID: 1, Price: 100}, ErrNamePriceRequired},
 		{"negative stock", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, StockQuantity: -1}, ErrNegativeStock},
+		{"negative threshold", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, LowStockThreshold: -1}, ErrInvalidThreshold},
+		{"huge threshold", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, LowStockThreshold: 100001}, ErrInvalidThreshold},
 		{"stale edit guard missing", 7, ProductInput{CategoryID: 1, Name: "Frame", Price: 100}, ErrExpectedStockMissing},
 		{"valid edit reaches storage", 7, base, ErrUnavailable},
 	} {
