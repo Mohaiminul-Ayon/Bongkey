@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"bongkey/backend/internal/audit"
 	"bongkey/backend/internal/auth"
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
@@ -97,6 +98,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.Use(middleware.AdminAuth(adminService))
 	uploads := handlers.UploadHandler{RootDir: cfg.ProjectRoot}
 	admin.GET("/me", adminHandler.Me)
+	admin.GET("/audit", handlers.AuditHandler{Reader: audit.Reader{DB: database.DB}}.List)
 	admin.POST("/uploads/product-image", uploads.ProductImage)
 	admin.POST("/uploads/try-on-mockup", uploads.TryOnMockup)
 	admin.GET("/products", products.AdminListProducts)
