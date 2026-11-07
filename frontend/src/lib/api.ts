@@ -12,6 +12,7 @@ export type ApiProduct = {
   parent_product_id: number;
   sku: string;
   variants?: ApiProduct[];
+  option_count?: number;
   category_id: number;
   category_name: string;
   name: string;
@@ -545,6 +546,7 @@ export function toProduct(product: ApiProduct): Product {
     parentProductId: product.parent_product_id,
     sku: product.sku,
     variants: product.variants?.map(toProduct),
+    optionCount: product.option_count,
     categoryId: product.category_id,
     slug: product.slug,
     name: product.name,

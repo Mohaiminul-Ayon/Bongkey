@@ -85,6 +85,9 @@ func TestVariantStockPostgres(t *testing.T) {
 	if err != nil || len(publicProduct.Variants) != 2 || publicProduct.Variants[1].SKU != variant.SKU {
 		t.Fatalf("public variant details=%+v error=%v", publicProduct.Variants, err)
 	}
+	if publicProduct.OptionCount != 1 || variants[0].OptionCount != 1 {
+		t.Fatalf("option count = %d; want the one active child so list cards send shoppers to choose", publicProduct.OptionCount)
+	}
 	store := orders.PostgresCheckoutStore{DB: db}
 	if err := store.InTransaction(ctx, func(tx orders.CheckoutTx) error {
 		reserved, err := tx.ReserveProduct(ctx, variant.ID, 1)
