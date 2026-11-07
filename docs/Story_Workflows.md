@@ -433,8 +433,59 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the private order page showed the timeline and the optional pay box;
   - all four header links fit at 375 px.
 
+## GOOGLE-01 — Customer Google sign-in and order linking (#79)
+
+**Status:** Built 2026-11-07 on `feat/customer-google-signin`. It is off until the owner creates a Google OAuth client and sets `GOOGLE_CLIENT_ID` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`. Guest checkout is unchanged.
+
+**Data:** migration `020_customers.sql` adds:
+- `customers` (Google's stable `google_sub`, the email Google last verified, the name);
+- `customer_sessions` (only the SHA-256 of the cookie token, with an expiry);
+- `orders.customer_id`, which stays NULL until a customer links the order.
+
+**Sign-in request:** `POST /api/customer/google` with `{"credential":"<Google ID token>"}` and the header `X-Requested-With: bongkey`.
+
+1. The [account page](../frontend/src/app/account/page.tsx) (header link "Account") draws Google's button through [GoogleSignInButton](../frontend/src/components/GoogleSignInButton.tsx). Google hands back an ID token, and `signInWithGoogle` posts it with `credentials: "include"`.
+2. [routes.go](../backend/internal/routes/routes.go) puts every `/api/customer` route behind [CustomerCSRF](../backend/internal/middleware/customer_auth.go). A non-GET request without the custom header gets 403 before any handler runs. Another site cannot add that header without a CORS preflight, and [CORS](../backend/internal/middleware/cors.go) only answers the shop's own origins (now with `Allow-Credentials`).
+3. [CustomerHandler.SignIn](../backend/internal/handlers/customer_handler.go) limits the body to 16 KB and calls [Service.SignIn](../backend/internal/customers/customers.go).
+4. [GoogleVerifier.Verify](../backend/internal/security/google_token.go):
+   - accepts RS256 only;
+   - checks the signature with Google's published key for the token's `kid` ([GoogleKeys.Key](../backend/internal/security/google_token.go) caches the key set for an hour and downloads it at most once a minute for unknown key IDs);
+   - requires the audience to be our client ID, the issuer to be Google, an unexpired token, a subject and a verified email.
+5. `SaveGoogleCustomer` upserts by `google_sub` and refreshes the email. A random 256-bit token is created, and only its hash is stored, with a 30-day expiry.
+6. The handler sets the cookie `bongkey_customer`: HttpOnly, SameSite=Lax, Secure outside `APP_ENV=development`. The token is never in the response body or in page scripts.
+
+**Signed-in requests:** `GET /me`, `GET /orders`, `GET /link-candidates`, `POST /link` run [CustomerAuth](../backend/internal/middleware/customer_auth.go) after CustomerCSRF. It hashes the cookie and looks up an unexpired session; missing, unknown or expired → 401 and abort. It attaches `customer` for the handler. A customer cookie never opens `/api/admin`: AdminAuth needs a bearer token from the admin login.
+
+**Linking earlier orders:** `POST /api/customer/link` with `{"phone":"01712-345678"}`.
+1. [Service.Link](../backend/internal/customers/customers.go) reduces the phone to its last ten digits (so 017…, +88017… and 88017… match) and refuses a non-mobile with 400.
+2. It counts the try with the shared PostgreSQL limiter (HMAC key of kind `customer-link`, 5 per 15 minutes per customer, then 429).
+3. [PostgresStore.LinkOrders](../backend/internal/customers/repository.go) runs one UPDATE: only orders with no owner, the Google-verified email and the typed phone get this `customer_id`. It returns how many were newly linked; a wrong phone links 0 and reveals nothing more.
+
+**Logout:** `POST /api/customer/logout` deletes the session row and clears the cookie, so the old cookie stops working at once.
+
+**Failure paths:**
+- No `X-Requested-With` header: 403 from CustomerCSRF; the handler never runs.
+- `GOOGLE_CLIENT_ID` unset: sign-in answers 503 and the page says sign-in is not available yet.
+- A forged, expired, wrong-audience or unverified-email token: 401.
+- No cookie, an expired session or a logged-out cookie: 401 from CustomerAuth.
+- A bad phone: 400. Too many link tries: 429.
+
+**Limits:**
+- One fixed 30-day session with no refresh rotation (marked `shortcut:`).
+- "My orders" shows number, date, total and status, capped at 100. Details still go through Track order.
+- Orders placed while signed in are not attached automatically yet; the customer links them with the same phone step. Auto-attach comes after guest checkout (#84) is merged.
+- The cookie only works when the API and the shop share a site (for example `api.example.com` and `example.com`).
+
+**Evidence:**
+- [google_token_test.go](../backend/internal/security/google_token_test.go): valid token, both issuer spellings, expired, no expiry, wrong audience, wrong issuer, unverified email, no email, no subject, another key, unknown key ID, an HS256 token, no client ID; key set parsing and the refresh floor.
+- [customers_test.go](../backend/internal/customers/customers_test.go): the raw token is never stored; logout and expiry end the session; phone formats; the link limit.
+- [customer_handler_test.go](../backend/internal/handlers/customer_handler_test.go): CSRF 403, forged 401, cookie flags, no token in the body, `/me`, logout clears the cookie, and the old cookie is refused.
+- Local PostgreSQL `TestPostgresLinkOrders`: an email-only match is refused, email + phone links, a repeat links 0, another customer's order is never moved, an expired session is refused.
+- Live HTTP on the local server: all failure paths above, the preflight headers, and a customer cookie refused on `/api/admin/me`.
+- Browser: the signed-out page, the signed-in page with "We found 2 earlier orders", linking one order by phone, and sign-out back to the signed-out page. QA rows were removed.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.
-- `ACCOUNT-01` is deferred to R2: there is no customer signup/login or historical order-linking implementation to trace. Guest email OTP in `EMAIL-01` does not create a customer account.
+- `ACCOUNT-01` beyond GOOGLE-01 (saved addresses, reorder, order details in the account) is deferred to R2.
 - Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, returns/refunds and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.
