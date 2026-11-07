@@ -7,6 +7,7 @@ import (
 	"bongkey/backend/internal/auth"
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
+	"bongkey/backend/internal/customers"
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/emailotp"
@@ -15,6 +16,7 @@ import (
 	"bongkey/backend/internal/middleware"
 	"bongkey/backend/internal/orders"
 	"bongkey/backend/internal/payments"
+	"bongkey/backend/internal/security"
 
 	"github.com/gin-gonic/gin"
 )
@@ -69,6 +71,16 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	}}
 	lensPackages := handlers.LensHandler{Service: lens.Service{Repository: lens.PostgresRepository{DB: database.DB}}}
 	categories := handlers.CategoryHandler{Service: catalog.CategoryService{Repository: catalog.PostgresCategoryRepository{DB: database.DB}}}
+	customerService := customers.Service{
+		Store: customers.PostgresStore{DB: database.DB},
+		// shortcut: shares the login limiter's table (HMAC keys with their own "customer-link" kind); split it if limits need separate tuning.
+		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
+		Secret:  cfg.JWTSecret,
+	}
+	if cfg.GoogleClientID != "" {
+		customerService.Google = security.GoogleVerifier{ClientID: cfg.GoogleClientID, Keys: &security.GoogleKeys{}}
+	}
+	customerAccount := handlers.CustomerHandler{Service: customerService, SecureCookie: cfg.AppEnv != "development"}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
 	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
 		Store: orders.PostgresFulfillmentStore{DB: database.DB},
@@ -92,6 +104,16 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/orders/:id/payments", paymentHandler.SubmitPayment)
 	router.POST("/api/email-otp/request", emailCodes.Request)
 	router.POST("/api/email-otp/verify", emailCodes.Verify)
+
+	// CustomerCSRF guards every customer route, sign-in included; CustomerAuth then needs a session for the rest.
+	customer := router.Group("/api/customer", middleware.CustomerCSRF())
+	customer.POST("/google", customerAccount.SignIn)
+	customer.POST("/logout", customerAccount.Logout)
+	signedIn := customer.Group("", middleware.CustomerAuth(customerService))
+	signedIn.GET("/me", customerAccount.Me)
+	signedIn.GET("/orders", customerAccount.Orders)
+	signedIn.GET("/link-candidates", customerAccount.LinkCandidates)
+	signedIn.POST("/link", customerAccount.Link)
 
 	admin := router.Group("/api/admin")
 	admin.Use(middleware.AdminAuth(adminService))
