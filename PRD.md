@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.31
+Version: 2.32
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -71,17 +71,17 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 
 ### 5.1 Authentication
 
-- Guest checkout requires a single-use email OTP before order creation. Completing checkout does not silently create a customer account.
+- Since 13.2 (2026-11-07), guest checkout does not ask for an email code; the owner confirms each order by phone. Completing checkout does not silently create a customer account.
 - The sending provider may be Gmail SMTP, but customers may use any valid email provider. A delivery phone number is operational contact data only and is not an authentication factor.
 - A fresh email OTP may recover secure access to orders placed with that verified email. OTP expiry, single-use consumption, retry/resend limits, email/IP rate limits, and safe non-enumerating responses are required. Never log OTPs or authentication tokens.
 - R2 account signup/login verifies the email explicitly. A guest has no row in the customer-account table; guest and account orders remain in the same orders table, with a nullable customer ID linking an order to an account.
-- After account signup, the customer may explicitly link eligible historical guest orders. The service may update only orders whose normalized email was verified when those orders were placed, must perform the link transactionally, and must never copy/move orders or infer ownership from an unverified address.
+- After account signup, the customer may explicitly link eligible historical guest orders. Since 13.2 an order is eligible when its email matches the Google-verified email and the customer types the phone number used on it; the service must perform the link transactionally, and must never copy/move orders or infer ownership from an unverified address.
 - An authenticated customer using the same verified email need not complete another checkout OTP while the session is valid. Email changes require fresh verification. Shared/reassigned mailbox risk and session expiry/revocation remain part of the R2 account design.
 - Reordering revalidates current stock/prices/options and asks for confirmation before reusing a prescription.
 
 ### 5.2 Checkout data and behavior
 
-- Required: customer name, verified email, delivery phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice.
+- Required: customer name, email (not verified at checkout since 13.2), delivery phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice.
 - Optional: alternate phone and delivery note. Prescription requirements depend on the selected lens option.
 - Show itemized frame/lens prices, discounts, delivery, grand total, advance due now, and amount due on delivery before submission.
 - Detect changed cart prices/availability and require the customer to review the updated checkout before submission.
@@ -241,11 +241,11 @@ Keep a record in story evidence of whether each step is Explained, Owner practic
 MVP means a complete, safe purchase-and-support flow for a controlled pilot, not completion of the entire feature catalog. First prove a frame-only flow with test data; then add the minimum lens flow required by the real business before the pilot. Security, money/stock correctness, and after-sales obligations cannot be postponed to reduce scope.
 
 - **R0 — verified internal slice:** fix known blockers, then demonstrate owner-managed frame → guest checkout → COD order → private invoice → fulfillment/cancellation and correct stock behavior. No real customers; development email delivery is clearly labeled.
-- **R1 — controlled pilot MVP:** frame/sunglasses catalog with variants, Men/Women/Unisex browsing and price filter; optional compatible fixed-price lens packages with prescription upload/WhatsApp review; guest email OTP; admin-configured delivery zones; COD and manual bKash/Nagad; full/partial advance rules for supported carts; basic automatic discounts scoped to frame/lens/both; secure tracking and PDF invoice; owner fulfillment, payment verification, recovery/audit; returns/exchanges/refunds and deadline queue; operational totals and essential notifications. Production gates apply.
+- **R1 — controlled pilot MVP:** frame/sunglasses catalog with variants, Men/Women/Unisex browsing and price filter; optional compatible fixed-price lens packages with prescription upload/WhatsApp review; guest checkout without email code plus optional Google sign-in (13.2); admin-configured delivery zones; COD and manual bKash/Nagad; full/partial advance rules for supported carts; basic automatic discounts scoped to frame/lens/both; secure tracking and PDF invoice; owner fulfillment, payment verification, recovery/audit; returns/exchanges/refunds and deadline queue; operational totals and essential notifications. Production gates apply.
 - **R2 — after pilot feedback:** SSLCOMMERZ, optional customer accounts/history/saved addresses/reorder, coupon campaigns with bounded offer rules, banner/home merchandising controls, storefront/admin UI improvements, lens extras beyond the initial packages, quick price presets, best-seller/report enhancements and richer notification configuration. Section 13.1 specifies the proposed slices and performance gates; arbitrary offer combinations require later refinement. Each feature must pass its own acceptance/security checks before enablement.
 - **R3 — optional future ideas:** section 14. Do not scaffold these now.
 
-R1 uses a small real catalog and a finite set of lens packages/settings. Mixed carts need a documented advance rule before checkout; resolve it when implementing pricing. Coupon input, account login and gateway options must be absent or clearly unavailable until R2 is implemented. Customers must never be promised an unavailable feature. An R0 demo is not an R1 launch.
+R1 uses a small real catalog and a finite set of lens packages/settings. Mixed carts need a documented advance rule before checkout; resolve it when implementing pricing. Coupon input and gateway options must be absent or clearly unavailable until R2 is implemented; customer Google sign-in moved to R1 (13.2). Customers must never be promised an unavailable feature. An R0 demo is not an R1 launch.
 
 | ID | Full project requirement | Detail sections | Release scope |
 | --- | --- | --- | --- |
@@ -253,7 +253,7 @@ R1 uses a small real catalog and a finite set of lens packages/settings. Mixed c
 | REQ-02 | Admin catalog/variants, categories/audiences, images/measurements, stock history and storefront filtering | 3, 9.2 | R0 basic flow; R1 discovery; R2 quick presets |
 | REQ-03 | Optional compatible lens packages/extras, fixed pricing, no standalone lens sales, prescription review | 4 | R1 packages/review; R2 additional extras |
 | REQ-04 | Cart, frame/lens/both offers and coupons, authoritative price calculation and snapshots | 5.2, 6 | R0 correct totals; R1 automatic offers; R2 coupons |
-| REQ-05 | Guest email-OTP checkout, optional verified-email account, secure order access, safe historical linking, addresses and reorder | 5 | R1 guest email OTP/access; R2 accounts/history/link/reorder |
+| REQ-05 | Guest checkout, optional Google sign-in account, secure order access, phone-checked historical linking, addresses and reorder | 5, 13.2 | R1 guest checkout without email code, Google sign-in and linking (13.2); R2 addresses/reorder |
 | REQ-06 | Admin-configured delivery zones, coverage and charges, manual courier tracking | 7 | R1; no hardcoded charge in R0 verified checkout |
 | REQ-07 | COD, manual bKash/Nagad, SSLCOMMERZ, configurable advance, reconciliation and retry protection | 8 | R0 COD; R1 manual/advance; R2 gateway |
 | REQ-08 | Idempotent orders, stock reservations, admin processing, customer tracking and mandatory PDF invoices | 9 | R0 basic complete flow; R1 lens/manual collection |
@@ -398,9 +398,34 @@ Before the affected slice becomes Ready, settle branding/language, banner placem
 - [ ] Owner can disable a campaign or new payment initiation without losing accepted orders or blocking reconciliation; rollout and reconciliation responsibilities are documented.
 - [ ] Owner accepts staged rollout after review. This PRD update does not mark any feature, infrastructure step or release Done.
 
+### 13.2 Pilot scope decisions (2026-11-07)
+
+The owner reviewed the pilot plan in a question-and-critique session. These decisions change sections 5, 11 and 14 for R1; the reasons and risks are recorded so they can be revisited after the pilot.
+
+**Build order (one branch each):**
+1. **Emails (#24):** every email is first saved as a database row, then sent in the background with bounded retries, so a provider failure never blocks or rolls back an order and a retry never sends twice. The sender is a setting: Gmail for local work, **Brevo** (HTTPS API, free plan) on the server, because free VPS hosts often block outgoing mail ports. Checkout codes still use the same sender and go before notifications when the daily limit is near.
+   - Customer: order placed (order number, products, total and a Track link only; no address or phone), bKash payment approved or rejected, shipped (with tracking), delivered, and the **invoice after confirmation**.
+   - The invoice email goes only when staff have read the email address back during the confirmation call and ticked "email confirmed", because the call proves the phone, not the email.
+   - Owner: one **daily summary at 9 PM** Bangladesh time (new orders, payments waiting, prescriptions and lens prices to check, confirmed orders not shipped; no email on a quiet day; sent once per day even after a restart), plus an **instant email for each bKash payment** waiting for approval.
+2. **Simpler guest checkout:** no email code at checkout (the owner confirms every order by phone).
+   - Bot protection: a hidden honeypot field and a minimum fill time. Only when both signs agree does the server answer as if it worked and save nothing; one sign alone shows "please try again or WhatsApp us", so a real customer whose browser autofills the hidden field is not silently lost.
+   - The phone must be a valid Bangladesh mobile number; orders per phone and per client are rate limited.
+   - **Red flags, not blocks:** the order is saved and the admin list shows red reasons (throwaway email domain, very short or nonsense address, digits-only name, same phone with several orders today or different names, high-value cash on delivery).
+   - After placing the order the customer downloads an **order slip** (order number, products, total, how to track), not the invoice, because the price or the order can still change before confirmation. The invoice download appears after confirmation.
+   - Opening the private order page on another device still needs an email code; the Track page works with order number and phone.
+   - Risk accepted: someone can type another person's email, and that person receives our order-placed email.
+3. **Google sign-in for customers, before the pilot:** optional; guest checkout stays. The session is an HttpOnly, Secure, SameSite cookie with expiry, logout and CSRF protection; the Google ID token is verified (issuer, audience, expiry, verified email). Customer sign-in is separate from the owner's admin login.
+   - Linking old guest orders: after sign-in the customer is told how many earlier orders use that email and must type the phone number used on them. Only orders where both the email and the phone match are linked, in one transaction. This replaces the earlier rule of linking only orders whose email was verified at checkout, because guest emails are no longer verified.
+4. **Shop UI:** prices always highlighted (old price struck through and a percentage badge); add to cart on product cards for single-option frames, "Choose options" otherwise; a **wishlist saved in the browser** (lost if the browser is cleared); move to shadcn/ui step by step, starting with buttons, inputs and dialogs, after fixing the specific broken layouts.
+5. **Research note:** features worth borrowing from established eyewear shops.
+
+**After the pilot:** a RAG chatbot built by the owner as a guided learning project (pgvector for search; a free AI service for answers on the server; prices and stock always from the database, never from the model; no customer or order data in the bot), and AR or 3D try-on (each frame needs a 3D model; the existing 2D camera try-on stays as it is). The admin try-on mockup maker is skipped for the pilot.
+
+**Hosting:** Oracle Cloud Always Free (owner decision). The free "ZenDevz" service was rejected for production: it runs VMs on volunteers' home PCs with no uptime, backups or data protection, which conflicts with private prescription and customer data. It may serve as a practice environment.
+
 ## 14. Deferred roadmap
 
-These ideas are recorded for later, not first-release requirements: wishlist, public reviews, loyalty points, advanced analytics, courier API automation, free-delivery campaigns, virtual try-on, and AI-assisted prescription interpretation. Staff roles are added only when staff are needed. Reassess safety, value, effort, and business requirements before enabling any automated prescription feature.
+These ideas are recorded for later, not first-release requirements: account-synced wishlist, public reviews, loyalty points, advanced analytics, courier API automation, free-delivery campaigns, AR/3D virtual try-on, a RAG chatbot (owner learning project), and AI-assisted prescription interpretation. A browser-saved wishlist and the existing 2D try-on are R1 (13.2). Staff roles are added only when staff are needed. Reassess safety, value, effort, and business requirements before enabling any automated prescription feature.
 
 ## 15. Decisions still required
 
@@ -690,3 +715,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-05 | 2.29 | PAY-01: COD or bKash choice for frame orders, bKash advance for lens orders, with owner approve/reject, idempotent TrxID submission and reuse warning. Nagad and SSLCOMMERZ deferred; SSLCOMMERZ needs a TIN and trade license first. |
 | 2026-11-05 | 2.30 | ADV-01: configurable advance rules (lens full, frame delivery charge first by default), saved per order with paid amount; confirmation waits for the advance; invoice paid/balance/due. Owner chose bKash only: Nagad leaves R1. |
 | 2026-11-05 | 2.31 | TRACK-01: delivery step times, courier tracking, public Track page (order number + phone, masked), and optional bKash payment of the remaining balance until delivery. |
+| 2026-11-07 | 2.32 | Pilot scope decisions (13.2): Brevo emails with database-first sending, owner 9 PM summary and instant bKash alert, invoice email after a confirmed address; guest checkout without email code, with honeypot, red flags and an order slip; Google sign-in before the pilot with phone-checked order linking; browser wishlist, price highlight, card add-to-cart, gradual shadcn/ui; RAG chatbot and AR/3D try-on after the pilot; Oracle Cloud hosting. |
