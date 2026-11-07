@@ -113,6 +113,7 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `015_advance_policies.sql` | The owner's advance rules and each order's saved advance and paid amount |
    | `016_delivery_tracking.sql` | Status step times and the courier name, tracking code and link |
    | `017_frame_line_price_final.sql` | Marks saved frame-only lines as having no lens price to confirm |
+   | `019_order_risk_flags.sql` | Red-flag reasons saved on each order for staff |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 
