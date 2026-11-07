@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.32
+Version: 2.33
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -717,3 +717,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-05 | 2.30 | ADV-01: configurable advance rules (lens full, frame delivery charge first by default), saved per order with paid amount; confirmation waits for the advance; invoice paid/balance/due. Owner chose bKash only: Nagad leaves R1. |
 | 2026-11-05 | 2.31 | TRACK-01: delivery step times, courier tracking, public Track page (order number + phone, masked), and optional bKash payment of the remaining balance until delivery. |
 | 2026-11-07 | 2.32 | Pilot scope decisions (13.2): Brevo emails with database-first sending, owner 9 PM summary and instant bKash alert, invoice email after a confirmed address; guest checkout without email code, with honeypot, red flags and an order slip; Google sign-in before the pilot with phone-checked order linking; browser wishlist, price highlight, card add-to-cart, gradual shadcn/ui; RAG chatbot and AR/3D try-on after the pilot; Oracle Cloud hosting. |
+| 2026-11-07 | 2.33 | NOTIFY-01: database-first order emails (Brevo or Gmail), customer emails for placed/payment/shipped/delivered/invoice after confirmed email, owner bKash alert and 9 PM summary. |
