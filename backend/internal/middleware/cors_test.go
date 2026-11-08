@@ -26,7 +26,9 @@ func preflight(origin string) *httptest.ResponseRecorder {
 func TestCORSAllowsCheckoutIdempotencyHeader(t *testing.T) {
 	response := preflight("http://localhost:3000")
 	if response.Code != http.StatusNoContent || response.Header().Get("Access-Control-Allow-Origin") != "http://localhost:3000" ||
-		!strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key") {
+		!strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), "Idempotency-Key") ||
+		!strings.Contains(response.Header().Get("Access-Control-Allow-Headers"), "X-Requested-With") ||
+		response.Header().Get("Access-Control-Allow-Credentials") != "true" {
 		t.Fatalf("preflight status=%d headers=%v", response.Code, response.Header())
 	}
 }
@@ -34,7 +36,7 @@ func TestCORSAllowsCheckoutIdempotencyHeader(t *testing.T) {
 // TestCORSIgnoresOtherOrigins gives other websites no permission to read API responses.
 func TestCORSIgnoresOtherOrigins(t *testing.T) {
 	response := preflight("https://evil.example")
-	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "" {
+	if got := response.Header().Get("Access-Control-Allow-Origin") + response.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Fatalf("other origin allowed: %q", got)
 	}
 }

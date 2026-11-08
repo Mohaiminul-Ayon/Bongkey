@@ -32,6 +32,8 @@ type FulfillmentStore interface {
 // FulfillmentService enforces the owner fulfillment state machine.
 type FulfillmentService struct {
 	Store FulfillmentStore
+	// Notifier may be nil; it queues the shipped, delivered and invoice emails after a change commits.
+	Notifier Notifier
 }
 
 // ChangeStatus serializes one transition and restores stock once when an eligible order is cancelled.
@@ -40,7 +42,7 @@ func (s FulfillmentService) ChangeStatus(ctx context.Context, orderID int, reque
 	if orderID <= 0 || !knownOrderStatus(next) {
 		return "", ErrInvalidOrderStatus
 	}
-	status := ""
+	status, changed := "", false
 	err := s.Store.InTransaction(ctx, func(tx FulfillmentTx) error {
 		current, err := tx.LockOrder(ctx, orderID)
 		if err != nil {
@@ -68,9 +70,12 @@ func (s FulfillmentService) ChangeStatus(ctx context.Context, orderID int, reque
 		if err := tx.UpdateStatus(ctx, orderID, current, next); err != nil {
 			return err
 		}
-		status = next
+		status, changed = next, true
 		return nil
 	})
+	if err == nil && changed && s.Notifier != nil {
+		s.Notifier.StatusChanged(ctx, orderID, status)
+	}
 	return status, err
 }
 

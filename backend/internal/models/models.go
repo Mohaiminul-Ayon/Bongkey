@@ -33,4 +33,6 @@ type Product struct {
 	IsFeatured      bool      `json:"is_featured"`
 	IsActive        bool      `json:"is_active"`
 	Variants        []Product `json:"variants,omitempty"`
+	// OptionCount is how many active colour/size options hang off this frame, so a list card knows to send shoppers to the product page.
+	OptionCount int `json:"option_count"`
 }

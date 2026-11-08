@@ -106,30 +106,38 @@ func TestAdminOrderResponse(t *testing.T) {
 	}
 }
 
-// TestGuestInvoiceResponse checks PDF delivery and denial without leaking private details.
+// TestGuestInvoiceResponse checks PDF delivery and denial without leaking private details; the invoice waits for
+// confirmation while the order slip is available at once.
 func TestGuestInvoiceResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	token, hash, err := security.IdempotentOrderToken("synthetic-order-token-secret-at-least-32-characters", "guest-invoice-handler-01")
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := OrderAccessHandler{Service: orders.AccessService{Reader: orderReader{record: orders.Record{
-		Summary:        orders.Summary{ID: 1, OrderNumber: "ORD-1", InvoiceNumber: "INV-1", CustomerName: "Private buyer", Total: 180},
-		GuestTokenHash: hash, PaymentMethod: "cash_on_delivery", PaymentStatus: "unpaid",
-	}}}}
+	reader := func(status string) orders.AccessService {
+		return orders.AccessService{Reader: orderReader{record: orders.Record{
+			Summary:        orders.Summary{ID: 1, OrderNumber: "ORD-1", InvoiceNumber: "INV-1", CustomerName: "Private buyer", Total: 180, Status: status},
+			GuestTokenHash: hash, PaymentMethod: "cash_on_delivery", PaymentStatus: "unpaid",
+		}}}
+	}
 	router := gin.New()
-	router.GET("/api/orders/:id/invoice.pdf", handler.GetInvoice)
+	router.GET("/api/orders/:id/invoice.pdf", OrderAccessHandler{Service: reader("confirmed")}.GetInvoice)
+	router.GET("/pending/orders/:id/invoice.pdf", OrderAccessHandler{Service: reader("pending")}.GetInvoice)
+	router.GET("/pending/orders/:id/slip.pdf", OrderAccessHandler{Service: reader("pending"), SiteURL: "https://shop.example"}.GetSlip)
 	for _, tc := range []struct {
-		name, id, auth string
-		status         int
+		name, path, auth string
+		status           int
 	}{
-		{"missing token", "1", "", http.StatusNotFound},
-		{"wrong token", "1", "Bearer wrong", http.StatusNotFound},
-		{"other order", "2", "Bearer " + token, http.StatusNotFound},
-		{"own invoice", "1", "Bearer " + token, http.StatusOK},
+		{"missing token", "/api/orders/1/invoice.pdf", "", http.StatusNotFound},
+		{"wrong token", "/api/orders/1/invoice.pdf", "Bearer wrong", http.StatusNotFound},
+		{"other order", "/api/orders/2/invoice.pdf", "Bearer " + token, http.StatusNotFound},
+		{"own invoice", "/api/orders/1/invoice.pdf", "Bearer " + token, http.StatusOK},
+		{"invoice before confirmation", "/pending/orders/1/invoice.pdf", "Bearer " + token, http.StatusConflict},
+		{"slip before confirmation", "/pending/orders/1/slip.pdf", "Bearer " + token, http.StatusOK},
+		{"slip wrong token", "/pending/orders/1/slip.pdf", "Bearer wrong", http.StatusNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "/api/orders/"+tc.id+"/invoice.pdf", nil)
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			request.Header.Set("Authorization", tc.auth)
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, request)
