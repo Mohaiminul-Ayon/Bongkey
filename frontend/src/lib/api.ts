@@ -88,6 +88,8 @@ export type AdminOrderDetail = {
   amount_paid: number;
   created_at: string;
   tracking: OrderTracking;
+  /** email_confirmed is the staff tick that the email was read back on the call; the invoice email waits for it. */
+  email_confirmed: boolean;
   /** risk_flags are checkout red flags for staff, such as "short_address". */
   risk_flags?: string[];
   items: AdminOrderItem[];
@@ -127,6 +129,11 @@ export type TrackedOrder = {
 /** trackOrder looks an order up by number and checkout phone; both travel in the body, not the URL. */
 export async function trackOrder(orderNumber: string, phone: string) {
   return request<TrackedOrder>("/api/track", { method: "POST", body: JSON.stringify({ order_number: orderNumber, phone }), cache: "no-store" });
+}
+
+/** setEmailConfirmed saves whether staff read the customer's email back on the confirmation call. */
+export async function setEmailConfirmed(id: number, confirmed: boolean) {
+  return adminRequest(`/api/admin/orders/${id}/email-confirmed`, { method: "PUT", body: JSON.stringify({ confirmed }) });
 }
 
 /** saveOrderTracking stores the courier details the owner types for an order. */

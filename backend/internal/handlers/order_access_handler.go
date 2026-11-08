@@ -146,7 +146,7 @@ func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee, "total": order.Total,
 		"order_status": order.Status, "payment_method": order.PaymentMethod, "payment_status": order.PaymentStatus,
 		"advance_mode": order.AdvanceMode, "advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
-		"tracking": order.Tracking, "risk_flags": order.RiskFlags,
+		"tracking": order.Tracking, "email_confirmed": order.EmailConfirmed, "risk_flags": order.RiskFlags,
 		"created_at": order.CreatedAt, "items": order.Items,
 	})
 }

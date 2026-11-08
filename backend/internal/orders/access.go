@@ -49,6 +49,7 @@ type Record struct {
 	GuestTokenHash  string
 	CustomerEmail   string
 	EmailVerified   bool
+	EmailConfirmed  bool
 	RiskFlags       []string
 	DeliveryNote    string
 	PaymentMethod   string
@@ -86,8 +87,10 @@ type Item struct {
 type AdminDetail struct {
 	Summary
 	// RiskFlags are the red-flag codes from checkout, shown only to staff.
-	RiskFlags       []string
-	CustomerEmail   string
+	RiskFlags     []string
+	CustomerEmail string
+	// EmailConfirmed is the staff tick that the email was read back on the confirmation call.
+	EmailConfirmed  bool
 	DeliveryNote    string
 	PaymentMethod   string
 	PaymentStatus   string
@@ -175,6 +178,6 @@ func (s AccessService) detail(ctx context.Context, record Record) (AdminDetail, 
 	return AdminDetail{
 		Summary: record.Summary, CustomerEmail: record.CustomerEmail, DeliveryNote: record.DeliveryNote,
 		PaymentMethod: record.PaymentMethod, PaymentStatus: record.PaymentStatus, CreatedAt: record.CreatedAt, Items: items,
-		InvoiceIssuedAt: record.InvoiceIssuedAt, RiskFlags: record.RiskFlags,
+		InvoiceIssuedAt: record.InvoiceIssuedAt, EmailConfirmed: record.EmailConfirmed, RiskFlags: record.RiskFlags,
 	}, nil
 }

@@ -193,6 +193,8 @@ type CheckoutService struct {
 	Prescriptions       PrescriptionSaver
 	// PaymentOptions may be nil; then no online payment can be chosen for a frame-only order.
 	PaymentOptions PaymentOptions
+	// Notifier may be nil; it queues the order-placed email after the order commits.
+	Notifier Notifier
 	// Limiter may be nil (tests); it counts checkouts per phone and per client.
 	Limiter AttemptCounter
 }
@@ -373,6 +375,9 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		return CheckoutReceipt{}, err
 	}
 	receipt.GuestAccessToken = guestToken
+	if s.Notifier != nil {
+		s.Notifier.OrderPlaced(ctx, receipt.ID)
+	}
 	return receipt, nil
 }
 

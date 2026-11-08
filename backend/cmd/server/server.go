@@ -15,6 +15,8 @@ import (
 	"bongkey/backend/internal/config"
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/lens"
+	"bongkey/backend/internal/mail"
+	"bongkey/backend/internal/notifications"
 	"bongkey/backend/internal/orders"
 	"bongkey/backend/internal/routes"
 )
@@ -45,6 +47,20 @@ func serve(cfg config.Config) error {
 	go func() {
 		defer cleanup.Done()
 		retention.RunDaily(ctx)
+	}()
+	emails := notifications.Worker{
+		Store:      notifications.PostgresStore{DB: database.DB},
+		Mail:       mail.New(cfg),
+		Orders:     orders.AccessService{Reader: orders.PostgresReader{DB: database.DB}},
+		OwnerEmail: cfg.OwnerNotifyEmail,
+		SiteURL:    cfg.SiteURL,
+	}
+	cleanup.Add(1)
+	// serve owns the email worker too: it stops on the same ctx, records the state of the email in hand,
+	// and serve waits for it before closing the database. Unsent emails stay queued for the next start.
+	go func() {
+		defer cleanup.Done()
+		emails.Run(ctx)
 	}()
 	defer func() {
 		stop()
