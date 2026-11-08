@@ -30,7 +30,7 @@ func Render(order orders.AdminDetail) ([]byte, error) {
 	}{
 		{"BONGKEY", 23}, {"INVOICE", 15},
 		{"Invoice: " + order.InvoiceNumber, 11}, {"Order: " + order.OrderNumber, 11},
-		{"Order date: " + order.CreatedAt, 10}, {"Invoice issued: " + order.InvoiceIssuedAt, 10},
+		{"Order date: " + readableDate(order.CreatedAt), 10}, {"Invoice issued: " + readableDate(order.InvoiceIssuedAt), 10},
 		{"Customer: " + order.CustomerName, 11}, {"Email: " + order.CustomerEmail, 10},
 		{"Phone: " + order.CustomerPhone, 10},
 		{"Deliver to: " + order.ShippingAddress + ", " + order.City, 10},

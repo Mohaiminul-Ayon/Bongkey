@@ -10,6 +10,10 @@ import (
 // ErrNotFound hides whether an order ID exists when guest access fails.
 var ErrNotFound = errors.New("order not found")
 
+// ErrInvoiceNotReady means the customer asked for the invoice before the owner confirmed the order by phone;
+// until then the price or the order can still change, so the customer gets the order slip instead.
+var ErrInvoiceNotReady = errors.New("invoice not ready")
+
 // Summary contains the order details returned to an authorized viewer.
 type Summary struct {
 	ID              int
@@ -45,6 +49,8 @@ type Record struct {
 	GuestTokenHash  string
 	CustomerEmail   string
 	EmailVerified   bool
+	EmailConfirmed  bool
+	RiskFlags       []string
 	DeliveryNote    string
 	PaymentMethod   string
 	PaymentStatus   string
@@ -80,7 +86,11 @@ type Item struct {
 // AdminDetail adds operational fields and item snapshots to the private order summary.
 type AdminDetail struct {
 	Summary
-	CustomerEmail   string
+	// RiskFlags are the red-flag codes from checkout, shown only to staff.
+	RiskFlags     []string
+	CustomerEmail string
+	// EmailConfirmed is the staff tick that the email was read back on the confirmation call.
+	EmailConfirmed  bool
 	DeliveryNote    string
 	PaymentMethod   string
 	PaymentStatus   string
@@ -109,13 +119,27 @@ func (s AccessService) Guest(ctx context.Context, id, token string) (Summary, er
 	return record.Summary, err
 }
 
-// GuestInvoice returns saved invoice lines only after order-scoped guest authorization.
-func (s AccessService) GuestInvoice(ctx context.Context, id, token string) (AdminDetail, error) {
+// GuestDetail returns the saved order lines after order-scoped guest authorization; the order slip uses it.
+func (s AccessService) GuestDetail(ctx context.Context, id, token string) (AdminDetail, error) {
 	record, err := s.guestRecord(ctx, id, token)
 	if err != nil {
 		return AdminDetail{}, err
 	}
 	return s.detail(ctx, record)
+}
+
+// GuestInvoice is GuestDetail for the invoice, which the customer gets only once the order is confirmed.
+func (s AccessService) GuestInvoice(ctx context.Context, id, token string) (AdminDetail, error) {
+	order, err := s.GuestDetail(ctx, id, token)
+	if err != nil {
+		return AdminDetail{}, err
+	}
+	switch order.Status {
+	case "confirmed", "preparing", "shipped", "delivered":
+		return order, nil
+	default:
+		return AdminDetail{}, ErrInvoiceNotReady
+	}
 }
 
 // guestRecord checks one guest proof against the requested order before private reads.
@@ -154,6 +178,6 @@ func (s AccessService) detail(ctx context.Context, record Record) (AdminDetail, 
 	return AdminDetail{
 		Summary: record.Summary, CustomerEmail: record.CustomerEmail, DeliveryNote: record.DeliveryNote,
 		PaymentMethod: record.PaymentMethod, PaymentStatus: record.PaymentStatus, CreatedAt: record.CreatedAt, Items: items,
-		InvoiceIssuedAt: record.InvoiceIssuedAt,
+		InvoiceIssuedAt: record.InvoiceIssuedAt, EmailConfirmed: record.EmailConfirmed, RiskFlags: record.RiskFlags,
 	}, nil
 }

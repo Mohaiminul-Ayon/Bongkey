@@ -13,7 +13,9 @@ import (
 	"bongkey/backend/internal/emailotp"
 	"bongkey/backend/internal/handlers"
 	"bongkey/backend/internal/lens"
+	"bongkey/backend/internal/mail"
 	"bongkey/backend/internal/middleware"
+	"bongkey/backend/internal/notifications"
 	"bongkey/backend/internal/orders"
 	"bongkey/backend/internal/payments"
 	"bongkey/backend/internal/security"
@@ -41,13 +43,20 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	// Prescriptions live outside /uploads so the public static route can never serve them.
 	prescriptions := lens.PrescriptionStore{Dir: cfg.PrescriptionDir}
 	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}, Files: prescriptions}, Files: prescriptions}
-	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
+	siteURL := ""
+	if len(cfg.FrontendOrigins) > 0 {
+		siteURL = strings.TrimRight(cfg.FrontendOrigins[0], "/")
+	}
+	orderAccess := handlers.OrderAccessHandler{SiteURL: siteURL, Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
 		// shortcut: shares the login limiter's table (keys are HMACs with their own "order-track-ip" kind, so budgets never mix); give tracking its own table if limits need tuning separately.
 		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
 	}}
-	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}}
+	mailer := mail.New(cfg)
+	// Emails are queued in the database after each change commits and sent by the worker that serve starts.
+	notifier := notifications.Service{Store: notifications.PostgresStore{DB: database.DB}, Orders: orderAccess.Service, OwnerEmail: cfg.OwnerNotifyEmail, SiteURL: cfg.SiteURL}
+	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}, Notifier: notifier}
 	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
 		Store:               orders.PostgresCheckoutStore{DB: database.DB},
@@ -56,11 +65,14 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		DeliveryFeeProvider: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}},
 		Prescriptions:       prescriptions,
 		PaymentOptions:      paymentService,
+		Notifier:            notifier,
+		// Same shared limiter table as tracking, with its own "checkout-phone" and "checkout-ip" key kinds.
+		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
 	}}
 	deliverySettings := handlers.DeliverySettingsHandler{Service: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}}}
 	emailCodes := handlers.EmailOTPHandler{Service: emailotp.Service{
 		Store:    emailotp.PostgresStore{DB: database.DB},
-		Sender:   emailotp.GmailSender{From: cfg.GmailFrom, AppPassword: cfg.GmailAppPassword},
+		Sender:   emailotp.CodeMailer{Mail: mailer},
 		Secret:   cfg.JWTSecret,
 		TestCode: cfg.EmailTestCode,
 	}}
@@ -83,8 +95,10 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	customerAccount := handlers.CustomerHandler{Service: customerService, SecureCookie: cfg.AppEnv != "development"}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
 	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
-		Store: orders.PostgresFulfillmentStore{DB: database.DB},
-	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}}}
+		Store:    orders.PostgresFulfillmentStore{DB: database.DB},
+		Notifier: notifier,
+	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}},
+		Emails: orders.EmailConfirmationService{Store: orders.PostgresFulfillmentStore{DB: database.DB}, Notifier: notifier}}
 
 	router.GET("/health", handlers.Health)
 	router.POST("/api/admin/login", adminHandler.Login)
@@ -99,6 +113,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/track", orderAccess.TrackOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
+	router.GET("/api/orders/:id/slip.pdf", orderAccess.GetSlip)
 	router.GET("/api/payment-options", paymentHandler.PaymentOptions)
 	router.GET("/api/orders/:id/payments", paymentHandler.GuestPayments)
 	router.POST("/api/orders/:id/payments", paymentHandler.SubmitPayment)
@@ -137,6 +152,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
 	admin.PUT("/orders/:id/tracking", orderFulfillment.SetTracking)
+	admin.PUT("/orders/:id/email-confirmed", orderFulfillment.SetEmailConfirmed)
 	admin.POST("/orders/:id/advance-received", lensReview.MarkAdvanceReceived)
 	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
 	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)

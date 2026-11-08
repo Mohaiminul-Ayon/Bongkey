@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, requestEmailCode, verifyEmailCode, type AdvancePolicy, type LensPackage, type OrderPayload } from "@/lib/api";
+import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, type AdvancePolicy, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
@@ -34,9 +34,15 @@ async function fetchCartLensTypes(items: CartItem[]) {
 const acceptedPrescriptionTypes = ".pdf,.jpg,.jpeg,.png,.heic,application/pdf,image/jpeg,image/png,image/heic";
 const maxPrescriptionBytes = 5 * 1024 * 1024;
 
-/** checkoutIdempotencyKey reuses a pending key only while the business payload is unchanged. */
+/** validBangladeshMobile mirrors the server check: 01, an operator digit 3-9 and 8 digits, with an optional +88 / 88. */
+function validBangladeshMobile(value: string) {
+  return /^(?:88)?01[3-9]\d{8}$/.test(value.replace(/\D/g, ""));
+}
+
+/** checkoutIdempotencyKey reuses a pending key only while the business payload is unchanged; the fill time and the
+ * hidden bot field are not part of the order. */
 function checkoutIdempotencyKey(payload: OrderPayload) {
-  const { email_proof: _emailProof, ...stablePayload } = payload;
+  const { fill_ms: _fillMs, website: _website, ...stablePayload } = payload;
   const signature = JSON.stringify(stablePayload);
   try {
     const saved = JSON.parse(sessionStorage.getItem(checkoutAttemptStorageKey) ?? "null") as { key?: string; signature?: string } | null;
@@ -86,13 +92,11 @@ export default function CheckoutPage() {
   const [placedOrderId, setPlacedOrderId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
-  const [emailCode, setEmailCode] = useState("");
-  const [emailProof, setEmailProof] = useState("");
+  // When the form appeared; the server treats a form sent within 3 seconds as a possible bot sign.
+  const [formShownAt] = useState(() => Date.now());
   const [bkashOn, setBkashOn] = useState(false);
   const [policies, setPolicies] = useState<AdvancePolicy[]>([]);
   const [payWith, setPayWith] = useState<"cash_on_delivery" | "bkash">("cash_on_delivery");
-  const [emailBusy, setEmailBusy] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
   // Prescription files by bag line; files stay in memory and are sent only with the order.
   const [prescriptions, setPrescriptions] = useState<Map<string, File>>(new Map());
   const hasLens = items.some((item) => item.lens);
@@ -127,36 +131,6 @@ export default function CheckoutPage() {
     // Run once after the saved cart loads; later cart edits already use refreshed products.
   }, [ready]);
 
-  /** sendCode requests verification for the currently entered mailbox. */
-  async function sendCode() {
-    setError("");
-    setEmailBusy(true);
-    try {
-      await requestEmailCode(email.trim());
-      setEmailProof("");
-      setEmailCode("");
-      setCodeSent(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send email code.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
-  /** verifyCode keeps the email proof in component state for this checkout only. */
-  async function verifyCode() {
-    setError("");
-    setEmailBusy(true);
-    try {
-      const result = await verifyEmailCode(email.trim(), emailCode.trim());
-      setEmailProof(result.email_proof);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not verify email code.");
-    } finally {
-      setEmailBusy(false);
-    }
-  }
-
   /** choosePrescription keeps one file per line after a quick type and size check; the server checks the content again. */
   function choosePrescription(lineId: string, file: File | undefined) {
     setError("");
@@ -189,23 +163,21 @@ export default function CheckoutPage() {
       setError("Upload a prescription for each pair with power.");
       return;
     }
-    if (!email.trim() || !emailProof) {
-      setEmailProof("");
-      setError("Verify your email code before placing the order.");
+    const form = new FormData(event.currentTarget);
+    if (!validBangladeshMobile(String(form.get("phone") ?? ""))) {
+      setError("Enter a Bangladesh mobile number like 01712345678.");
       return;
     }
     if (deliveryFee === null || !deliverySettings?.districts.includes(district)) {
       setError("Select a Bangladesh district and confirm the delivery charge before ordering.");
       return;
     }
-    const form = new FormData(event.currentTarget);
     setLoading(true);
     try {
       const payload: OrderPayload = {
         customer_name: String(form.get("name") ?? ""),
         customer_phone: String(form.get("phone") ?? ""),
         customer_email: email.trim(),
-        email_proof: emailProof,
         shipping_address: String(form.get("address") ?? ""),
         city: district,
         delivery_note: String(form.get("note") ?? ""),
@@ -217,6 +189,8 @@ export default function CheckoutPage() {
           lens_option: item.lens ? "" : item.lensOption,
           ...lensPayload(item.lens),
         })),
+        website: String(form.get("bk_extra_url") ?? ""),
+        fill_ms: Date.now() - formShownAt,
       };
       const files = new Map<number, File>();
       items.forEach((item, index) => {
@@ -256,18 +230,18 @@ export default function CheckoutPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
         <form className="grid gap-5 rounded-xl border border-black/10 bg-white p-5 shadow-sm" onSubmit={submitOrder}>
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
-          {placedOrderNumber ? <p role="status" className="rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Order {placedOrderNumber} was placed, but this browser could not save access. {email.trim() && placedOrderId ? <a className="underline" href={`/order-success/${placedOrderId}`}>Verify your email to view it</a> : "Contact support with this order number."}</p> : null}
+          {placedOrderNumber ? <p role="status" className="rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Order {placedOrderNumber} was placed, but this browser could not save access. <a className="underline" href="/track">Track it with your order number and phone</a>.</p> : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">Name<input name="name" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Your full name" /></label>
             <label className="grid gap-2 text-sm font-black">Phone<input name="phone" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="01XXXXXXXXX" /></label>
           </div>
           <div className="rounded-md border border-black/10 p-4">
-            <label className="grid gap-2 text-sm font-black">Email (required)<input name="email" type="email" required value={email} onChange={(event) => { setEmail(event.target.value); setEmailProof(""); setCodeSent(false); setEmailCode(""); }} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="you@example.com" /></label>
-            {email.trim() ? <div className="mt-3 flex flex-wrap items-center gap-3">
-              <button type="button" disabled={emailBusy} onClick={sendCode} className="rounded-md border border-[#173c34] px-3 py-2 text-sm font-bold text-[#173c34] disabled:opacity-50">Send email code</button>
-              {codeSent && !emailProof ? <><input aria-label="Email verification code" inputMode="numeric" maxLength={6} value={emailCode} onChange={(event) => setEmailCode(event.target.value)} className="w-32 rounded-md border border-neutral-300 px-3 py-2" placeholder="6-digit code" /><button type="button" disabled={emailBusy || emailCode.length !== 6} onClick={verifyCode} className="site-button button-primary disabled:opacity-50">Verify</button></> : null}
-              {emailProof ? <span role="status" className="text-sm font-bold text-[#173c34]">Code accepted. If checkout fails after about 9 minutes, send a new code.</span> : null}
-            </div> : null}
+            <label className="grid gap-2 text-sm font-black">Email (required)<input name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="you@example.com" /></label>
+            <p className="mt-2 text-sm text-neutral-600">We email your order number here, and your invoice after we confirm the order by phone.</p>
+          </div>
+          {/* Hidden from people, screen readers and autofill; bots that fill every field reveal themselves. */}
+          <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}>
+            <label>Leave this empty<input name="bk_extra_url" type="text" tabIndex={-1} autoComplete="off" defaultValue="" /></label>
           </div>
           <label className="grid gap-2 text-sm font-black">Address<textarea name="address" required className="min-h-28 rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="House, road, area, landmark" /></label>
           <div className="grid gap-4 sm:grid-cols-2">
