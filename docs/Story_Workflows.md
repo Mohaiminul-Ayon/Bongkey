@@ -612,6 +612,32 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - Local PostgreSQL `TestPostgresLinkOrders`: an email-only match is refused, email + phone links, a repeat links 0, another customer's order is never moved, an expired session is refused.
 - Live HTTP on the local server: all failure paths above, the preflight headers, and a customer cookie refused on `/api/admin/me`.
 - Browser: the signed-out page, the signed-in page with "We found 2 earlier orders", linking one order by phone, and sign-out back to the signed-out page. QA rows were removed.
+## SHOP-01 — Sale prices, card add-to-bag and browser wishlist (#80)
+
+**Status:** Built 2026-11-07 on `feat/storefront-ui`. The shadcn/ui swap waits for the owner's screenshots of layouts that break.
+
+**Prices:** [discountPercent](../frontend/src/lib/products.ts) gives the whole-number saving. Cards and the product page show the price in the sale colour, the old price struck through, and a "-23%" badge. A tiny saving that rounds to 0% shows no badge.
+
+**Card add-to-bag:** [ProductCard](../frontend/src/components/ProductCard.tsx).
+- `GET /api/products` now returns `option_count`: active colour/size options under the frame. [productSelectSQL](../backend/internal/catalog/product_repository.go) counts them in a subquery.
+- A frame with options shows **Choose options**, which opens the product page.
+- A single-option frame shows **Add to bag**. It picks the same default as the product page and calls the existing `addItem`, so the bag's merge rules still apply.
+- The button turns to **All in your bag** once every bag line of that frame reaches its stock, and to **Out of stock** when there is none. Checkout still checks stock on the server.
+
+**Wishlist:** [WishlistProvider](../frontend/src/lib/wishlist.tsx) keeps up to 100 saved slugs in `localStorage` (`bongkey_wishlist`). The ♡ button on each card has `aria-pressed` and a "Save …"/"Remove … from saved" label. The header shows the saved count. The [wishlist page](../frontend/src/app/wishlist/page.tsx) loads today's products. A saved frame the shop no longer lists shows "no longer available" with Remove; an out-of-stock one shows the disabled card button.
+
+**Limits:** the wishlist lives only in this browser (marked `shortcut:`). The product page has no heart yet.
+
+**Evidence:**
+- The catalog integration test checks `option_count` for a frame with one child.
+- `go vet`, `go test` and `tsc` pass.
+- Browser at desktop and 375 px with no horizontal scroll:
+  - sale badges on cards;
+  - two hearts saved, with the header count at 2;
+  - Add to bag → "Added ✓" and the bag at 1;
+  - the frame with options showed Choose options;
+  - adding up to stock (14) turned the button to "All in your bag";
+  - a deleted saved slug showed "no longer available", and Remove cleared it.
 
 ## Stories without a completed request flow
 

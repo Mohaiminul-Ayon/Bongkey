@@ -11,6 +11,7 @@
   --muted: #6b6b66;
   --inverse: #ffffff;
   --radius: 16px;
+  --sale: #b42318;
 }
 
 html[data-theme="dark"] {
@@ -22,6 +23,7 @@ html[data-theme="dark"] {
   --border: #333333;
   --muted: #a9a9a4;
   --inverse: #121212;
+  --sale: #ff8a80;
 }
 
 /* Element defaults live in the base layer so Tailwind utilities (e.g. text-white on a link) can override them. */
@@ -115,8 +117,16 @@ html[data-theme="dark"] {
 
 /* Product grid and card: the photo carries the card; text stays quiet. */
 .product-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 20px; }
-.product-card { min-width: 0; }
-.product-card-link { display: block; }
+/* A column, so every card's bag button lines up at the bottom of its row. */
+.product-card { position: relative; display: flex; min-width: 0; flex-direction: column; }
+.wish-button { position: absolute; top: 10px; right: 10px; z-index: 1; display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--foreground); font-size: 19px; line-height: 1; }
+.wish-button[aria-pressed="true"] { color: var(--sale); }
+.card-add { width: 100%; min-height: 40px; margin-top: 10px; padding: 8px 14px; font-size: 13px; }
+.on-sale strong { color: var(--sale); }
+.sale-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--sale); color: var(--inverse); font-size: 11px; font-weight: 700; vertical-align: middle; }
+.product-card-was { display: block; white-space: nowrap; }
+.saved-link { display: inline-flex; height: 40px; align-items: center; gap: 4px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 600; }
+.product-card-link { display: block; flex: 1; }
 .product-visual { aspect-ratio: 1 / 1; display: grid; place-items: center; position: relative; overflow: hidden; border-radius: var(--radius); background: var(--surface-raised); }
 .product-visual img { transition: transform .4s; }
 .product-card-link:hover .product-visual img { transform: scale(1.04); }
@@ -128,7 +138,7 @@ html[data-theme="dark"] {
 .product-card-name { font-size: 15px; font-weight: 600; line-height: 1.35; }
 .product-card-price { flex: none; text-align: right; }
 .product-card-price strong { font-size: 15px; font-weight: 600; }
-.product-card-price del { display: block; color: var(--muted); font-size: 12px; }
+.product-card-price del { color: var(--muted); font-size: 12px; }
 .product-card-detail { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 
 /* Catalog */
@@ -269,7 +279,7 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
   .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 12px; }
   .product-card-row { flex-direction: column; gap: 2px; }
   .product-card-price { text-align: left; }
-  .product-card-price del { display: inline; margin-left: 6px; }
+  .product-card-was { display: inline; margin-left: 6px; }
   .product-card-name { font-size: 14px; }
   .catalog-page, .product-page { padding: 28px 16px 64px; }
   .editorial-band { grid-template-columns: 1fr; margin: 0 16px; padding: 40px 24px; }

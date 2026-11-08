@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.35
+Version: 2.36
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -517,6 +517,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | GUEST-01 | High / REQ-05 | Guest checkout without an email code; Bangladesh mobile required and normalized; per-phone and per-client limits; honeypot + fill-time bot handling; red flags saved for staff; order slip at checkout, guest invoice only after confirmation | Built 2026-11-07 (#78): Go unit tests, HTTP bot/phone cases, local slip PDF and invoice gate, browser checkout without code. Email-code recovery for unverified orders waits for #83's staff email tick |
 | ACCOUNT-01 | R2 / REQ-05 | Explicit verified-email account signup/login; one customer table; orders use nullable `customer_id`; customer-confirmed historical linking updates eligible verified-email guest orders without copying data | Deferred until after pilot feedback; do not scaffold during R1 |
 | GOOGLE-01 | R1 / REQ-05 | Optional customer Google sign-in (13.2): verified ID token, HttpOnly SameSite cookie session with expiry and logout, CSRF header, "My orders", phone-checked linking of earlier guest orders (#79) | Built 2026-11-07, off until the owner sets the Google client ID. Unit, HTTP and local PostgreSQL tests, live HTTP failure paths and a browser link/sign-out pass. Open: auto-attach orders placed while signed in after #84; real Google sign-in with the owner's client |
+| SHOP-01 | R1 / REQ-12 | Sale price highlight with % badge, add-to-bag on single-option cards (Choose options otherwise), browser wishlist with a saved page (#80) | Built 2026-11-07; desktop and 375 px browser checks. Open: gradual shadcn/ui after the owner shares screenshots of broken layouts |
 
 ### Separate execution checklists (2026-10-15)
 
@@ -721,3 +722,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.32 | Pilot scope decisions (13.2): Brevo emails with database-first sending, owner 9 PM summary and instant bKash alert, invoice email after a confirmed address; guest checkout without email code, with honeypot, red flags and an order slip; Google sign-in before the pilot with phone-checked order linking; browser wishlist, price highlight, card add-to-cart, gradual shadcn/ui; RAG chatbot and AR/3D try-on after the pilot; Oracle Cloud hosting. |
 | 2026-11-07 | 2.33 | NOTIFY-01: database-first order emails (Brevo or Gmail), customer emails for placed/payment/shipped/delivered/invoice after confirmed email, owner bKash alert and 9 PM summary. |
 | 2026-11-07 | 2.35 | GOOGLE-01 (#79): customer Google sign-in, cookie sessions, My orders and phone-checked order linking; off until `GOOGLE_CLIENT_ID` is set. |
+| 2026-11-07 | 2.36 | SHOP-01 (#80): sale price badges, card add-to-bag, browser wishlist; `option_count` on the product list. |
