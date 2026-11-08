@@ -114,7 +114,7 @@ const findOrderSQL = `
 		EXISTS (SELECT 1 FROM order_items x WHERE x.order_id = o.id AND x.lens_kind <> 'none'),
 		o.advance_mode, o.advance_required, o.amount_paid,
 		o.created_at, o.confirmed_at, o.preparing_at, o.shipped_at, o.delivered_at, o.cancelled_at,
-		o.courier_name, o.tracking_code, o.tracking_url
+		o.courier_name, o.tracking_code, o.tracking_url, o.email_confirmed
 	FROM orders o LEFT JOIN invoices i ON i.order_id = o.id
 	WHERE `
 
@@ -138,7 +138,7 @@ func (r PostgresReader) Find(ctx context.Context, id string) (Record, error) {
 		&record.LensOrder, &record.AdvanceMode, &record.AdvanceRequired, &record.AmountPaid,
 		&record.Tracking.PlacedAt, &record.Tracking.ConfirmedAt, &record.Tracking.PreparingAt, &record.Tracking.ShippedAt,
 		&record.Tracking.DeliveredAt, &record.Tracking.CancelledAt,
-		&record.Tracking.Courier, &record.Tracking.TrackingCode, &record.Tracking.TrackingURL,
+		&record.Tracking.Courier, &record.Tracking.TrackingCode, &record.Tracking.TrackingURL, &record.EmailConfirmed,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Record{}, ErrNotFound

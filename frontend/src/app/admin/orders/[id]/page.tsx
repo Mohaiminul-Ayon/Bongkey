@@ -7,7 +7,7 @@ import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { OrderTimeline } from "@/components/OrderTimeline";
 import { PaymentReviewList } from "@/components/PaymentReviewList";
-import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderTracking, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
+import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderTracking, setEmailConfirmed, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
@@ -167,6 +167,13 @@ function OrderDetails({ id }: { id: string }) {
             <h2 className="text-xl font-black">Customer and delivery</h2>
             <p className="mt-4 font-bold">{order.customer_name}</p>
             <p>{order.customer_email || "No email recorded"}</p>
+            {order.customer_email ? (
+              <label className="mt-2 flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-1" checked={order.email_confirmed} disabled={busy}
+                  onChange={(event) => { const confirmed = event.target.checked; void run(() => setEmailConfirmed(order.id, confirmed)); }} />
+                <span>Email confirmed on the call. The invoice email is sent once this is ticked and the order is confirmed.</span>
+              </label>
+            ) : null}
             <p>{order.customer_phone}</p>
             <p className="mt-3 whitespace-pre-wrap">{order.shipping_address}, {order.city}</p>
             {order.delivery_note ? <p className="mt-3 text-sm text-neutral-600">Note: {order.delivery_note}</p> : null}

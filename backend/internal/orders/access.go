@@ -45,6 +45,7 @@ type Record struct {
 	GuestTokenHash  string
 	CustomerEmail   string
 	EmailVerified   bool
+	EmailConfirmed  bool
 	DeliveryNote    string
 	PaymentMethod   string
 	PaymentStatus   string
@@ -80,7 +81,9 @@ type Item struct {
 // AdminDetail adds operational fields and item snapshots to the private order summary.
 type AdminDetail struct {
 	Summary
-	CustomerEmail   string
+	CustomerEmail string
+	// EmailConfirmed is the staff tick that the email was read back on the confirmation call.
+	EmailConfirmed  bool
 	DeliveryNote    string
 	PaymentMethod   string
 	PaymentStatus   string
@@ -154,6 +157,6 @@ func (s AccessService) detail(ctx context.Context, record Record) (AdminDetail, 
 	return AdminDetail{
 		Summary: record.Summary, CustomerEmail: record.CustomerEmail, DeliveryNote: record.DeliveryNote,
 		PaymentMethod: record.PaymentMethod, PaymentStatus: record.PaymentStatus, CreatedAt: record.CreatedAt, Items: items,
-		InvoiceIssuedAt: record.InvoiceIssuedAt,
+		InvoiceIssuedAt: record.InvoiceIssuedAt, EmailConfirmed: record.EmailConfirmed,
 	}, nil
 }

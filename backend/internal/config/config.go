@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,16 @@ type Config struct {
 	// EmailTestCode turns on local email test mode: addresses ending in @example.test get this fixed
 	// 6-digit code and no email is sent. Empty means off; startup refuses it outside development.
 	EmailTestCode string
+	// MailProvider is "gmail" (SMTP, local work) or "brevo" (HTTPS API, for hosts that block mail ports).
+	MailProvider string
+	BrevoAPIKey  string
+	// MailFrom is the Brevo sender, an address on a domain verified in Brevo; Gmail sends from GmailFrom.
+	MailFrom     string
+	MailFromName string
+	// OwnerNotifyEmail receives the daily summary and payment alerts; empty turns owner emails off.
+	OwnerNotifyEmail string
+	// SiteURL is the public storefront address used in email links, such as the Track page.
+	SiteURL string
 	// FrontendOrigins are the browser origins allowed to read API responses (CORS).
 	FrontendOrigins []string
 	ProjectRoot     string
@@ -52,12 +63,18 @@ func Load() (Config, error) {
 		GmailFrom:        getEnv("GMAIL_FROM", ""),
 		GmailAppPassword: getEnv("GMAIL_APP_PASSWORD", ""),
 		EmailTestCode:    getEnv("EMAIL_TEST_CODE", ""),
+		MailProvider:     getEnv("MAIL_PROVIDER", "gmail"),
+		BrevoAPIKey:      getEnv("BREVO_API_KEY", ""),
+		MailFrom:         getEnv("MAIL_FROM", ""),
+		MailFromName:     getEnv("MAIL_FROM_NAME", "Bongkey"),
+		OwnerNotifyEmail: getEnv("OWNER_NOTIFY_EMAIL", ""),
 		FrontendOrigins:  strings.Split(getEnv("FRONTEND_ORIGIN", "http://localhost:3000"), ","),
 		ProjectRoot:      projectRoot,
 		PrescriptionDir:  filepath.Join(projectRoot, "backend", "private", "prescriptions"),
 		EnvFile:          loadedEnvFile,
 		EnvFileHint:      envFileHint,
 	}
+	cfg.SiteURL = strings.TrimRight(getEnv("PUBLIC_SITE_URL", cfg.FrontendOrigins[0]), "/")
 	if err := cfg.validateSecurity(); err != nil {
 		return Config{}, err
 	}
@@ -72,11 +89,29 @@ func (cfg Config) validateSecurity() error {
 	if (cfg.GmailFrom == "") != (cfg.GmailAppPassword == "") {
 		return fmt.Errorf("GMAIL_FROM and GMAIL_APP_PASSWORD must be set together")
 	}
+	switch cfg.MailProvider {
+	case "", "gmail":
+	case "brevo":
+		if cfg.BrevoAPIKey == "" || !plainAddress(cfg.MailFrom) {
+			return fmt.Errorf("MAIL_PROVIDER=brevo needs BREVO_API_KEY and a plain MAIL_FROM address")
+		}
+	default:
+		return fmt.Errorf("MAIL_PROVIDER must be gmail or brevo")
+	}
+	if cfg.OwnerNotifyEmail != "" && !plainAddress(cfg.OwnerNotifyEmail) {
+		return fmt.Errorf("OWNER_NOTIFY_EMAIL must be one plain email address")
+	}
 	// A fixed code must never reach a real shop: fail closed unless this is explicitly a development run.
 	if cfg.EmailTestCode != "" && (cfg.AppEnv != "development" || !sixDigits(cfg.EmailTestCode)) {
 		return fmt.Errorf("EMAIL_TEST_CODE is only allowed with APP_ENV=development and must be 6 digits")
 	}
 	return nil
+}
+
+// plainAddress accepts one mailbox such as orders@example.com, without a display name.
+func plainAddress(value string) bool {
+	parsed, err := mail.ParseAddress(value)
+	return err == nil && parsed.Address == value
 }
 
 // sixDigits reports whether value is exactly six ASCII digits.

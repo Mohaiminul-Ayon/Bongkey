@@ -22,6 +22,29 @@ func TestValidateSecurityRejectsTemplateSecrets(t *testing.T) {
 	}
 }
 
+// TestMailProviderSettings fails closed on an unknown provider or an incomplete Brevo setup.
+func TestMailProviderSettings(t *testing.T) {
+	const secret = "synthetic-test-secret-at-least-thirty-two-characters"
+	for name, tc := range map[string]struct {
+		cfg Config
+		ok  bool
+	}{
+		"gmail default":       {Config{}, true},
+		"brevo complete":      {Config{MailProvider: "brevo", BrevoAPIKey: "synthetic-key", MailFrom: "orders@example.com"}, true},
+		"brevo without key":   {Config{MailProvider: "brevo", MailFrom: "orders@example.com"}, false},
+		"brevo without from":  {Config{MailProvider: "brevo", BrevoAPIKey: "synthetic-key"}, false},
+		"brevo display name":  {Config{MailProvider: "brevo", BrevoAPIKey: "synthetic-key", MailFrom: "Shop <orders@example.com>"}, false},
+		"unknown provider":    {Config{MailProvider: "sendmail"}, false},
+		"owner email valid":   {Config{OwnerNotifyEmail: "owner@example.com"}, true},
+		"owner email invalid": {Config{OwnerNotifyEmail: "owner@"}, false},
+	} {
+		tc.cfg.JWTSecret = secret
+		if err := tc.cfg.validateSecurity(); (err == nil) != tc.ok {
+			t.Fatalf("%s: err = %v", name, err)
+		}
+	}
+}
+
 // TestEmailTestCodeOnlyInDevelopment keeps the fixed email code out of any non-development run.
 func TestEmailTestCodeOnlyInDevelopment(t *testing.T) {
 	const secret = "synthetic-test-secret-at-least-thirty-two-characters"

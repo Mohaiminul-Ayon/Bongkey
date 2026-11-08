@@ -48,6 +48,10 @@ Before the first backend start, fill in these values in `.env`:
 | `FRONTEND_ORIGIN` | No | Exact browser origin(s) of the shop frontend, comma-separated. Default `http://localhost:3000`. Other websites get no CORS permission. Set it to the real site address when deploying. |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First start | Creates the one owner account when the admin table is empty. Password at least 12 characters. Later starts never change it. |
 | `GMAIL_FROM`, `GMAIL_APP_PASSWORD` | For checkout | Sends the email OTP. Set both or neither. Without them the backend starts, but checkout cannot send a code, so no order can be placed. Use a dedicated Gmail account with 2-Step Verification and an app password. |
+| `MAIL_PROVIDER` | No | `gmail` (default, SMTP, for local work) or `brevo` (HTTPS API, for servers that block mail ports). Checkout codes and order emails use the same provider |
+| `BREVO_API_KEY`, `MAIL_FROM`, `MAIL_FROM_NAME` | With `brevo` | Brevo API key and a sender address on a domain verified in Brevo; startup fails if either is missing |
+| `OWNER_NOTIFY_EMAIL` | No | Gets the 9 PM daily summary and an email for each bKash payment waiting. Empty turns owner emails off |
+| `PUBLIC_SITE_URL` | No | Storefront address used in email links (Track page, admin). Defaults to the first `FRONTEND_ORIGIN` |
 | `EMAIL_TEST_CODE` | No | Local testing only. When set (6 digits, and only with `APP_ENV=development`, otherwise startup fails), addresses ending in `@example.test` get this code and no email is sent; every real address still needs a real emailed code. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
 | `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
@@ -113,6 +117,7 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `015_advance_policies.sql` | The owner's advance rules and each order's saved advance and paid amount |
    | `016_delivery_tracking.sql` | Status step times and the courier name, tracking code and link |
    | `017_frame_line_price_final.sql` | Marks saved frame-only lines as having no lens price to confirm |
+   | `018_notifications.sql` | Saved emails waiting to be sent, and the order's "email confirmed" tick |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

@@ -37,7 +37,7 @@ func localDB(t *testing.T) *sql.DB {
 		t.Fatal("could not open local PostgreSQL")
 	}
 	t.Cleanup(func() { db.Close() })
-	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql", "014_manual_payments.sql", "015_advance_policies.sql"} {
+	for _, name := range []string{"011_lens_packages.sql", "012_lens_orders.sql", "013_prescription_review.sql", "014_manual_payments.sql", "015_advance_policies.sql", "016_delivery_tracking.sql", "018_notifications.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)

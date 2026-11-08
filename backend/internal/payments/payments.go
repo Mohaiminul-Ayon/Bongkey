@@ -179,7 +179,17 @@ type Store interface {
 }
 
 // Service applies the payment rules; it never trusts a submission as money received.
-type Service struct{ Store Store }
+type Service struct {
+	Store Store
+	// Notifier may be nil; it queues the owner alert and the customer's approved or rejected email.
+	Notifier Notifier
+}
+
+// Notifier queues payment emails after a change committed; implementations record their own errors.
+type Notifier interface {
+	PaymentSubmitted(ctx context.Context, paymentID int)
+	PaymentReviewed(ctx context.Context, paymentID int)
+}
 
 // GuestView is what the customer sees for their order: whether to pay now, where, and what they sent.
 type GuestView struct {
@@ -243,7 +253,12 @@ func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payme
 	if !method.Enabled {
 		return Payment{}, ErrMethodOff
 	}
-	return s.Store.Submit(ctx, orderID, sub)
+	payment, err := s.Store.Submit(ctx, orderID, sub)
+	// A repeated submission returns the first record; its event key keeps the owner alert to one email.
+	if err == nil && s.Notifier != nil {
+		s.Notifier.PaymentSubmitted(ctx, payment.ID)
+	}
+	return payment, err
 }
 
 // SaveMethod updates the receiving number and instructions; an enabled method needs a valid number.
@@ -312,7 +327,13 @@ func (s Service) Approve(ctx context.Context, paymentID int, adminID int64) erro
 	if paymentID <= 0 || adminID <= 0 {
 		return ErrInvalidPayment
 	}
-	return s.Store.Approve(ctx, paymentID, adminID)
+	if err := s.Store.Approve(ctx, paymentID, adminID); err != nil {
+		return err
+	}
+	if s.Notifier != nil {
+		s.Notifier.PaymentReviewed(ctx, paymentID)
+	}
+	return nil
 }
 
 // Reject closes a payment the owner could not find in the bKash app; the reason is shown to the customer.
@@ -321,7 +342,13 @@ func (s Service) Reject(ctx context.Context, paymentID int, adminID int64, reaso
 	if paymentID <= 0 || adminID <= 0 || reason == "" || utf8.RuneCountInString(reason) > maxRejectReason {
 		return ErrInvalidPayment
 	}
-	return s.Store.Reject(ctx, paymentID, adminID, reason)
+	if err := s.Store.Reject(ctx, paymentID, adminID, reason); err != nil {
+		return err
+	}
+	if s.Notifier != nil {
+		s.Notifier.PaymentReviewed(ctx, paymentID)
+	}
+	return nil
 }
 
 // NormalizeMobile turns "+880 1712-345678" or "8801712345678" into the local 01XXXXXXXXX form; anything else is returned trimmed.
