@@ -20,7 +20,7 @@ func multipartOrder(t *testing.T, files map[string][]byte) (*bytes.Buffer, strin
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	order := `{"customer_name":"QA","customer_phone":"000","shipping_address":"Local","city":"Dhaka","expected_delivery_fee":80,
+	order := `{"customer_name":"QA","customer_phone":"01712345678","shipping_address":"Local","city":"Dhaka","expected_delivery_fee":80,
 		"items":[{"product_id":1,"quantity":1,"lens_kind":"package","lens_package_id":7,"lens_power":"with_power"}]}`
 	if err := writer.WriteField("order", order); err != nil {
 		t.Fatal(err)

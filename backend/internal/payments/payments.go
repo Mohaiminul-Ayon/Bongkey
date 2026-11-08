@@ -50,8 +50,7 @@ var (
 )
 
 var (
-	trxPattern    = regexp.MustCompile(`^[A-Z0-9]{8,12}$`)
-	mobilePattern = regexp.MustCompile(`^01[3-9][0-9]{8}$`)
+	trxPattern = regexp.MustCompile(`^[A-Z0-9]{8,12}$`)
 )
 
 // Method is one way the shop receives money, with what the customer is told to do.
@@ -242,8 +241,8 @@ func (s Service) ForGuest(ctx context.Context, orderID int) (GuestView, error) {
 func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payment, error) {
 	sub.Method = strings.TrimSpace(sub.Method)
 	sub.TrxID = strings.ToUpper(strings.TrimSpace(sub.TrxID))
-	sub.SenderNumber = NormalizeMobile(sub.SenderNumber)
-	if orderID <= 0 || sub.Method != MethodBkash || !trxPattern.MatchString(sub.TrxID) || !mobilePattern.MatchString(sub.SenderNumber) || sub.Amount <= 0 || sub.Amount > maxAmount {
+	sub.SenderNumber = orders.NormalizeMobile(sub.SenderNumber)
+	if orderID <= 0 || sub.Method != MethodBkash || !trxPattern.MatchString(sub.TrxID) || !orders.ValidMobile(sub.SenderNumber) || sub.Amount <= 0 || sub.Amount > maxAmount {
 		return Payment{}, ErrInvalidPayment
 	}
 	method, err := s.Store.Method(ctx, sub.Method)
@@ -263,10 +262,10 @@ func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payme
 
 // SaveMethod updates the receiving number and instructions; an enabled method needs a valid number.
 func (s Service) SaveMethod(ctx context.Context, method Method) error {
-	method.AccountNumber = NormalizeMobile(method.AccountNumber)
+	method.AccountNumber = orders.NormalizeMobile(method.AccountNumber)
 	method.Instructions = strings.TrimSpace(method.Instructions)
 	if method.Code != MethodBkash || utf8.RuneCountInString(method.Instructions) > maxInstructions ||
-		(method.AccountNumber != "" && !mobilePattern.MatchString(method.AccountNumber)) || (method.Enabled && method.AccountNumber == "") {
+		(method.AccountNumber != "" && !orders.ValidMobile(method.AccountNumber)) || (method.Enabled && method.AccountNumber == "") {
 		return ErrInvalidPayment
 	}
 	return s.Store.SaveMethod(ctx, method)
@@ -349,21 +348,4 @@ func (s Service) Reject(ctx context.Context, paymentID int, adminID int64, reaso
 		s.Notifier.PaymentReviewed(ctx, paymentID)
 	}
 	return nil
-}
-
-// NormalizeMobile turns "+880 1712-345678" or "8801712345678" into the local 01XXXXXXXXX form; anything else is returned trimmed.
-func NormalizeMobile(value string) string {
-	digits := strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, value)
-	if strings.HasPrefix(digits, "880") && len(digits) == 13 {
-		return digits[2:]
-	}
-	if len(digits) == 11 {
-		return digits
-	}
-	return strings.TrimSpace(value)
 }

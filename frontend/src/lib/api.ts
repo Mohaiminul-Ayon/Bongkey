@@ -39,7 +39,6 @@ export type OrderPayload = {
   customer_name: string;
   customer_phone: string;
   customer_email: string;
-  email_proof: string;
   shipping_address: string;
   city: string;
   delivery_note: string;
@@ -47,6 +46,9 @@ export type OrderPayload = {
   /** payment_method is sent only for frame-only carts; lens orders always pay an advance. */
   payment_method?: "cash_on_delivery" | "bkash";
   items: OrderItemPayload[];
+  /** website is the hidden honeypot field (empty for people); fill_ms is how long the form was open. */
+  website?: string;
+  fill_ms?: number;
 };
 
 /** OrderItemPayload is one bag line; lens fields are sent only for lens lines, and powers are hundredths (-150 = -1.50). */
@@ -88,6 +90,8 @@ export type AdminOrderDetail = {
   tracking: OrderTracking;
   /** email_confirmed is the staff tick that the email was read back on the call; the invoice email waits for it. */
   email_confirmed: boolean;
+  /** risk_flags are checkout red flags for staff, such as "short_address". */
+  risk_flags?: string[];
   items: AdminOrderItem[];
 };
 
@@ -522,15 +526,25 @@ export async function savePaymentMethod(method: PaymentMethod) {
 /** downloadInvoice keeps guest and admin bearer proofs out of URLs. */
 export async function downloadInvoice(id: string, token: string, admin = false) {
   const path = admin ? `/api/admin/orders/${encodeURIComponent(id)}` : `/api/orders/${encodeURIComponent(id)}`;
-  const response = await fetch(`${API_URL}${path}/invoice.pdf`, {
+  await downloadPdf(`${path}/invoice.pdf`, token, `bongkey-invoice-${id}.pdf`, "Could not download invoice.");
+}
+
+/** downloadOrderSlip saves the order slip (not an invoice) the customer gets right after checkout. */
+export async function downloadOrderSlip(id: string, token: string) {
+  await downloadPdf(`/api/orders/${encodeURIComponent(id)}/slip.pdf`, token, `bongkey-order-${id}.pdf`, "Could not download the order slip.");
+}
+
+/** downloadPdf fetches an authorized PDF and saves it without putting the token in a URL. */
+async function downloadPdf(path: string, token: string, filename: string, failure: string) {
+  const response = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error("Could not download invoice.");
+  if (!response.ok) throw new Error(failure);
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = url;
-  link.download = `bongkey-invoice-${id}.pdf`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();

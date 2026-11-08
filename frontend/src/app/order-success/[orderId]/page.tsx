@@ -6,7 +6,7 @@ import { BkashPaymentBox } from "@/components/BkashPaymentBox";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { OrderTimeline } from "@/components/OrderTimeline";
-import { downloadInvoice, fetchOrder, requestEmailCode, verifyEmailCode, type OrderTracking } from "@/lib/api";
+import { downloadInvoice, downloadOrderSlip, fetchOrder, requestEmailCode, verifyEmailCode, type OrderTracking } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -46,14 +46,14 @@ export default function OrderSuccessPage() {
   const [busy, setBusy] = useState(false);
   const [accessToken, setAccessToken] = useState("");
 
-  /** saveInvoice downloads the authorized PDF without navigating to a token URL. */
-  async function saveInvoice() {
+  /** saveFile downloads the order slip or, once the order is confirmed, the invoice, without a token URL. */
+  async function saveFile(kind: "slip" | "invoice") {
     setBusy(true);
     setError("");
     try {
-      await downloadInvoice(params.orderId, accessToken);
-    } catch {
-      setError("Could not download invoice. Please verify the order email again.");
+      await (kind === "slip" ? downloadOrderSlip(params.orderId, accessToken) : downloadInvoice(params.orderId, accessToken));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not download the file.");
     } finally {
       setBusy(false);
     }
@@ -135,8 +135,13 @@ export default function OrderSuccessPage() {
             ) : null}
             <div className="mt-4"><OrderTimeline status={order.order_status} tracking={order.tracking} /></div>
             {accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} lensOrder={order.lens_order} /> : null}
-            {!order.pay_in_advance ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on Delivery. Invoice has been generated after order confirmation.</p> : null}
-            <button type="button" disabled={busy || !accessToken} onClick={saveInvoice} className="site-button button-primary w-fit disabled:opacity-50">Download invoice PDF</button>
+            {!order.pay_in_advance ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on delivery. We call you to confirm the order; your invoice comes after that.</p> : null}
+            <div className="flex flex-wrap gap-3">
+              <button type="button" disabled={busy || !accessToken} onClick={() => void saveFile("slip")} className="site-button button-primary w-fit disabled:opacity-50">Download order slip</button>
+              {["confirmed", "preparing", "shipped", "delivered"].includes(order.order_status) ? (
+                <button type="button" disabled={busy || !accessToken} onClick={() => void saveFile("invoice")} className="site-button button-secondary w-fit disabled:opacity-50">Download invoice PDF</button>
+              ) : null}
+            </div>
             {error ? <p role="alert" className="text-red-700">{error}</p> : null}
           </div>
         ) : error || codeSent ? (

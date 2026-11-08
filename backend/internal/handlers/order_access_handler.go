@@ -14,6 +14,8 @@ import (
 // OrderAccessHandler maps private order access decisions to HTTP responses.
 type OrderAccessHandler struct {
 	Service orders.AccessService
+	// SiteURL is printed on the order slip so the customer knows where to track the order.
+	SiteURL string
 }
 
 // GetInvoice downloads a snapshot PDF after order-scoped guest authorization.
@@ -25,7 +27,39 @@ func (h OrderAccessHandler) GetInvoice(c *gin.Context) {
 		return
 	}
 	order, err := h.Service.GuestInvoice(c.Request.Context(), c.Param("id"), token)
+	if errors.Is(err, orders.ErrInvoiceNotReady) {
+		c.JSON(http.StatusConflict, gin.H{"error": "your invoice is ready after we confirm your order by phone; download the order slip for now"})
+		return
+	}
 	respondWithInvoice(c, order, err)
+}
+
+// GetSlip downloads the order slip (order number, products, total, how to track) after order-scoped guest
+// authorization. It is not an invoice: before confirmation the price or the order can still change.
+func (h OrderAccessHandler) GetSlip(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !ok || token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	order, err := h.Service.GuestDetail(c.Request.Context(), c.Param("id"), token)
+	if errors.Is(err, orders.ErrNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load the order"})
+		return
+	}
+	data, err := invoice.RenderSlip(order, h.SiteURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create the order slip"})
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="order-%s.pdf"`, order.OrderNumber))
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Data(http.StatusOK, "application/pdf", data)
 }
 
 // GetAdminInvoice downloads the same snapshot after AdminAuth verifies the owner.
@@ -112,7 +146,7 @@ func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee, "total": order.Total,
 		"order_status": order.Status, "payment_method": order.PaymentMethod, "payment_status": order.PaymentStatus,
 		"advance_mode": order.AdvanceMode, "advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,
-		"tracking": order.Tracking, "email_confirmed": order.EmailConfirmed,
+		"tracking": order.Tracking, "email_confirmed": order.EmailConfirmed, "risk_flags": order.RiskFlags,
 		"created_at": order.CreatedAt, "items": order.Items,
 	})
 }

@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/mail"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"bongkey/backend/internal/delivery"
@@ -48,6 +50,18 @@ var (
 	ErrLensUnavailable = errors.New("lens type unavailable for this frame")
 	// ErrPaymentUnavailable means the customer chose an online payment the owner has turned off.
 	ErrPaymentUnavailable = errors.New("payment method unavailable")
+	// ErrInvalidPhone means the delivery phone is not a Bangladesh mobile number.
+	ErrInvalidPhone = errors.New("invalid delivery phone")
+	// ErrInvalidEmail means the email is missing or not one plain address.
+	ErrInvalidEmail = errors.New("invalid email")
+	// ErrCheckoutLimited means one phone or client placed too many orders in a short time.
+	ErrCheckoutLimited = errors.New("too many orders")
+)
+
+// Checkout floods are limited per phone and per client in the shared 15-minute window.
+const (
+	checkoutsPerPhone  = 5
+	checkoutsPerClient = 10
 )
 
 // Checkout payment choices. An empty choice keeps the old default: cash on delivery, or an advance for lenses.
@@ -108,12 +122,16 @@ type PrescriptionSaver interface {
 
 // CheckoutRequest contains the customer details and items needed to place a COD order.
 type CheckoutRequest struct {
-	IdempotencyKey      string
-	CustomerName        string
-	CustomerPhone       string
-	CustomerEmail       string
-	EmailProof          string
-	EmailVerified       bool
+	IdempotencyKey string
+	CustomerName   string
+	CustomerPhone  string
+	CustomerEmail  string
+	// EmailProof is optional since checkout stopped asking for an email code; a valid proof still marks the email verified.
+	EmailProof    string
+	EmailVerified bool
+	// ClientIP rate-limits checkouts per client; FastSubmit records a form sent faster than a person types.
+	ClientIP            string
+	FastSubmit          bool
 	ShippingAddress     string
 	City                string
 	DeliveryNote        string
@@ -145,6 +163,10 @@ type ReservedProduct struct {
 // CheckoutTx persists all pieces of an order inside one transaction.
 type CheckoutTx interface {
 	FindIdempotentOrder(context.Context, string) (CheckoutReceipt, string, bool, error)
+	// PhoneHistory reads earlier orders with the same phone for the red flags.
+	PhoneHistory(ctx context.Context, phone, name string, dayStart time.Time) (PhoneHistory, error)
+	// FlagOrder saves the red flags staff see in the order list.
+	FlagOrder(ctx context.Context, orderID int, flags []string) error
 	ReserveProduct(context.Context, int, int) (ReservedProduct, error)
 	LensForProduct(ctx context.Context, packageID, productID int) (LensChoice, error)
 	InsertOrder(ctx context.Context, request CheckoutRequest, subtotal, deliveryFee, total int, tokenHash, keyHash, requestHash string, terms PaymentTerms) (int, string, error)
@@ -173,6 +195,8 @@ type CheckoutService struct {
 	PaymentOptions PaymentOptions
 	// Notifier may be nil; it queues the order-placed email after the order commits.
 	Notifier Notifier
+	// Limiter may be nil (tests); it counts checkouts per phone and per client.
+	Limiter AttemptCounter
 }
 
 // Place reserves products in a stable order and commits the order and invoice together.
@@ -181,7 +205,17 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		return CheckoutReceipt{}, ErrInvalidCheckout
 	}
 	request.CustomerEmail = strings.ToLower(strings.TrimSpace(request.CustomerEmail))
-	request.EmailVerified = request.CustomerEmail != ""
+	request.CustomerPhone = NormalizeMobile(request.CustomerPhone)
+	if !ValidMobile(request.CustomerPhone) {
+		return CheckoutReceipt{}, ErrInvalidPhone
+	}
+	// The owner confirms every order by phone, so checkout no longer needs an email code (PRD 13.2). An old client
+	// that still sends a proof keeps the email marked verified, which also keeps its retries' fingerprint unchanged.
+	verifiedEmail, proofErr := security.VerifyEmailProof(s.EmailProofSecret, request.EmailProof)
+	request.EmailVerified = request.EmailProof != "" && proofErr == nil && verifiedEmail == request.CustomerEmail
+	if err := s.limit(ctx, request); err != nil {
+		return CheckoutReceipt{}, err
+	}
 	quantities := make(map[int]int, len(request.Items))
 	hasLens, prescriptions := false, 0
 	for _, item := range request.Items {
@@ -238,13 +272,9 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		if request.ExpectedDeliveryFee == nil || *request.ExpectedDeliveryFee < 0 {
 			return ErrInvalidCheckout
 		}
-		// Existing guest orders may retry their accepted key; new orders require verified email.
-		if !request.EmailVerified {
-			return ErrInvalidCheckout
-		}
-		verifiedEmail, err := security.VerifyEmailProof(s.EmailProofSecret, request.EmailProof)
-		if err != nil || verifiedEmail != request.CustomerEmail {
-			return ErrInvalidCheckout
+		// Checked after the retry lookup, so an accepted order from before emails were required keeps its receipt.
+		if !plainEmail(request.CustomerEmail) {
+			return ErrInvalidEmail
 		}
 		if s.DeliveryFeeProvider == nil {
 			return ErrDeliveryUnavailable
@@ -299,9 +329,19 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		}
 		total := subtotal + deliveryFee
 		terms := terms.withAmount(total, deliveryFee)
+		// Read the phone's history before inserting, so this order does not count itself.
+		history, err := tx.PhoneHistory(ctx, request.CustomerPhone, request.CustomerName, startOfDhakaDay(time.Now()))
+		if err != nil {
+			return err
+		}
 		orderID, orderNumber, err := tx.InsertOrder(ctx, request, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash, terms)
 		if err != nil {
 			return err
+		}
+		if flags := riskFlags(request, total, terms.Method, history); len(flags) > 0 {
+			if err := tx.FlagOrder(ctx, orderID, flags); err != nil {
+				return err
+			}
 		}
 		for i, item := range request.Items {
 			item.LensOption = lensLabel(item, lines[i])
@@ -415,6 +455,40 @@ func ValidIdempotencyKey(key string) bool {
 	return true
 }
 
+// plainEmail accepts one mailbox such as buyer@example.com, without a display name.
+func plainEmail(value string) bool {
+	parsed, err := mail.ParseAddress(value)
+	return err == nil && parsed.Address == value && len(value) <= 254
+}
+
+// limit counts this checkout against the phone's and the client's 15-minute budgets. The keys are HMACs, so the
+// limiter table never stores a phone number or IP address.
+func (s CheckoutService) limit(ctx context.Context, request CheckoutRequest) error {
+	if s.Limiter == nil {
+		return nil
+	}
+	phoneCount, err := s.Limiter.Count(ctx, security.EmailKey(s.EmailProofSecret, "checkout-phone", request.CustomerPhone))
+	if err != nil {
+		return err
+	}
+	clientCount := 0
+	if request.ClientIP != "" {
+		if clientCount, err = s.Limiter.Count(ctx, security.EmailKey(s.EmailProofSecret, "checkout-ip", request.ClientIP)); err != nil {
+			return err
+		}
+	}
+	if phoneCount > checkoutsPerPhone || clientCount > checkoutsPerClient {
+		return ErrCheckoutLimited
+	}
+	return nil
+}
+
+// startOfDhakaDay is midnight Bangladesh time for the red flags' "orders today"; the country has no daylight saving.
+func startOfDhakaDay(now time.Time) time.Time {
+	local := now.In(time.FixedZone("Asia/Dhaka", 6*60*60))
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+}
+
 // checkoutRequestHash excludes proof and expected fee so accepted retries retain the original receipt after either changes.
 func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	// PrescriptionFileURL stays empty in the fingerprint so retries of orders accepted before it was removed still match.
@@ -427,7 +501,9 @@ func checkoutRequestHash(request CheckoutRequest) (string, error) {
 	}{
 		CustomerName: request.CustomerName, CustomerPhone: request.CustomerPhone, CustomerEmail: request.CustomerEmail,
 		ShippingAddress: request.ShippingAddress, City: request.City, DeliveryNote: request.DeliveryNote,
-		EmailVerified: request.EmailVerified, Items: request.Items, PaymentMethod: request.PaymentMethod,
+		// The field once meant "email given" (every order needed a code); keeping that meaning keeps old fingerprints
+		// valid, and a retry with an expired proof still matches its accepted order.
+		EmailVerified: request.CustomerEmail != "", Items: request.Items, PaymentMethod: request.PaymentMethod,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

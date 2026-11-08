@@ -7,6 +7,7 @@ import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import { OrderTimeline } from "@/components/OrderTimeline";
 import { PaymentReviewList } from "@/components/PaymentReviewList";
+import { RiskFlags } from "@/components/RiskFlags";
 import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderTracking, setEmailConfirmed, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
@@ -166,6 +167,7 @@ function OrderDetails({ id }: { id: string }) {
           <div className="rounded-xl bg-white p-6 shadow-sm">
             <h2 className="text-xl font-black">Customer and delivery</h2>
             <p className="mt-4 font-bold">{order.customer_name}</p>
+            <RiskFlags flags={order.risk_flags} />
             <p>{order.customer_email || "No email recorded"}</p>
             {order.customer_email ? (
               <label className="mt-2 flex items-start gap-2 text-sm">

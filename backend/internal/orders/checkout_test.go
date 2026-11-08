@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/security"
@@ -31,7 +32,7 @@ func (invalidDistrictFee) DeliveryFee(context.Context, string) (int, error) {
 // TestCheckoutRejectsInvalidDistrict keeps an unknown district out of order and stock writes.
 func TestCheckoutRejectsInvalidDistrict(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
-	request := verifiedCheckoutRequest(t, CheckoutRequest{IdempotencyKey: "checkout-invalid-district-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dakka", Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}})
+	request := verifiedCheckoutRequest(t, CheckoutRequest{IdempotencyKey: "checkout-invalid-district-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dakka", Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}})
 	_, err := (CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: invalidDistrictFee{}}).Place(context.Background(), request)
 	if !errors.Is(err, ErrInvalidCheckout) || len(tx.reservedIDs) != 0 || tx.orderSaved {
 		t.Fatalf("invalid district reached persistence: %v", err)
@@ -88,6 +89,19 @@ type checkoutTxStub struct {
 	paymentMethod, paymentStatus string
 	terms                        PaymentTerms
 	failInvoice                  bool
+	history                      PhoneHistory
+	flags                        []string
+}
+
+// PhoneHistory returns the prepared history for the red-flag rules.
+func (tx *checkoutTxStub) PhoneHistory(context.Context, string, string, time.Time) (PhoneHistory, error) {
+	return tx.history, nil
+}
+
+// FlagOrder records the red flags the checkout chose.
+func (tx *checkoutTxStub) FlagOrder(_ context.Context, _ int, flags []string) error {
+	tx.flags = flags
+	return nil
 }
 
 // LensForProduct returns the stub's lens types; a missing one behaves like a disabled or unfitting type.
@@ -128,26 +142,37 @@ func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest
 	return 7, "ORD-000007", nil
 }
 
-// TestCheckoutRequiresEmailProof rejects new orders without a matching verified mailbox.
-func TestCheckoutRequiresEmailProof(t *testing.T) {
+// TestCheckoutEmailWithoutCode needs a plain email but no code; only a matching proof marks it verified.
+func TestCheckoutEmailWithoutCode(t *testing.T) {
 	proof, err := security.IssueEmailProof(testEmailProofSecret, "buyer@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	fee := 80
-	base := CheckoutRequest{IdempotencyKey: "checkout-email-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
-	for _, tc := range []struct{ email, proof string }{
-		{"", ""},
-		{"buyer@example.com", ""},
-		{"buyer@example.com", "expired-proof"},
-		{"other@example.com", proof},
-		{"", proof},
-	} {
+	base := CheckoutRequest{IdempotencyKey: "checkout-email-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	for _, email := range []string{"", "buyer@", "Buyer <buyer@example.com>"} {
 		store := &checkoutStoreStub{tx: &checkoutTxStub{}}
 		input := base
+		input.CustomerEmail, input.EmailProof = email, proof
+		if _, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), input); !errors.Is(err, ErrInvalidEmail) || store.committed || len(store.tx.reservedIDs) != 0 {
+			t.Fatalf("invalid email %q reached stock reservation: %v", email, err)
+		}
+	}
+	for name, tc := range map[string]struct {
+		email, proof string
+		verified     bool
+	}{
+		"no code":        {"buyer@example.com", "", false},
+		"expired proof":  {"buyer@example.com", "expired-proof", false},
+		"other mailbox":  {"other@example.com", proof, false},
+		"matching proof": {"buyer@example.com", proof, true},
+	} {
+		tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
+		input := base
 		input.CustomerEmail, input.EmailProof = tc.email, tc.proof
-		if _, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), input); !errors.Is(err, ErrInvalidCheckout) || store.committed || len(store.tx.reservedIDs) != 0 {
-			t.Fatal("unverified email reached stock reservation")
+		_, err := (CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), input)
+		if err != nil || tx.request.EmailVerified != tc.verified {
+			t.Fatalf("%s: err=%v verified=%v", name, err, tx.request.EmailVerified)
 		}
 	}
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
@@ -186,7 +211,7 @@ func TestCheckoutReservesCombinedStockInStableOrder(t *testing.T) {
 	}
 	store := &checkoutStoreStub{tx: tx}
 	receipt, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-stock-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-stock-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 2, Quantity: 1}, {ProductID: 1, Quantity: 1}, {ProductID: 2, Quantity: 1}},
 	}))
 	if err != nil {
@@ -209,7 +234,7 @@ func TestCheckoutRequiresConfirmedDeliveryFee(t *testing.T) {
 	store := &checkoutStoreStub{tx: tx}
 	service := CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(125)}
 	request := verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-fee-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-fee-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
 	})
 	confirmedFee := request.ExpectedDeliveryFee
@@ -243,7 +268,7 @@ func TestCheckoutIdempotencyReturnsOriginalOrder(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 2}}
 	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}
 	request := verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-retry-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-retry-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
 	})
 	first, err := service.Place(context.Background(), request)
@@ -269,7 +294,7 @@ func TestCheckoutIdempotencyReturnsOriginalOrder(t *testing.T) {
 // TestCheckoutAllowsLegacyGuestRetry preserves the receipt for an accepted no-email order.
 func TestCheckoutAllowsLegacyGuestRetry(t *testing.T) {
 	request := CheckoutRequest{
-		IdempotencyKey: "checkout-legacy-guest-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-legacy-guest-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: "Blue-cut lens"}},
 	}
 	requestHash, err := checkoutRequestHash(request)
@@ -296,7 +321,7 @@ func TestNewCheckoutRejectsUnpricedLenses(t *testing.T) {
 			tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 1}}
 			store := &checkoutStoreStub{tx: tx}
 			request := verifiedCheckoutRequest(t, CheckoutRequest{
-				IdempotencyKey: "checkout-unpriced-lens-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+				IdempotencyKey: "checkout-unpriced-lens-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 				Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensOption: tc.lens}},
 			})
 			_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), request)
@@ -318,7 +343,7 @@ func TestCheckoutRetryOutlivesEmailProof(t *testing.T) {
 	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: secret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}
 	fee := 80
 	request := CheckoutRequest{
-		IdempotencyKey: "checkout-email-retry-0001", CustomerName: "QA", CustomerPhone: "000", CustomerEmail: "buyer@example.com", EmailProof: proof,
+		IdempotencyKey: "checkout-email-retry-0001", CustomerName: "QA", CustomerPhone: "01712345678", CustomerEmail: "buyer@example.com", EmailProof: proof,
 		ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
 	}
 	first, err := service.Place(context.Background(), request)
@@ -337,7 +362,7 @@ func TestCheckoutRejectsUnavailableStock(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: 100}}, stock: map[int]int{1: 0}}
 	store := &checkoutStoreStub{tx: tx}
 	_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-stock-0002", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-stock-0002", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1}},
 	}))
 	if !errors.Is(err, ErrUnavailable) || store.committed || tx.orderSaved || tx.invoiceSaved {
@@ -349,7 +374,7 @@ func TestCheckoutRejectsUnavailableStock(t *testing.T) {
 func TestCheckoutRejectsInvalidQuantity(t *testing.T) {
 	store := &checkoutStoreStub{tx: &checkoutTxStub{}}
 	_, err := (CheckoutService{Store: store, OrderTokenSecret: testOrderTokenSecret}).Place(context.Background(), CheckoutRequest{
-		IdempotencyKey: "checkout-invalid-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-invalid-0001", CustomerName: "QA", CustomerPhone: "01712345678", CustomerEmail: "buyer@example.com", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 0}},
 	})
 	if !errors.Is(err, ErrInvalidCheckout) || store.started {
@@ -362,7 +387,7 @@ func TestCheckoutRejectsOversizedTotal(t *testing.T) {
 	tx := &checkoutTxStub{products: map[int]ReservedProduct{1: {Name: "A", Price: maxOrderAmount}}, stock: map[int]int{1: 2}}
 	store := &checkoutStoreStub{tx: tx}
 	_, err := (CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}).Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-total-00001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-total-00001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 2}},
 	}))
 	if !errors.Is(err, ErrInvalidCheckout) || store.committed || tx.orderSaved {
@@ -372,7 +397,7 @@ func TestCheckoutRejectsOversizedTotal(t *testing.T) {
 
 // TestCheckoutRequestHashMatchesPrePrescriptionRemoval keeps retries of already-accepted orders matching after the field removal.
 func TestCheckoutRequestHashMatchesPrePrescriptionRemoval(t *testing.T) {
-	request := CheckoutRequest{CustomerName: "QA", CustomerPhone: "000", CustomerEmail: "buyer@example.com", ShippingAddress: "Local", City: "Dhaka", EmailVerified: true, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
+	request := CheckoutRequest{CustomerName: "QA", CustomerPhone: "01712345678", CustomerEmail: "buyer@example.com", ShippingAddress: "Local", City: "Dhaka", EmailVerified: true, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
 	got, err := checkoutRequestHash(request)
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +407,7 @@ func TestCheckoutRequestHashMatchesPrePrescriptionRemoval(t *testing.T) {
 		CustomerName, CustomerPhone, CustomerEmail, ShippingAddress, City, DeliveryNote, PrescriptionFileURL string
 		EmailVerified                                                                                        bool
 		Items                                                                                                []CheckoutItem
-	}{"QA", "000", "buyer@example.com", "Local", "Dhaka", "", "", true, request.Items})
+	}{"QA", "01712345678", "buyer@example.com", "Local", "Dhaka", "", "", true, request.Items})
 	if err != nil {
 		t.Fatal(err)
 	}
