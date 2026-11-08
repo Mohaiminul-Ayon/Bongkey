@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { CartProvider } from "@/lib/cart";
+import { WishlistProvider } from "@/lib/wishlist";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -24,9 +25,11 @@ export default function RootLayout({
       </head>
       <body>
         <CartProvider>
-          <Header />
-          <main className="min-h-screen">{children}</main>
-          <Footer />
+          <WishlistProvider>
+            <Header />
+            <main className="min-h-screen">{children}</main>
+            <Footer />
+          </WishlistProvider>
         </CartProvider>
       </body>
     </html>

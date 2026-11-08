@@ -73,6 +73,11 @@ func TestConcurrentCancellationPostgres(t *testing.T) {
 	if status != "cancelled" || stock != 3 {
 		t.Fatalf("status=%q stock=%d, want cancelled and 3", status, stock)
 	}
+	// Two racing cancellations restore once, so exactly one restore row, tied to the order.
+	var restoreRows, restoreOrder int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*), MAX(order_id) FROM stock_history WHERE product_id = $1 AND reason = 'order_cancelled' AND change = 2`, productID).Scan(&restoreRows, &restoreOrder); err != nil || restoreRows != 1 || restoreOrder != orderID {
+		t.Fatalf("restore rows=%d order=%d err=%v", restoreRows, restoreOrder, err)
+	}
 }
 
 // TestDeliveryTrackingPostgres walks one order to delivery: each step gets its time once, courier details need a

@@ -39,7 +39,7 @@ func lensCheckout(t *testing.T, item CheckoutItem) (*checkoutTxStub, *prescripti
 	saver := &prescriptionSaverStub{}
 	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), Prescriptions: saver}
 	receipt, err := service.Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-lens-test-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-lens-test-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{item},
 	}))
 	return tx, saver, receipt, err
@@ -135,7 +135,7 @@ func TestCheckoutRemovesFilesWhenOrderFails(t *testing.T) {
 	saver := &prescriptionSaverStub{}
 	service := CheckoutService{Store: &checkoutStoreStub{tx: tx}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), Prescriptions: saver}
 	_, err := service.Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-		IdempotencyKey: "checkout-lens-cleanup-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-lens-cleanup-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		Items: []CheckoutItem{{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensWithPower, SPHRight: power(-100), SPHLeft: power(-100), Prescription: []byte("%PDF-1.7")}},
 	}))
 	if err == nil || len(saver.saved) != 1 || len(saver.removed) != 1 || saver.removed[0] != saver.saved[0] {
@@ -230,7 +230,7 @@ func TestCheckoutPaymentChoice(t *testing.T) {
 		store := &checkoutStoreStub{tx: tx}
 		service := CheckoutService{Store: store, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80), PaymentOptions: tc.options}
 		_, err := service.Place(context.Background(), verifiedCheckoutRequest(t, CheckoutRequest{
-			IdempotencyKey: "checkout-pay-choice-01", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+			IdempotencyKey: "checkout-pay-choice-01", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 			PaymentMethod: tc.choice, Items: items,
 		}))
 		if !errors.Is(err, tc.err) || tx.paymentMethod != tc.method || tx.paymentStatus != tc.state || tx.terms.AdvanceRequired != tc.required {

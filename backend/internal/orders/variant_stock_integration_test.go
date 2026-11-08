@@ -41,7 +41,7 @@ func TestVariantStockCheckoutAndCancelPostgres(t *testing.T) {
 	fee := 80
 	request := func(key string, quantity int) CheckoutRequest {
 		return CheckoutRequest{
-			IdempotencyKey: key, CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+			IdempotencyKey: key, CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 			CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 			Items: []CheckoutItem{{ProductID: variantID, Quantity: quantity}},
 		}

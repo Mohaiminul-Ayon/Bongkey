@@ -47,8 +47,8 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
 	}
-	// Status changes write the delivery-tracking times, so that migration is needed by every order test.
-	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql"} {
+	// Status changes write the delivery-tracking times, order reads include the email tick and red flags, and stock changes write history, so every order test needs those migrations.
+	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql", "018_notifications.sql", "019_order_risk_flags.sql", "021_stock_history.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -123,6 +123,10 @@ func TestConcurrentCheckoutStockPostgres(t *testing.T) {
 	if successes != 1 || rejected != 1 || remaining != 0 {
 		t.Fatalf("successes=%d rejected=%d remaining=%d", successes, rejected, remaining)
 	}
+	// The losing reservation changed nothing, so it must leave no history row.
+	if got := stockHistory(t, db, id); got != "created +1 =1|order_placed -1 =0" {
+		t.Fatalf("history after the race = %q", got)
+	}
 	forced := errors.New("forced rollback")
 	if _, err := db.ExecContext(ctx, `UPDATE products SET stock_quantity = 1 WHERE id = $1`, id); err != nil {
 		t.Fatal("could not reset local stock fixture")
@@ -138,6 +142,33 @@ func TestConcurrentCheckoutStockPostgres(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT stock_quantity FROM products WHERE id = $1`, id).Scan(&remaining); err != nil || remaining != 1 {
 		t.Fatalf("rollback left stock=%d, read error=%v", remaining, err)
 	}
+	// The hand-written reset is recorded as unlabelled; the rolled-back reservation left nothing.
+	if got := stockHistory(t, db, id); got != "created +1 =1|order_placed -1 =0|unlabelled +1 =1" {
+		t.Fatalf("history after rollback = %q", got)
+	}
+}
+
+// stockHistory summarises one product's history rows oldest first as "reason ±change =after".
+func stockHistory(t *testing.T, db *sql.DB, productID int) string {
+	t.Helper()
+	rows, err := db.Query(`SELECT reason, change, stock_after FROM stock_history WHERE product_id = $1 ORDER BY id`, productID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var parts []string
+	for rows.Next() {
+		var reason string
+		var change, after int
+		if err := rows.Scan(&reason, &change, &after); err != nil {
+			t.Fatal(err)
+		}
+		parts = append(parts, fmt.Sprintf("%s %+d =%d", reason, change, after))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(parts, "|")
 }
 
 // TestCheckoutOrderPostgres verifies one accepted order and a rejected repeat use real transactions.
@@ -158,7 +189,7 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	}
 	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: emailSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings}
 	request := CheckoutRequest{
-		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: "checkout-postgres-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
 	}
@@ -195,6 +226,10 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if remaining != 1 || itemCount != 1 || invoiceCount != 1 || receipt.Total != 100+fee || orderFee != fee || invoiceFee != fee || orderTotal != receipt.Total || invoiceTotal != receipt.Total || !security.MatchesOrderToken(receipt.GuestAccessToken, tokenHash) || !emailVerified {
 		t.Fatal("accepted checkout did not persist stock, order, invoice, and private access together")
 	}
+	var historyOrder int
+	if err := db.QueryRowContext(ctx, `SELECT order_id FROM stock_history WHERE product_id = $1 AND reason = 'order_placed'`, id).Scan(&historyOrder); err != nil || historyOrder != receipt.ID {
+		t.Fatalf("checkout history order = %d (%v), want %d", historyOrder, err, receipt.ID)
+	}
 	changedFee := fee + 1
 	request.IdempotencyKey = "checkout-postgres-stale-delivery"
 	request.ExpectedDeliveryFee = &changedFee
@@ -220,7 +255,7 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	request.ExpectedDeliveryFee = &fee
 	access := AccessService{Reader: PostgresReader{DB: db}, EmailProofSecret: emailSecret}
 	orderID := fmt.Sprint(receipt.ID)
-	order, err := access.GuestInvoice(ctx, orderID, proof)
+	order, err := access.GuestDetail(ctx, orderID, proof)
 	if err != nil || order.InvoiceNumber != receipt.InvoiceNumber {
 		t.Fatal("verified email could not access its stored invoice summary")
 	}
@@ -275,11 +310,11 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if _, err := access.Guest(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
 		t.Fatal("another email accessed the invoice summary")
 	}
-	guestInvoice, err := access.GuestInvoice(ctx, orderID, proof)
+	guestInvoice, err := access.GuestDetail(ctx, orderID, proof)
 	if err != nil || guestInvoice.InvoiceNumber != receipt.InvoiceNumber || guestInvoice.InvoiceIssuedAt == "" || len(guestInvoice.Items) != 1 || guestInvoice.Items[0].UnitPrice != 100 {
 		t.Fatalf("verified guest could not read saved invoice lines: %+v, %v", guestInvoice, err)
 	}
-	if _, err := access.GuestInvoice(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
+	if _, err := access.GuestDetail(ctx, orderID, otherProof); !errors.Is(err, ErrNotFound) {
 		t.Fatal("another email accessed saved invoice lines")
 	}
 	adminDetail, err := access.Admin(ctx, orderID)
@@ -336,7 +371,7 @@ func TestConcurrentIdempotentCheckoutPostgres(t *testing.T) {
 	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, EmailProofSecret: testEmailProofSecret, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: fixedDeliveryFee(80)}
 	fee := 80
 	request := CheckoutRequest{
-		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "000", ShippingAddress: "Local", City: "Dhaka",
+		IdempotencyKey: fmt.Sprintf("checkout-concurrent-%d-%d", os.Getpid(), time.Now().UnixNano()), CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka",
 		CustomerEmail: "qa-buyer@example.invalid", EmailProof: proof, ExpectedDeliveryFee: &fee,
 		Items: []CheckoutItem{{ProductID: productID, Quantity: 1}},
 	}

@@ -69,6 +69,7 @@ export function ProductForm({ product }: ProductFormProps) {
       old_price: formNumber(form, "old_price"),
       stock_quantity: formNumber(form, "stock_quantity"),
       expected_stock_quantity: product?.id ? (product.stockQuantity ?? 0) : undefined,
+      low_stock_threshold: formNumber(form, "low_stock_threshold"),
       brand_tier: formString(form, "brand_tier"),
       frame_type: formString(form, "frame_type"),
       gender: formString(form, "gender"),
@@ -104,6 +105,7 @@ export function ProductForm({ product }: ProductFormProps) {
         <Field name="price" label="Price" type="number" value={product?.price} />
         <Field name="old_price" label="Old price" type="number" value={product?.oldPrice ?? 0} />
         <Field name="stock_quantity" label="Stock quantity" type="number" value={product?.stockQuantity ?? 0} />
+        <Field name="low_stock_threshold" label="Low-stock alert at (0 = off)" type="number" value={product?.lowStockThreshold ?? 0} />
         <Select name="category_id" label="Category" value={product?.categoryId} options={categories.map((c) => [String(c.id), c.name])} />
         <Select name="gender" label="Gender" value={product?.gender?.toLowerCase()} options={[["men", "Men"], ["women", "Women"], ["unisex", "Unisex"]]} />
         <Select name="brand_tier" label="Brand tier" value={product?.brandTier === "Mid-range" ? "mid_range" : product?.brandTier?.toLowerCase()} options={[["budget", "Budget"], ["mid_range", "Mid-range"], ["premium", "Premium"]]} />

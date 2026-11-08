@@ -5,10 +5,12 @@ import { usePathname } from "next/navigation";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCart } from "@/lib/cart";
+import { useWishlist } from "@/lib/wishlist";
 
 /** Header keeps the frame types, the bag, and the theme choice visible on every shop page; admin pages use their own sidebar. */
 export function Header() {
   const { count } = useCart();
+  const saved = useWishlist().slugs.length;
   if (usePathname().startsWith("/admin")) return null;
 
   return (
@@ -25,6 +27,8 @@ export function Header() {
           </div>
           <div className="header-actions">
             <ThemeToggle />
+            <Link href="/account">Account</Link>
+            <Link aria-label={`Saved, ${saved} items`} className="saved-link" href="/wishlist"><span aria-hidden="true">♡</span> {saved}</Link>
             <Link aria-label={`Bag, ${count} items`} className="cart-link" href="/cart">Bag <span>{count}</span></Link>
           </div>
         </nav>

@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/lib/pq"
 )
 
 // PostgresCheckoutStore persists a complete checkout in PostgreSQL.
@@ -27,6 +30,10 @@ func (s PostgresCheckoutStore) InTransaction(ctx context.Context, work func(Chec
 			resultErr = fmt.Errorf("rollback checkout: %w", err)
 		}
 	}()
+	// Labels this transaction's stock reservations for the stock_history trigger (021_stock_history.sql).
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('bongkey.stock_reason', 'order_placed', true)`); err != nil {
+		return err
+	}
 	if err := work(postgresCheckoutTx{Tx: tx}); err != nil {
 		return err
 	}
@@ -99,6 +106,11 @@ func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutReq
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash,
 		terms.Method, terms.Status, terms.AdvanceMode, terms.AdvanceValue, terms.AdvanceRequired)
+	if err != nil {
+		return 0, "", err
+	}
+	// Stock was reserved before the order existed; link those history rows from this transaction to it now.
+	_, err = p.Tx.ExecContext(ctx, `UPDATE stock_history SET order_id = $1 WHERE tx_id = txid_current() AND order_id IS NULL AND reason = 'order_placed'`, id)
 	return id, number, err
 }
 
@@ -135,4 +147,25 @@ func (p postgresCheckoutTx) InsertInvoice(ctx context.Context, orderID int, requ
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`, id, number, orderID, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.ShippingAddress, subtotal, deliveryFee, total)
 	return number, err
+}
+
+// PhoneHistory counts today's earlier orders with this phone and checks recent ones for a different name.
+// Older orders may store the phone as typed, so both sides compare the last 11 digits.
+// shortcut: scans orders without an index on the normalized phone; add one if order volume grows large.
+func (p postgresCheckoutTx) PhoneHistory(ctx context.Context, phone, name string, dayStart time.Time) (PhoneHistory, error) {
+	var history PhoneHistory
+	err := p.Tx.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE created_at >= $2),
+			COALESCE(BOOL_OR(lower(btrim(customer_name)) <> lower(btrim($3))), false)
+		FROM orders
+		WHERE right(regexp_replace(customer_phone, '[^0-9]', '', 'g'), 11) = $1
+			AND created_at >= NOW() - INTERVAL '30 days'`, phone, dayStart, name).Scan(&history.OrdersToday, &history.OtherName)
+	return history, err
+}
+
+// FlagOrder saves the red-flag codes on the new order.
+func (p postgresCheckoutTx) FlagOrder(ctx context.Context, orderID int, flags []string) error {
+	_, err := p.Tx.ExecContext(ctx, `UPDATE orders SET risk_flags = $2 WHERE id = $1`, orderID, pq.Array(flags))
+	return err
 }

@@ -50,8 +50,7 @@ var (
 )
 
 var (
-	trxPattern    = regexp.MustCompile(`^[A-Z0-9]{8,12}$`)
-	mobilePattern = regexp.MustCompile(`^01[3-9][0-9]{8}$`)
+	trxPattern = regexp.MustCompile(`^[A-Z0-9]{8,12}$`)
 )
 
 // Method is one way the shop receives money, with what the customer is told to do.
@@ -179,7 +178,17 @@ type Store interface {
 }
 
 // Service applies the payment rules; it never trusts a submission as money received.
-type Service struct{ Store Store }
+type Service struct {
+	Store Store
+	// Notifier may be nil; it queues the owner alert and the customer's approved or rejected email.
+	Notifier Notifier
+}
+
+// Notifier queues payment emails after a change committed; implementations record their own errors.
+type Notifier interface {
+	PaymentSubmitted(ctx context.Context, paymentID int)
+	PaymentReviewed(ctx context.Context, paymentID int)
+}
 
 // GuestView is what the customer sees for their order: whether to pay now, where, and what they sent.
 type GuestView struct {
@@ -232,8 +241,8 @@ func (s Service) ForGuest(ctx context.Context, orderID int) (GuestView, error) {
 func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payment, error) {
 	sub.Method = strings.TrimSpace(sub.Method)
 	sub.TrxID = strings.ToUpper(strings.TrimSpace(sub.TrxID))
-	sub.SenderNumber = NormalizeMobile(sub.SenderNumber)
-	if orderID <= 0 || sub.Method != MethodBkash || !trxPattern.MatchString(sub.TrxID) || !mobilePattern.MatchString(sub.SenderNumber) || sub.Amount <= 0 || sub.Amount > maxAmount {
+	sub.SenderNumber = orders.NormalizeMobile(sub.SenderNumber)
+	if orderID <= 0 || sub.Method != MethodBkash || !trxPattern.MatchString(sub.TrxID) || !orders.ValidMobile(sub.SenderNumber) || sub.Amount <= 0 || sub.Amount > maxAmount {
 		return Payment{}, ErrInvalidPayment
 	}
 	method, err := s.Store.Method(ctx, sub.Method)
@@ -243,15 +252,20 @@ func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payme
 	if !method.Enabled {
 		return Payment{}, ErrMethodOff
 	}
-	return s.Store.Submit(ctx, orderID, sub)
+	payment, err := s.Store.Submit(ctx, orderID, sub)
+	// A repeated submission returns the first record; its event key keeps the owner alert to one email.
+	if err == nil && s.Notifier != nil {
+		s.Notifier.PaymentSubmitted(ctx, payment.ID)
+	}
+	return payment, err
 }
 
 // SaveMethod updates the receiving number and instructions; an enabled method needs a valid number.
 func (s Service) SaveMethod(ctx context.Context, method Method) error {
-	method.AccountNumber = NormalizeMobile(method.AccountNumber)
+	method.AccountNumber = orders.NormalizeMobile(method.AccountNumber)
 	method.Instructions = strings.TrimSpace(method.Instructions)
 	if method.Code != MethodBkash || utf8.RuneCountInString(method.Instructions) > maxInstructions ||
-		(method.AccountNumber != "" && !mobilePattern.MatchString(method.AccountNumber)) || (method.Enabled && method.AccountNumber == "") {
+		(method.AccountNumber != "" && !orders.ValidMobile(method.AccountNumber)) || (method.Enabled && method.AccountNumber == "") {
 		return ErrInvalidPayment
 	}
 	return s.Store.SaveMethod(ctx, method)
@@ -312,7 +326,13 @@ func (s Service) Approve(ctx context.Context, paymentID int, adminID int64) erro
 	if paymentID <= 0 || adminID <= 0 {
 		return ErrInvalidPayment
 	}
-	return s.Store.Approve(ctx, paymentID, adminID)
+	if err := s.Store.Approve(ctx, paymentID, adminID); err != nil {
+		return err
+	}
+	if s.Notifier != nil {
+		s.Notifier.PaymentReviewed(ctx, paymentID)
+	}
+	return nil
 }
 
 // Reject closes a payment the owner could not find in the bKash app; the reason is shown to the customer.
@@ -321,22 +341,11 @@ func (s Service) Reject(ctx context.Context, paymentID int, adminID int64, reaso
 	if paymentID <= 0 || adminID <= 0 || reason == "" || utf8.RuneCountInString(reason) > maxRejectReason {
 		return ErrInvalidPayment
 	}
-	return s.Store.Reject(ctx, paymentID, adminID, reason)
-}
-
-// NormalizeMobile turns "+880 1712-345678" or "8801712345678" into the local 01XXXXXXXXX form; anything else is returned trimmed.
-func NormalizeMobile(value string) string {
-	digits := strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, value)
-	if strings.HasPrefix(digits, "880") && len(digits) == 13 {
-		return digits[2:]
+	if err := s.Store.Reject(ctx, paymentID, adminID, reason); err != nil {
+		return err
 	}
-	if len(digits) == 11 {
-		return digits
+	if s.Notifier != nil {
+		s.Notifier.PaymentReviewed(ctx, paymentID)
 	}
-	return strings.TrimSpace(value)
+	return nil
 }

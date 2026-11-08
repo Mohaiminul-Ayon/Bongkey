@@ -8,29 +8,36 @@ import (
 	"bongkey/backend/internal/auth"
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
+	"bongkey/backend/internal/customers"
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/emailotp"
 	"bongkey/backend/internal/handlers"
 	"bongkey/backend/internal/lens"
+	"bongkey/backend/internal/mail"
 	"bongkey/backend/internal/middleware"
+	"bongkey/backend/internal/notifications"
 	"bongkey/backend/internal/orders"
 	"bongkey/backend/internal/payments"
+	"bongkey/backend/internal/security"
 
 	"github.com/gin-gonic/gin"
 )
 
-// logWithoutQuery formats one access-log line without the query string, because admin searches carry customer phone numbers.
+// logWithoutQuery formats one access-log line with the request ID and without the query string,
+// because admin searches carry customer phone numbers.
 func logWithoutQuery(p gin.LogFormatterParams) string {
 	path, _, _ := strings.Cut(p.Path, "?")
-	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n%s",
-		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, p.Method, path, p.ErrorMessage)
+	id, _ := p.Keys[middleware.RequestIDKey].(string)
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %s | %-7s %s\n%s",
+		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, id, p.Method, path, p.ErrorMessage)
 }
 
 // SetupRouter configures direct-client trust and registers routes for later HTTP requests.
 func SetupRouter(cfg config.Config) *gin.Engine {
 	router := gin.New()
-	router.Use(gin.LoggerWithFormatter(logWithoutQuery), gin.Recovery())
+	// Order matters: RequestID first so both read the ID; the logger wraps Recovery so a recovered panic is still logged as a 500.
+	router.Use(middleware.RequestID(), gin.LoggerWithFormatter(logWithoutQuery), middleware.Recovery(gin.DefaultErrorWriter))
 	// Direct deployments must ignore forwarded client IP headers until an exact reverse proxy is configured.
 	if err := router.SetTrustedProxies(nil); err != nil {
 		panic("disable trusted proxies: " + err.Error())
@@ -40,13 +47,20 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	// Prescriptions live outside /uploads so the public static route can never serve them.
 	prescriptions := lens.PrescriptionStore{Dir: cfg.PrescriptionDir}
 	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}, Files: prescriptions}, Files: prescriptions}
-	orderAccess := handlers.OrderAccessHandler{Service: orders.AccessService{
+	siteURL := ""
+	if len(cfg.FrontendOrigins) > 0 {
+		siteURL = strings.TrimRight(cfg.FrontendOrigins[0], "/")
+	}
+	orderAccess := handlers.OrderAccessHandler{SiteURL: siteURL, Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
 		// shortcut: shares the login limiter's table (keys are HMACs with their own "order-track-ip" kind, so budgets never mix); give tracking its own table if limits need tuning separately.
 		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
 	}}
-	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}}
+	mailer := mail.New(cfg)
+	// Emails are queued in the database after each change commits and sent by the worker that serve starts.
+	notifier := notifications.Service{Store: notifications.PostgresStore{DB: database.DB}, Orders: orderAccess.Service, OwnerEmail: cfg.OwnerNotifyEmail, SiteURL: cfg.SiteURL}
+	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}, Notifier: notifier}
 	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
 		Store:               orders.PostgresCheckoutStore{DB: database.DB},
@@ -55,11 +69,14 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		DeliveryFeeProvider: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}},
 		Prescriptions:       prescriptions,
 		PaymentOptions:      paymentService,
+		Notifier:            notifier,
+		// Same shared limiter table as tracking, with its own "checkout-phone" and "checkout-ip" key kinds.
+		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
 	}}
 	deliverySettings := handlers.DeliverySettingsHandler{Service: delivery.Service{Store: delivery.PostgresRepository{DB: database.DB}}}
 	emailCodes := handlers.EmailOTPHandler{Service: emailotp.Service{
 		Store:    emailotp.PostgresStore{DB: database.DB},
-		Sender:   emailotp.GmailSender{From: cfg.GmailFrom, AppPassword: cfg.GmailAppPassword},
+		Sender:   emailotp.CodeMailer{Mail: mailer},
 		Secret:   cfg.JWTSecret,
 		TestCode: cfg.EmailTestCode,
 	}}
@@ -68,12 +85,25 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	products := handlers.ProductHandler{Service: catalog.ProductService{
 		Repository: catalog.PostgresProductRepository{DB: database.DB},
 	}}
+	stock := handlers.StockHandler{Service: catalog.StockService{Store: catalog.PostgresProductRepository{DB: database.DB}}}
 	lensPackages := handlers.LensHandler{Service: lens.Service{Repository: lens.PostgresRepository{DB: database.DB}}}
 	categories := handlers.CategoryHandler{Service: catalog.CategoryService{Repository: catalog.PostgresCategoryRepository{DB: database.DB}}}
+	customerService := customers.Service{
+		Store: customers.PostgresStore{DB: database.DB},
+		// shortcut: shares the login limiter's table (HMAC keys with their own "customer-link" kind); split it if limits need separate tuning.
+		Limiter: auth.PostgresLoginLimiter{DB: database.DB},
+		Secret:  cfg.JWTSecret,
+	}
+	if cfg.GoogleClientID != "" {
+		customerService.Google = security.GoogleVerifier{ClientID: cfg.GoogleClientID, Keys: &security.GoogleKeys{}}
+	}
+	customerAccount := handlers.CustomerHandler{Service: customerService, SecureCookie: cfg.AppEnv != "development"}
 	orderList := handlers.OrderListHandler{Reader: orders.PostgresReader{DB: database.DB}}
 	orderFulfillment := handlers.OrderFulfillmentHandler{Service: orders.FulfillmentService{
-		Store: orders.PostgresFulfillmentStore{DB: database.DB},
-	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}}}
+		Store:    orders.PostgresFulfillmentStore{DB: database.DB},
+		Notifier: notifier,
+	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}},
+		Emails: orders.EmailConfirmationService{Store: orders.PostgresFulfillmentStore{DB: database.DB}, Notifier: notifier}}
 
 	router.GET("/health", handlers.Health)
 	router.POST("/api/admin/login", adminHandler.Login)
@@ -88,11 +118,22 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/track", orderAccess.TrackOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
+	router.GET("/api/orders/:id/slip.pdf", orderAccess.GetSlip)
 	router.GET("/api/payment-options", paymentHandler.PaymentOptions)
 	router.GET("/api/orders/:id/payments", paymentHandler.GuestPayments)
 	router.POST("/api/orders/:id/payments", paymentHandler.SubmitPayment)
 	router.POST("/api/email-otp/request", emailCodes.Request)
 	router.POST("/api/email-otp/verify", emailCodes.Verify)
+
+	// CustomerCSRF guards every customer route, sign-in included; CustomerAuth then needs a session for the rest.
+	customer := router.Group("/api/customer", middleware.CustomerCSRF())
+	customer.POST("/google", customerAccount.SignIn)
+	customer.POST("/logout", customerAccount.Logout)
+	signedIn := customer.Group("", middleware.CustomerAuth(customerService))
+	signedIn.GET("/me", customerAccount.Me)
+	signedIn.GET("/orders", customerAccount.Orders)
+	signedIn.GET("/link-candidates", customerAccount.LinkCandidates)
+	signedIn.POST("/link", customerAccount.Link)
 
 	admin := router.Group("/api/admin")
 	admin.Use(middleware.AdminAuth(adminService))
@@ -104,6 +145,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/products", products.AdminListProducts)
 	admin.POST("/products", products.CreateProduct)
 	admin.GET("/products/:id/variants", products.ListVariants)
+	admin.GET("/products/:id/stock-history", stock.History)
+	admin.GET("/stock/low", stock.LowStock)
 	admin.POST("/products/:id/variants", products.CreateVariant)
 	admin.PUT("/products/:id", products.UpdateProduct)
 	admin.DELETE("/products/:id", products.DeleteProduct)
@@ -117,6 +160,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id/invoice.pdf", orderAccess.GetAdminInvoice)
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
 	admin.PUT("/orders/:id/tracking", orderFulfillment.SetTracking)
+	admin.PUT("/orders/:id/email-confirmed", orderFulfillment.SetEmailConfirmed)
 	admin.POST("/orders/:id/advance-received", lensReview.MarkAdvanceReceived)
 	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
 	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)

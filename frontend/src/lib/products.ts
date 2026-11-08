@@ -3,6 +3,8 @@ export type Product = {
   parentProductId?: number;
   sku?: string;
   variants?: Product[];
+  /** optionCount is the number of extra colour/size options; list rows carry it instead of the variants. */
+  optionCount?: number;
   categoryId?: number;
   slug: string;
   name: string;
@@ -26,10 +28,18 @@ export type Product = {
   description?: string;
   imageUrl?: string;
   tryOnImageUrl?: string;
+  /** lowStockThreshold is the owner's alert level; 0 means no alert. */
+  lowStockThreshold?: number;
   isFeatured?: boolean;
   isActive?: boolean;
 };
 
 export function formatPrice(price: number) {
   return `৳${price.toLocaleString("en-BD")}`;
+}
+
+/** discountPercent is the whole-number saving shown on a sale badge, or 0 when there is no real discount. */
+export function discountPercent(price: number, oldPrice?: number) {
+  if (!oldPrice || oldPrice <= price || price < 0) return 0;
+  return Math.round(((oldPrice - price) / oldPrice) * 100);
 }

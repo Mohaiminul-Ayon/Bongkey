@@ -17,7 +17,8 @@ const productSelectSQL = `
 SELECT p.id, COALESCE(p.parent_product_id, 0), p.sku, COALESCE(p.category_id, 0), COALESCE(c.name, ''), p.name, p.slug, p.description,
 	p.price, p.old_price, p.brand_tier, p.frame_type, p.gender, p.material, p.color, p.size,
 	p.lens_width, p.bridge_width, p.temple_length, p.stock_quantity, p.image_url,
-	p.try_on_image_url, p.is_featured, p.is_active
+	p.try_on_image_url, p.is_featured, p.is_active, p.low_stock_threshold,
+	(SELECT COUNT(*) FROM products o WHERE o.parent_product_id = p.id AND o.is_active) AS option_count
 FROM products p
 LEFT JOIN categories c ON c.id = p.category_id
 `
@@ -124,35 +125,56 @@ func (r PostgresProductRepository) Save(ctx context.Context, id int, input Produ
 			INSERT INTO products (
 				category_id, name, slug, description, price, old_price, brand_tier, frame_type, gender,
 				material, color, size, lens_width, bridge_width, temple_length, stock_quantity,
-				image_url, try_on_image_url, is_featured, is_active, sku
+				image_url, try_on_image_url, is_featured, is_active, sku, low_stock_threshold
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,COALESCE(NULLIF($21,''), 'BK-' || UPPER(SUBSTR(REPLACE(gen_random_uuid()::text, '-', ''), 1, 12))))
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,COALESCE(NULLIF($21,''), 'BK-' || UPPER(SUBSTR(REPLACE(gen_random_uuid()::text, '-', ''), 1, 12))),$22)
 			RETURNING id
-		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, input.SKU).Scan(&id)
+		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, input.SKU, input.LowStockThreshold).Scan(&id)
 		if err != nil {
 			return models.Product{}, variantWriteError(err)
 		}
 	} else {
-		// The stock predicate prevents an old admin form from replacing a concurrent sale.
-		result, err := r.DB.ExecContext(ctx, `
-			UPDATE products SET category_id=$1, name=$2, slug=$3, description=$4, price=$5, old_price=$6,
-				brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
-				lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
-				image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, sku=COALESCE(NULLIF($23,''),sku), updated_at=NOW()
-			WHERE id=$21 AND stock_quantity=$22
-		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, id, *input.ExpectedStockQuantity, input.SKU)
-		if err != nil {
-			return models.Product{}, variantWriteError(err)
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
+		if err := r.update(ctx, id, input); err != nil {
 			return models.Product{}, err
-		}
-		if affected == 0 {
-			return models.Product{}, ErrStaleStock
 		}
 	}
 	return scanProduct(r.DB.QueryRowContext(ctx, productSelectSQL+` WHERE p.id = $1`, id))
+}
+
+// update saves an edited product in one transaction labelled "admin_edit", so a stock change gets that history reason.
+func (r PostgresProductRepository) update(ctx context.Context, id int, input ProductInput) (resultErr error) {
+	tx, err := r.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			resultErr = fmt.Errorf("rollback product update: %w", err)
+		}
+	}()
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('bongkey.stock_reason', 'admin_edit', true)`); err != nil {
+		return err
+	}
+	// The stock predicate prevents an old admin form from replacing a concurrent sale.
+	result, err := tx.ExecContext(ctx, `
+		UPDATE products SET category_id=$1, name=$2, slug=$3, description=$4, price=$5, old_price=$6,
+			brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
+			lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
+			image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, sku=COALESCE(NULLIF($23,''),sku),
+			low_stock_threshold=$24, updated_at=NOW()
+		WHERE id=$21 AND stock_quantity=$22
+	`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, id, *input.ExpectedStockQuantity, input.SKU, input.LowStockThreshold)
+	if err != nil {
+		return variantWriteError(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrStaleStock
+	}
+	return tx.Commit()
 }
 
 // Delete removes a product only when the database allows it.
@@ -182,7 +204,7 @@ type productScanner interface{ Scan(...any) error }
 // scanProduct keeps the read column mapping next to its SQL definition.
 func scanProduct(row productScanner) (models.Product, error) {
 	var product models.Product
-	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive)
+	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive, &product.LowStockThreshold, &product.OptionCount)
 	return product, err
 }
 
