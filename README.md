@@ -53,6 +53,7 @@ Before the first backend start, fill in these values in `.env`:
 | `OWNER_NOTIFY_EMAIL` | No | Gets the 9 PM daily summary and an email for each bKash payment waiting. Empty turns owner emails off |
 | `PUBLIC_SITE_URL` | No | Storefront address used in email links (Track page, admin). Defaults to the first `FRONTEND_ORIGIN` |
 | `EMAIL_TEST_CODE` | No | Local testing only. When set (6 digits, and only with `APP_ENV=development`, otherwise startup fails), addresses ending in `@example.test` get this code and no email is sent; every real address still needs a real emailed code. |
+| `GOOGLE_CLIENT_ID`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | No | The Google OAuth client ID for customer "Sign in with Google" (both the same value; it is public). Empty turns customer sign-in off and hides the button. The session cookie needs the API and the shop on the same site, for example `api.example.com` and `example.com`. |
 | `DATABASE_URL`, `SERVER_PORT`, `APP_ENV` | No | Defaults match the Docker database and port `8080`. |
 | `NEXT_PUBLIC_API_URL` | No | Frontend's backend URL, default `http://localhost:8080`. |
 | `NEXT_PUBLIC_WHATSAPP_NUMBER` | No | Shop WhatsApp number, e.g. `8801XXXXXXXXX` (a local `01XXXXXXXXX` is converted). The product page (custom lens, "Not sure which lens?"), checkout and order success page show WhatsApp chat links. Without it, the page says the shop will call. Next.js reads it from `frontend/.env.local`, not the root `.env`; restart `npm run dev` after setting it. |
@@ -119,6 +120,7 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `017_frame_line_price_final.sql` | Marks saved frame-only lines as having no lens price to confirm |
    | `018_notifications.sql` | Saved emails waiting to be sent, and the order's "email confirmed" tick |
    | `019_order_risk_flags.sql` | Red-flag reasons saved on each order for staff |
+   | `020_customers.sql` | Customer accounts from Google sign-in, their sessions, and `orders.customer_id` |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

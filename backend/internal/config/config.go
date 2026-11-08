@@ -18,6 +18,8 @@ type Config struct {
 	JWTSecret        string
 	GmailFrom        string
 	GmailAppPassword string
+	// GoogleClientID is the OAuth client for customer "Sign in with Google"; empty turns customer sign-in off.
+	GoogleClientID string
 	// EmailTestCode turns on local email test mode: addresses ending in @example.test get this fixed
 	// 6-digit code and no email is sent. Empty means off; startup refuses it outside development.
 	EmailTestCode string
@@ -62,6 +64,7 @@ func Load() (Config, error) {
 		JWTSecret:        getEnv("JWT_SECRET", ""),
 		GmailFrom:        getEnv("GMAIL_FROM", ""),
 		GmailAppPassword: getEnv("GMAIL_APP_PASSWORD", ""),
+		GoogleClientID:   getEnv("GOOGLE_CLIENT_ID", ""),
 		EmailTestCode:    getEnv("EMAIL_TEST_CODE", ""),
 		MailProvider:     getEnv("MAIL_PROVIDER", "gmail"),
 		BrevoAPIKey:      getEnv("BREVO_API_KEY", ""),

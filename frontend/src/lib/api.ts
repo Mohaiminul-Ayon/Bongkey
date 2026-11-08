@@ -551,6 +551,49 @@ async function downloadPdf(path: string, token: string, filename: string, failur
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** Customer is the shopper signed in with Google; the session itself lives in an HttpOnly cookie. */
+export type Customer = { email: string; name: string };
+
+/** CustomerOrder is one row of "My orders". */
+export type CustomerOrder = { id: number; order_number: string; total: number; order_status: string; created_at: string };
+
+/** customerRequest sends the session cookie and the header the backend's CustomerCSRF check requires. */
+function customerRequest<T>(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers);
+  headers.set("X-Requested-With", "bongkey");
+  return request<T>(path, { ...options, headers, credentials: "include", cache: "no-store" });
+}
+
+/** signInWithGoogle trades the Google ID token for a customer session cookie. */
+export function signInWithGoogle(credential: string) {
+  return customerRequest<Customer>("/api/customer/google", { method: "POST", body: JSON.stringify({ credential }) });
+}
+
+/** fetchCustomer returns the signed-in customer; a 401 means signed out. */
+export function fetchCustomer() {
+  return customerRequest<Customer>("/api/customer/me");
+}
+
+/** signOutCustomer ends the session on the server and clears the cookie. */
+export function signOutCustomer() {
+  return customerRequest<unknown>("/api/customer/logout", { method: "POST" });
+}
+
+/** fetchCustomerOrders lists orders linked to the signed-in customer. */
+export function fetchCustomerOrders() {
+  return customerRequest<CustomerOrder[]>("/api/customer/orders");
+}
+
+/** fetchLinkCandidates counts earlier guest orders that used the customer's Google email. */
+export function fetchLinkCandidates() {
+  return customerRequest<{ count: number }>("/api/customer/link-candidates");
+}
+
+/** linkEarlierOrders links guest orders whose email and phone both match; the phone travels in the body. */
+export function linkEarlierOrders(phone: string) {
+  return customerRequest<{ linked: number }>("/api/customer/link", { method: "POST", body: JSON.stringify({ phone }) });
+}
+
 function title(value: string) {
   return value
     .replaceAll("_", " ")

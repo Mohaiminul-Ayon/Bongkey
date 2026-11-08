@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.33
+Version: 2.35
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -516,6 +516,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | NOTIFY-01 | High / REQ-10 | Every email queued in the database first and sent in the background with bounded retries; Brevo or Gmail by setting; customer emails for order placed (no address/phone), payment approved/rejected, shipped, delivered, invoice after staff confirm the email; owner instant bKash alert and 9 PM summary | Built 2026-11-07 (#24): Go unit tests, local PostgreSQL queue test, local end-to-end of all six emails. Real provider delivery needs the owner's test |
 | GUEST-01 | High / REQ-05 | Guest checkout without an email code; Bangladesh mobile required and normalized; per-phone and per-client limits; honeypot + fill-time bot handling; red flags saved for staff; order slip at checkout, guest invoice only after confirmation | Built 2026-11-07 (#78): Go unit tests, HTTP bot/phone cases, local slip PDF and invoice gate, browser checkout without code. Email-code recovery for unverified orders waits for #83's staff email tick |
 | ACCOUNT-01 | R2 / REQ-05 | Explicit verified-email account signup/login; one customer table; orders use nullable `customer_id`; customer-confirmed historical linking updates eligible verified-email guest orders without copying data | Deferred until after pilot feedback; do not scaffold during R1 |
+| GOOGLE-01 | R1 / REQ-05 | Optional customer Google sign-in (13.2): verified ID token, HttpOnly SameSite cookie session with expiry and logout, CSRF header, "My orders", phone-checked linking of earlier guest orders (#79) | Built 2026-11-07, off until the owner sets the Google client ID. Unit, HTTP and local PostgreSQL tests, live HTTP failure paths and a browser link/sign-out pass. Open: auto-attach orders placed while signed in after #84; real Google sign-in with the owner's client |
 
 ### Separate execution checklists (2026-10-15)
 
@@ -719,3 +720,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-05 | 2.31 | TRACK-01: delivery step times, courier tracking, public Track page (order number + phone, masked), and optional bKash payment of the remaining balance until delivery. |
 | 2026-11-07 | 2.32 | Pilot scope decisions (13.2): Brevo emails with database-first sending, owner 9 PM summary and instant bKash alert, invoice email after a confirmed address; guest checkout without email code, with honeypot, red flags and an order slip; Google sign-in before the pilot with phone-checked order linking; browser wishlist, price highlight, card add-to-cart, gradual shadcn/ui; RAG chatbot and AR/3D try-on after the pilot; Oracle Cloud hosting. |
 | 2026-11-07 | 2.33 | NOTIFY-01: database-first order emails (Brevo or Gmail), customer emails for placed/payment/shipped/delivered/invoice after confirmed email, owner bKash alert and 9 PM summary. |
+| 2026-11-07 | 2.35 | GOOGLE-01 (#79): customer Google sign-in, cookie sessions, My orders and phone-checked order linking; off until `GOOGLE_CLIENT_ID` is set. |
