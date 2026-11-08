@@ -12,8 +12,8 @@ import (
 
 // TestLogWithoutQueryDropsSearchTerms keeps customer phone numbers out of access logs.
 func TestLogWithoutQueryDropsSearchTerms(t *testing.T) {
-	line := logWithoutQuery(gin.LogFormatterParams{Path: "/api/admin/orders?search=01712345678", Method: http.MethodGet})
-	if strings.Contains(line, "01712345678") || !strings.Contains(line, "/api/admin/orders") {
+	line := logWithoutQuery(gin.LogFormatterParams{Path: "/api/admin/orders?search=01712345678", Method: http.MethodGet, Keys: map[any]any{"request_id": "abc123"}})
+	if strings.Contains(line, "01712345678") || !strings.Contains(line, "/api/admin/orders") || !strings.Contains(line, "abc123") {
 		t.Fatalf("log line = %q", line)
 	}
 }
@@ -120,6 +120,7 @@ func TestPaymentReviewRoutesRequireAdmin(t *testing.T) {
 		{http.MethodGet, "/api/admin/advance-policies", http.StatusUnauthorized},
 		{http.MethodPut, "/api/admin/advance-policies/lens", http.StatusUnauthorized},
 		{http.MethodPut, "/api/admin/orders/1/tracking", http.StatusUnauthorized},
+		{http.MethodPut, "/api/admin/orders/1/email-confirmed", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/stock/low", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/products/1/stock-history", http.StatusUnauthorized},
 		{http.MethodGet, "/api/orders/1/payments", http.StatusNotFound},

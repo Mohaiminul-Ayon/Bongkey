@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -33,6 +34,17 @@ type orderRequest struct {
 	ExpectedDeliveryFee *int               `json:"expected_delivery_fee"`
 	PaymentMethod       string             `json:"payment_method"`
 	Items               []orderItemRequest `json:"items"`
+	// Website is a hidden honeypot field people never see; FillMS is how long the form was open.
+	Website string `json:"website"`
+	FillMS  int    `json:"fill_ms"`
+}
+
+// minFillMS is faster than a person can fill in the checkout form.
+const minFillMS = 3000
+
+// botSigns reads the two transport-level bot signs. A missing fill time (old pages, API clients) counts as fast.
+func botSigns(req orderRequest) (honeypot, fast bool) {
+	return strings.TrimSpace(req.Website) != "", req.FillMS < minFillMS
 }
 
 type orderItemRequest struct {
@@ -78,6 +90,19 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid idempotency key is required"})
 		return
 	}
+	// Both signs together are a bot: answer as if it worked, so it learns nothing, and save nothing. The honeypot
+	// alone may be a browser autofilling the hidden field, so the person is asked to try again instead of being
+	// silently dropped. Speed alone is saved as a red flag for staff, because a fast person must not lose the order.
+	honeypot, fast := botSigns(req)
+	if honeypot && fast {
+		log.Printf("checkout: bot submission dropped")
+		c.JSON(http.StatusOK, gin.H{"received": true})
+		return
+	}
+	if honeypot {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "something went wrong; please try again or message us on WhatsApp"})
+		return
+	}
 	items := make([]orders.CheckoutItem, len(req.Items))
 	for i, item := range req.Items {
 		items[i] = orders.CheckoutItem{
@@ -92,11 +117,18 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
 		ExpectedDeliveryFee: req.ExpectedDeliveryFee, PaymentMethod: req.PaymentMethod, Items: items,
+		ClientIP: c.ClientIP(), FastSubmit: fast,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, orders.ErrInvalidCheckout):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order data"})
+		case errors.Is(err, orders.ErrInvalidPhone):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enter a Bangladesh mobile number like 01712345678"})
+		case errors.Is(err, orders.ErrInvalidEmail):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enter one email address like name@example.com"})
+		case errors.Is(err, orders.ErrCheckoutLimited):
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many orders in a short time; please wait 15 minutes or message us on WhatsApp"})
 		case errors.Is(err, lens.ErrInvalidPrescription):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "each prescription must be a clear PDF, JPG, PNG or HEIC file up to 5 MB"})
 		case errors.Is(err, orders.ErrUnavailable):
