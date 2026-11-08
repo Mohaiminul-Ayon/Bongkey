@@ -21,6 +21,8 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, Idempotency-Key, X-Requested-With")
 			// Credentials let the shop's own pages send the HttpOnly customer cookie; other origins still get nothing.
 			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+			// The shop's pages may read the request ID to show it next to an error.
+			c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 		}
 
 		if c.Request.Method == http.MethodOptions {

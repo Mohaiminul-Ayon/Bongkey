@@ -638,6 +638,24 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the frame with options showed Choose options;
   - adding up to stock (14) turned the button to "All in your bag";
   - a deleted saved slug showed "no longer available", and Remove cleared it.
+## LOG-01 — Request IDs in logs and errors (#27)
+
+**Status:** Built 2026-11-07 on `feat/logging-request-id`.
+
+**Middleware order** in [SetupRouter](../backend/internal/routes/routes.go): `RequestID` → access logger → `Recovery` → CORS → routes.
+- [RequestID](../backend/internal/middleware/request_id.go) makes 8 random bytes (16 hex), stores them under `request_id` and sends `X-Request-ID` on every response. A client-sent ID is ignored, so nobody can forge log lines.
+- The access logger ([logWithoutQuery](../backend/internal/routes/routes.go)) prints the ID after the client IP. The query string is still dropped.
+- [Recovery](../backend/internal/middleware/recovery.go) replaces `gin.Recovery`. On a panic it logs `[PANIC] request_id=… METHOD /path: cause` and the stack, and answers 500 `{"error":"something went wrong; please try again","request_id":"…"}`. Unlike gin's version it never dumps request headers, so cookies and bearer tokens stay out of logs. The logger sits outside it, so the 500 is still logged.
+- CORS exposes `X-Request-ID` to the shop's own pages. [requestError](../frontend/src/lib/api.ts) adds " (ref …)" to the message of any 5xx error, so a customer can read the reference to the owner.
+
+**Example:** `GET /api/admin/orders?search=01712345678` without login → 401 with `X-Request-Id: 0c0bad5c2b876545`. The log line ends `| 0c0bad5c2b876545 | GET /api/admin/orders`, with no phone.
+
+**Limits:** only the access log and panic log carry the ID. Other `log.Printf` lines (email provider failures, prescription cleanup) do not, because they don't receive the request context. Panics in other goroutines are not covered.
+
+**Evidence:**
+- `TestRequestIDAndRecovery`: unique 16-hex IDs; a client ID is ignored; a panic gives a 500 with the same ID in the header, body and log; no token, cookie or query phone in the log or body.
+- `TestLogWithoutQueryDropsSearchTerms` now also checks the ID.
+- Live: one request showed the same ID in the header and the log line, and the expose header was present.
 
 ## Stories without a completed request flow
 

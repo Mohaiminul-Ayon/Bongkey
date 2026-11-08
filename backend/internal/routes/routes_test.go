@@ -12,8 +12,8 @@ import (
 
 // TestLogWithoutQueryDropsSearchTerms keeps customer phone numbers out of access logs.
 func TestLogWithoutQueryDropsSearchTerms(t *testing.T) {
-	line := logWithoutQuery(gin.LogFormatterParams{Path: "/api/admin/orders?search=01712345678", Method: http.MethodGet})
-	if strings.Contains(line, "01712345678") || !strings.Contains(line, "/api/admin/orders") {
+	line := logWithoutQuery(gin.LogFormatterParams{Path: "/api/admin/orders?search=01712345678", Method: http.MethodGet, Keys: map[any]any{"request_id": "abc123"}})
+	if strings.Contains(line, "01712345678") || !strings.Contains(line, "/api/admin/orders") || !strings.Contains(line, "abc123") {
 		t.Fatalf("log line = %q", line)
 	}
 }

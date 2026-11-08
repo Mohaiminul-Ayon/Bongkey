@@ -185,15 +185,19 @@ export function clearAdminToken() {
   localStorage.removeItem("bongkey_admin_token");
 }
 
+/** requestError builds a failed call's error; a server error carries its request ID so the owner can find it in the logs. */
+function requestError(response: Response, data: { error?: string }, fallback: string) {
+  const ref = response.status >= 500 ? response.headers.get("X-Request-ID") : null;
+  // status lets callers treat a missing resource differently from an outage.
+  return Object.assign(new Error(`${data.error || fallback}${ref ? ` (ref ${ref})` : ""}`), { status: response.status });
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    // status lets callers treat a missing resource differently from an outage.
-    throw Object.assign(new Error(data.error || "Request failed"), { status: response.status });
-  }
+  if (!response.ok) throw requestError(response, data, "Request failed");
   return data as T;
 }
 
@@ -214,9 +218,7 @@ export async function adminUpload(path: string, file: File, field = "image") {
     body,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || "Upload failed");
-  }
+  if (!response.ok) throw requestError(response, data, "Upload failed");
   return data as { url: string };
 }
 
@@ -390,7 +392,7 @@ export async function createOrder(payload: OrderPayload, idempotencyKey: string,
   // The browser sets the multipart boundary itself, so no Content-Type header here.
   const response = await fetch(`${API_URL}/api/orders`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw Object.assign(new Error(data.error || "Request failed"), { status: response.status });
+  if (!response.ok) throw requestError(response, data, "Request failed");
   return data as PlacedOrder;
 }
 
