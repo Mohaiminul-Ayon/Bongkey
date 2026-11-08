@@ -40,7 +40,6 @@ export type OrderPayload = {
   customer_name: string;
   customer_phone: string;
   customer_email: string;
-  email_proof: string;
   shipping_address: string;
   city: string;
   delivery_note: string;
@@ -48,6 +47,9 @@ export type OrderPayload = {
   /** payment_method is sent only for frame-only carts; lens orders always pay an advance. */
   payment_method?: "cash_on_delivery" | "bkash";
   items: OrderItemPayload[];
+  /** website is the hidden honeypot field (empty for people); fill_ms is how long the form was open. */
+  website?: string;
+  fill_ms?: number;
 };
 
 /** OrderItemPayload is one bag line; lens fields are sent only for lens lines, and powers are hundredths (-150 = -1.50). */
@@ -87,6 +89,10 @@ export type AdminOrderDetail = {
   amount_paid: number;
   created_at: string;
   tracking: OrderTracking;
+  /** email_confirmed is the staff tick that the email was read back on the call; the invoice email waits for it. */
+  email_confirmed: boolean;
+  /** risk_flags are checkout red flags for staff, such as "short_address". */
+  risk_flags?: string[];
   items: AdminOrderItem[];
 };
 
@@ -124,6 +130,11 @@ export type TrackedOrder = {
 /** trackOrder looks an order up by number and checkout phone; both travel in the body, not the URL. */
 export async function trackOrder(orderNumber: string, phone: string) {
   return request<TrackedOrder>("/api/track", { method: "POST", body: JSON.stringify({ order_number: orderNumber, phone }), cache: "no-store" });
+}
+
+/** setEmailConfirmed saves whether staff read the customer's email back on the confirmation call. */
+export async function setEmailConfirmed(id: number, confirmed: boolean) {
+  return adminRequest(`/api/admin/orders/${id}/email-confirmed`, { method: "PUT", body: JSON.stringify({ confirmed }) });
 }
 
 /** saveOrderTracking stores the courier details the owner types for an order. */
@@ -516,19 +527,72 @@ export async function savePaymentMethod(method: PaymentMethod) {
 /** downloadInvoice keeps guest and admin bearer proofs out of URLs. */
 export async function downloadInvoice(id: string, token: string, admin = false) {
   const path = admin ? `/api/admin/orders/${encodeURIComponent(id)}` : `/api/orders/${encodeURIComponent(id)}`;
-  const response = await fetch(`${API_URL}${path}/invoice.pdf`, {
+  await downloadPdf(`${path}/invoice.pdf`, token, `bongkey-invoice-${id}.pdf`, "Could not download invoice.");
+}
+
+/** downloadOrderSlip saves the order slip (not an invoice) the customer gets right after checkout. */
+export async function downloadOrderSlip(id: string, token: string) {
+  await downloadPdf(`/api/orders/${encodeURIComponent(id)}/slip.pdf`, token, `bongkey-order-${id}.pdf`, "Could not download the order slip.");
+}
+
+/** downloadPdf fetches an authorized PDF and saves it without putting the token in a URL. */
+async function downloadPdf(path: string, token: string, filename: string, failure: string) {
+  const response = await fetch(`${API_URL}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  if (!response.ok) throw new Error("Could not download invoice.");
+  if (!response.ok) throw new Error(failure);
   const url = URL.createObjectURL(await response.blob());
   const link = document.createElement("a");
   link.href = url;
-  link.download = `bongkey-invoice-${id}.pdf`;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Customer is the shopper signed in with Google; the session itself lives in an HttpOnly cookie. */
+export type Customer = { email: string; name: string };
+
+/** CustomerOrder is one row of "My orders". */
+export type CustomerOrder = { id: number; order_number: string; total: number; order_status: string; created_at: string };
+
+/** customerRequest sends the session cookie and the header the backend's CustomerCSRF check requires. */
+function customerRequest<T>(path: string, options: RequestInit = {}) {
+  const headers = new Headers(options.headers);
+  headers.set("X-Requested-With", "bongkey");
+  return request<T>(path, { ...options, headers, credentials: "include", cache: "no-store" });
+}
+
+/** signInWithGoogle trades the Google ID token for a customer session cookie. */
+export function signInWithGoogle(credential: string) {
+  return customerRequest<Customer>("/api/customer/google", { method: "POST", body: JSON.stringify({ credential }) });
+}
+
+/** fetchCustomer returns the signed-in customer; a 401 means signed out. */
+export function fetchCustomer() {
+  return customerRequest<Customer>("/api/customer/me");
+}
+
+/** signOutCustomer ends the session on the server and clears the cookie. */
+export function signOutCustomer() {
+  return customerRequest<unknown>("/api/customer/logout", { method: "POST" });
+}
+
+/** fetchCustomerOrders lists orders linked to the signed-in customer. */
+export function fetchCustomerOrders() {
+  return customerRequest<CustomerOrder[]>("/api/customer/orders");
+}
+
+/** fetchLinkCandidates counts earlier guest orders that used the customer's Google email. */
+export function fetchLinkCandidates() {
+  return customerRequest<{ count: number }>("/api/customer/link-candidates");
+}
+
+/** linkEarlierOrders links guest orders whose email and phone both match; the phone travels in the body. */
+export function linkEarlierOrders(phone: string) {
+  return customerRequest<{ linked: number }>("/api/customer/link", { method: "POST", body: JSON.stringify({ phone }) });
 }
 
 function title(value: string) {

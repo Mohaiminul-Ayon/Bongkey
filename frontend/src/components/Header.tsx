@@ -27,6 +27,7 @@ export function Header() {
           </div>
           <div className="header-actions">
             <ThemeToggle />
+            <Link href="/account">Account</Link>
             <Link aria-label={`Saved, ${saved} items`} className="saved-link" href="/wishlist"><span aria-hidden="true">♡</span> {saved}</Link>
             <Link aria-label={`Bag, ${count} items`} className="cart-link" href="/cart">Bag <span>{count}</span></Link>
           </div>

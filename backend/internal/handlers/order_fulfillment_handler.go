@@ -13,6 +13,34 @@ import (
 type OrderFulfillmentHandler struct {
 	Service  orders.FulfillmentService
 	Tracking orders.TrackingService
+	Emails   orders.EmailConfirmationService
+}
+
+// SetEmailConfirmed saves the staff tick that the customer's email was read back on the confirmation call.
+func (h OrderFulfillmentHandler) SetEmailConfirmed(c *gin.Context) {
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
+	var req struct {
+		Confirmed *bool `json:"confirmed"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Confirmed == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirmed must be true or false"})
+		return
+	}
+	err = h.Emails.SetEmailConfirmed(c.Request.Context(), orderID, *req.Confirmed)
+	c.Header("Cache-Control", "no-store")
+	switch {
+	case errors.Is(err, orders.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save the email check"})
+	default:
+		c.JSON(http.StatusOK, gin.H{"email_confirmed": *req.Confirmed})
+	}
 }
 
 // SetTracking saves the courier name, tracking code and link the owner types for an order.

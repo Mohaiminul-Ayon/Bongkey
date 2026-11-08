@@ -433,6 +433,185 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - the private order page showed the timeline and the optional pay box;
   - all four header links fit at 375 px.
 
+## NOTIFY-01 — Order emails and owner summary (#24)
+
+**Status:** Built 2026-11-07 on `feat/notifications-email`. Real delivery through Brevo or Gmail still needs the owner's test with a real address.
+
+**Owner decisions (2026-11-07, PRD 13.2):**
+- Brevo on the server, Gmail locally.
+- Customer emails: order placed (no address or phone), payment approved or rejected, shipped, delivered, and the invoice after staff tick "email confirmed".
+- Owner emails: a 9 PM summary plus an instant email for each bKash payment.
+
+**Data:** migration `018_notifications.sql` adds:
+- the `notifications` queue, one row per email with a unique `event_key` such as `order_placed:160`;
+- `orders.email_confirmed`.
+
+**Request (order placed):** `POST /api/orders` as before.
+1. [CheckoutService.Place](../backend/internal/orders/checkout.go:339) commits the order, then calls `Notifier.OrderPlaced`. The interface lives in [orders/notifier.go](../backend/internal/orders/notifier.go), so orders does not import the email code.
+2. [Service.OrderPlaced](../backend/internal/notifications/notifications.go:65):
+   - uses a [detached](../backend/internal/notifications/notifications.go:59) 5-second context, so a customer who closes the page right after ordering still gets the email;
+   - loads the order through `orders.AccessService.Admin`;
+   - writes the text: order number, products, totals, the next step and the Track link, with no name, phone or address.
+3. [PostgresStore.Enqueue](../backend/internal/notifications/repository.go:20) inserts it with `ON CONFLICT (event_key) DO NOTHING`, so a repeated event never queues a second email. Nothing here returns an error to checkout; a failure is logged as `notification not queued: event=order_placed:160`, without customer data.
+4. The worker that [serve](../backend/cmd/server/server.go:63) starts ([Worker.Tick](../backend/internal/notifications/worker.go:113) every 30 seconds):
+   - [ClaimDue](../backend/internal/notifications/repository.go:56) marks up to 20 due rows `sending` with `FOR UPDATE SKIP LOCKED`, so two servers never claim the same row;
+   - [send](../backend/internal/notifications/worker.go:137) sends each one through [mail.Brevo](../backend/internal/mail/brevo.go) or [mail.Gmail](../backend/internal/mail/gmail.go) and records `sent`;
+   - on a failure it retries after 1 min, 5 min, 30 min, 2 h, then 6 h, and marks the row `failed` after 8 attempts (about a day);
+   - addresses on `@example.test` are recorded as `skipped`, never sent.
+
+**Other events:**
+- `Submit`, `Approve` and `Reject` in [payments.go](../backend/internal/payments/payments.go:259) call `PaymentSubmitted` (the owner alert, with order, amount and TrxID) and `PaymentReviewed` (approved, or rejected with the reason).
+- [FulfillmentService.ChangeStatus](../backend/internal/orders/fulfillment.go:77) calls `StatusChanged` only when the status really changed:
+  - **shipped** includes the courier and the cash still due;
+  - **delivered** is a thank-you;
+  - **confirmed** tries the invoice.
+- **Invoice:** `PUT /api/admin/orders/:id/email-confirmed` `{"confirmed":true}` → `AdminAuth` → [SetEmailConfirmed](../backend/internal/handlers/order_fulfillment_handler.go:20) → `EmailConfirmationService` saves the tick → [invoiceIfReady](../backend/internal/notifications/notifications.go:141). The invoice is queued only when the order is confirmed (or later) **and** ticked. Whichever comes second sends it; the key `invoice:<id>` keeps it to one email. The PDF is rendered when the email is sent, so it shows the current paid amount.
+- **Daily summary:** [queueSummary](../backend/internal/notifications/worker.go:185) runs at or after 21:00 Bangladesh time and checks the key `owner_summary:YYYY-MM-DD`:
+  - it reports new orders, payments waiting, prescriptions, open lens prices, confirmed orders not shipped, and failed emails;
+  - a quiet day is recorded as `skipped`, without an email;
+  - a server that starts later that evening still sends it, and a restart never sends it twice.
+
+**Failure paths:**
+- The provider is down: the row goes back to `pending` with its next attempt time; the order is unaffected.
+- After 8 attempts the row is `failed`, and the next summary counts it.
+- A crash while a row is `sending`: the row is retried after 10 minutes. That can send that one email twice (a `shortcut:` in the repository).
+- `MAIL_PROVIDER=brevo` without `BREVO_API_KEY` or `MAIL_FROM`: startup fails.
+- The admin tick without login: 401 from `AdminAuth`.
+
+**Limits:**
+- Old sent rows are not purged yet.
+- Owner alerts go to one address.
+- Templates are English plain text.
+- There is no cancellation email.
+
+**Evidence:**
+- Unit tests in [notifications_test.go](../backend/internal/notifications/notifications_test.go):
+  - the order-placed email shows no phone, address or name, and is queued once;
+  - the invoice waits for both the confirmation and the tick;
+  - shipped and delivered only;
+  - the owner alert only when set, and the rejection reason;
+  - retry delays and the final failure;
+  - test addresses skipped;
+  - the summary at 21:00, once, with a quiet day skipped.
+- [gmail_test.go](../backend/internal/mail/gmail_test.go): header injection refused for both providers; multipart attachment; the Brevo request shape; logs that hide the Brevo response body.
+- `TestMailProviderSettings`: the configuration checks.
+- Local PostgreSQL `TestNotificationQueuePostgres`: a duplicate key ignored, claim once, a retry not early, a stale claim retried, a sent row not claimed again, the summary query.
+- The route protection test covers the admin route.
+- Local end-to-end: a test-mode frame order went through bKash, approve, confirm, tick, courier details, shipped and delivered. It queued exactly six emails (placed, owner alert, approved, invoice with attachment flag, shipped, delivered), each with the expected text, and the running worker processed them all.
+## GUEST-01 — Guest checkout without an email code (#78)
+
+**Status:** Built 2026-11-07 on `feat/guest-checkout-simple`. One follow-up waits for #83 (see Limits).
+
+**Owner decisions (2026-11-07, PRD 13.2):**
+- No email code at checkout; the owner confirms every order by phone.
+- Bot handling: a hidden field plus a fill time.
+- Red flags warn staff but never block an order.
+- The customer gets an order slip at checkout; the invoice comes only after confirmation.
+
+**Data:** migration `019_order_risk_flags.sql` adds `orders.risk_flags TEXT[]`.
+
+**Request:** `POST /api/orders` `{"customer_phone":"+880 1712-345678","customer_email":"buyer@example.com",…,"website":"","fill_ms":41000}`. There is no `email_proof`.
+
+1. The [checkout page](../frontend/src/app/checkout/page.tsx):
+   - checks the phone with `validBangladeshMobile`;
+   - sends the hidden `bk_extra_url` input as `website` (off-screen, `aria-hidden`, `tabIndex=-1`, `autoComplete=off`);
+   - sends `fill_ms`, the time since the form appeared.
+
+   Neither of those two is part of the retry key.
+2. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go:69) parses the body. Then [botSigns](../backend/internal/handlers/order_handler.go:96) decides:
+   - **honeypot and fast:** `200 {"received":true}` and nothing saved, so the bot learns nothing;
+   - **honeypot only:** 400 "please try again or message us on WhatsApp";
+   - **fast only:** goes on, with `FastSubmit` set.
+
+   It passes `c.ClientIP()` to the service.
+3. [CheckoutService.Place](../backend/internal/orders/checkout.go:201):
+   - normalizes the phone with `NormalizeMobile` ([phone.go](../backend/internal/orders/phone.go), now shared with payments) and refuses anything that is not `01[3-9]` plus 8 digits (`ErrInvalidPhone`, 400);
+   - marks the email verified only if an old client sent a matching proof;
+   - counts the order in [limit](../backend/internal/orders/checkout.go:461): at most 5 per phone and 10 per client in 15 minutes, otherwise `ErrCheckoutLimited` and 429. The keys are HMACs, so no phone or IP is stored.
+4. Inside the transaction, after the retry lookup (so old accepted retries keep their receipt), the email must be one plain address ([line 274](../backend/internal/orders/checkout.go:274), `ErrInvalidEmail`, 400).
+5. [PhoneHistory](../backend/internal/orders/checkout_repository.go:146) reads earlier orders with the same last 11 digits **before** the insert: how many were placed today (Bangladesh time) and whether a different name was used in the last 30 days.
+6. [riskFlags](../backend/internal/orders/risk.go:43) can set: `disposable_email`, `short_address` (fewer than 10 letters or a single word), `odd_name`, `repeat_phone` (2 earlier orders today), `phone_other_name`, `high_value_cod` (৳10,000 or more cash on delivery) and `fast_submit`. Bangla vowel signs count as letters. `FlagOrder` saves them in the same transaction.
+7. The admin list and the order page show them in red through [RiskFlags](../frontend/src/components/RiskFlags.tsx).
+8. The order page offers **Download order slip**: `GET /api/orders/:id/slip.pdf` with the order token → [GetSlip](../backend/internal/handlers/order_access_handler.go:39) → `GuestDetail` → `invoice.RenderSlip`. The slip says "This is not an invoice". `GET /api/orders/:id/invoice.pdf` now goes through [GuestInvoice](../backend/internal/orders/access.go:129) and answers 409 until the order is confirmed; only then does the page show **Download invoice PDF**. The admin invoice is unchanged.
+
+**Failure paths:**
+- A wrong phone: 400 with an example number.
+- A bad email: 400.
+- A flood: 429.
+- Honeypot only: 400.
+- Both bot signs: silent 200, nothing saved.
+- A guest invoice before confirmation: 409 with a pointer to the slip.
+
+**Limits:**
+- After #83 merges, email-code access to the private order page should also accept an order whose email staff ticked as confirmed (`EmailVerified || EmailConfirmed` in `guestRecord`). Until then, an unverified order opened on another device must use the Track page.
+- The fill time is sent by the browser, so a careful bot can fake it. The phone limit and the confirmation call remain the real protection.
+- The throwaway-domain list is short (`shortcut:` in risk.go).
+- Phone history scans without an index (`shortcut:`).
+
+**Evidence:**
+- Unit tests:
+  - `TestCheckoutEmailWithoutCode`;
+  - `TestCheckoutPhoneRules`;
+  - `TestCheckoutLimits` (6th per phone, 11th per client, no raw phone or IP in keys);
+  - `TestRiskFlags` (including Bangla names and addresses);
+  - `TestCheckoutSavesFlags`;
+  - `TestStartOfDhakaDay`;
+  - `TestCheckoutHTTPBotSigns`;
+  - `TestGuestInvoiceResponse` (invoice 409 before confirmation, slip 200, wrong token 404);
+  - `TestReadableDate`;
+  - `TestRenderSlip`.
+- Local HTTP: the bot case gave 200 and saved nothing; the honeypot gave 400; a bad phone gave 400; orders without a code were accepted with the phone saved as `01712000004`; the slip PDF downloaded; the invoice gave 409; the flags were saved (`short_address odd_name phone_other_name fast_submit`).
+- Browser: the checkout has no email-code step and the honeypot is off-screen; a browser order reached its order page, which showed **Download order slip** and no invoice button.
+## GOOGLE-01 — Customer Google sign-in and order linking (#79)
+
+**Status:** Built 2026-11-07 on `feat/customer-google-signin`. It is off until the owner creates a Google OAuth client and sets `GOOGLE_CLIENT_ID` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`. Guest checkout is unchanged.
+
+**Data:** migration `020_customers.sql` adds:
+- `customers` (Google's stable `google_sub`, the email Google last verified, the name);
+- `customer_sessions` (only the SHA-256 of the cookie token, with an expiry);
+- `orders.customer_id`, which stays NULL until a customer links the order.
+
+**Sign-in request:** `POST /api/customer/google` with `{"credential":"<Google ID token>"}` and the header `X-Requested-With: bongkey`.
+
+1. The [account page](../frontend/src/app/account/page.tsx) (header link "Account") draws Google's button through [GoogleSignInButton](../frontend/src/components/GoogleSignInButton.tsx). Google hands back an ID token, and `signInWithGoogle` posts it with `credentials: "include"`.
+2. [routes.go](../backend/internal/routes/routes.go) puts every `/api/customer` route behind [CustomerCSRF](../backend/internal/middleware/customer_auth.go). A non-GET request without the custom header gets 403 before any handler runs. Another site cannot add that header without a CORS preflight, and [CORS](../backend/internal/middleware/cors.go) only answers the shop's own origins (now with `Allow-Credentials`).
+3. [CustomerHandler.SignIn](../backend/internal/handlers/customer_handler.go) limits the body to 16 KB and calls [Service.SignIn](../backend/internal/customers/customers.go).
+4. [GoogleVerifier.Verify](../backend/internal/security/google_token.go):
+   - accepts RS256 only;
+   - checks the signature with Google's published key for the token's `kid` ([GoogleKeys.Key](../backend/internal/security/google_token.go) caches the key set for an hour and downloads it at most once a minute for unknown key IDs);
+   - requires the audience to be our client ID, the issuer to be Google, an unexpired token, a subject and a verified email.
+5. `SaveGoogleCustomer` upserts by `google_sub` and refreshes the email. A random 256-bit token is created, and only its hash is stored, with a 30-day expiry.
+6. The handler sets the cookie `bongkey_customer`: HttpOnly, SameSite=Lax, Secure outside `APP_ENV=development`. The token is never in the response body or in page scripts.
+
+**Signed-in requests:** `GET /me`, `GET /orders`, `GET /link-candidates`, `POST /link` run [CustomerAuth](../backend/internal/middleware/customer_auth.go) after CustomerCSRF. It hashes the cookie and looks up an unexpired session; missing, unknown or expired → 401 and abort. It attaches `customer` for the handler. A customer cookie never opens `/api/admin`: AdminAuth needs a bearer token from the admin login.
+
+**Linking earlier orders:** `POST /api/customer/link` with `{"phone":"01712-345678"}`.
+1. [Service.Link](../backend/internal/customers/customers.go) reduces the phone to its last ten digits (so 017…, +88017… and 88017… match) and refuses a non-mobile with 400.
+2. It counts the try with the shared PostgreSQL limiter (HMAC key of kind `customer-link`, 5 per 15 minutes per customer, then 429).
+3. [PostgresStore.LinkOrders](../backend/internal/customers/repository.go) runs one UPDATE: only orders with no owner, the Google-verified email and the typed phone get this `customer_id`. It returns how many were newly linked; a wrong phone links 0 and reveals nothing more.
+
+**Logout:** `POST /api/customer/logout` deletes the session row and clears the cookie, so the old cookie stops working at once.
+
+**Failure paths:**
+- No `X-Requested-With` header: 403 from CustomerCSRF; the handler never runs.
+- `GOOGLE_CLIENT_ID` unset: sign-in answers 503 and the page says sign-in is not available yet.
+- A forged, expired, wrong-audience or unverified-email token: 401.
+- No cookie, an expired session or a logged-out cookie: 401 from CustomerAuth.
+- A bad phone: 400. Too many link tries: 429.
+
+**Limits:**
+- One fixed 30-day session with no refresh rotation (marked `shortcut:`).
+- "My orders" shows number, date, total and status, capped at 100. Details still go through Track order.
+- Orders placed while signed in are not attached automatically yet; the customer links them with the same phone step. Auto-attach comes after guest checkout (#84) is merged.
+- The cookie only works when the API and the shop share a site (for example `api.example.com` and `example.com`).
+
+**Evidence:**
+- [google_token_test.go](../backend/internal/security/google_token_test.go): valid token, both issuer spellings, expired, no expiry, wrong audience, wrong issuer, unverified email, no email, no subject, another key, unknown key ID, an HS256 token, no client ID; key set parsing and the refresh floor.
+- [customers_test.go](../backend/internal/customers/customers_test.go): the raw token is never stored; logout and expiry end the session; phone formats; the link limit.
+- [customer_handler_test.go](../backend/internal/handlers/customer_handler_test.go): CSRF 403, forged 401, cookie flags, no token in the body, `/me`, logout clears the cookie, and the old cookie is refused.
+- Local PostgreSQL `TestPostgresLinkOrders`: an email-only match is refused, email + phone links, a repeat links 0, another customer's order is never moved, an expired session is refused.
+- Live HTTP on the local server: all failure paths above, the preflight headers, and a customer cookie refused on `/api/admin/me`.
+- Browser: the signed-out page, the signed-in page with "We found 2 earlier orders", linking one order by phone, and sign-out back to the signed-out page. QA rows were removed.
 ## SHOP-01 — Sale prices, card add-to-bag and browser wishlist (#80)
 
 **Status:** Built 2026-11-07 on `feat/storefront-ui`. The shadcn/ui swap waits for the owner's screenshots of layouts that break.
@@ -463,5 +642,5 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.
-- `ACCOUNT-01` is deferred to R2: there is no customer signup/login or historical order-linking implementation to trace. Guest email OTP in `EMAIL-01` does not create a customer account.
+- `ACCOUNT-01` beyond GOOGLE-01 (saved addresses, reorder, order details in the account) is deferred to R2.
 - Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, returns/refunds and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.
