@@ -555,8 +555,9 @@ async function downloadPdf(path: string, token: string, filename: string, failur
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Customer is the shopper signed in with Google; the session itself lives in an HttpOnly cookie. */
-export type Customer = { email: string; name: string };
+/** Customer is the signed-in shopper (Google or email + password); the session itself lives in an HttpOnly cookie.
+ * phone is "01XXXXXXXXX", or "" until the profile is finished. */
+export type Customer = { email: string; name: string; phone: string };
 
 /** CustomerOrder is one row of "My orders". */
 export type CustomerOrder = { id: number; order_number: string; total: number; order_status: string; created_at: string };
@@ -576,6 +577,21 @@ export function signInWithGoogle(credential: string) {
 /** fetchCustomer returns the signed-in customer; a 401 means signed out. */
 export function fetchCustomer() {
   return customerRequest<Customer>("/api/customer/me");
+}
+
+/** signInWithPassword starts a session from an email and password. */
+export function signInWithPassword(email: string, password: string) {
+  return customerRequest<Customer>("/api/customer/login", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+/** setCustomerPassword creates an account or resets its password with the proof from the email-code step, then signs in. */
+export function setCustomerPassword(emailProof: string, password: string) {
+  return customerRequest<Customer>("/api/customer/password", { method: "POST", body: JSON.stringify({ email_proof: emailProof, password }) });
+}
+
+/** updateCustomerProfile saves the required name and mobile number. */
+export function updateCustomerProfile(name: string, phone: string) {
+  return customerRequest<Customer>("/api/customer/profile", { method: "PUT", body: JSON.stringify({ name, phone }) });
 }
 
 /** signOutCustomer ends the session on the server and clears the cookie. */

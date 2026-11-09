@@ -49,6 +49,13 @@ func (s sessionStore) Orders(context.Context, int64) ([]customers.Order, error) 
 	return []customers.Order{}, nil
 }
 func (s sessionStore) LinkCandidates(context.Context, string) (int, error) { return 0, nil }
+func (s sessionStore) PasswordCustomer(context.Context, string) (customers.Customer, string, error) {
+	return customers.Customer{}, "", customers.ErrNotFound
+}
+func (s sessionStore) SetPassword(_ context.Context, email, _ string) (customers.Customer, error) {
+	return customers.Customer{ID: 1, Email: email}, nil
+}
+func (s sessionStore) UpdateProfile(context.Context, int64, string, string) error { return nil }
 func (s sessionStore) LinkOrders(context.Context, int64, string, string) (int, error) {
 	return 0, nil
 }
@@ -56,13 +63,17 @@ func (s sessionStore) LinkOrders(context.Context, int64, string, string) (int, e
 // TestCustomerSessionHTTP walks sign-in, a signed-in read, logout and the CSRF header rule through real routes.
 func TestCustomerSessionHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service := customers.Service{Store: sessionStore{hashes: map[string]bool{}}, Google: oneGoogle{}}
+	const secret = "synthetic-test-secret-at-least-thirty-two-characters"
+	service := customers.Service{Store: sessionStore{hashes: map[string]bool{}}, Google: oneGoogle{}, Limiter: &countAll{}, Secret: secret}
 	h := CustomerHandler{Service: service, SecureCookie: true}
 	router := gin.New()
 	group := router.Group("/api/customer", middleware.CustomerCSRF())
 	group.POST("/google", h.SignIn)
 	group.POST("/logout", h.Logout)
 	group.GET("/me", middleware.CustomerAuth(service), h.Me)
+	group.POST("/login", h.Login)
+	group.POST("/password", h.SetPassword)
+	group.PUT("/profile", middleware.CustomerAuth(service), h.UpdateProfile)
 
 	send := func(method, path, body, cookie string, header bool) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -109,4 +120,38 @@ func TestCustomerSessionHTTP(t *testing.T) {
 	if got := send(http.MethodGet, "/api/customer/me", "", cookie.Value, false); got.Code != http.StatusUnauthorized {
 		t.Fatalf("old cookie after logout: %d", got.Code)
 	}
+
+	// Email + password: unknown account, expired proof, weak password, then sign-up and the profile.
+	if got := send(http.MethodPost, "/api/customer/login", `{"email":"nobody@example.test","password":"long enough"}`, "", true); got.Code != http.StatusUnauthorized {
+		t.Fatalf("unknown login: %d", got.Code)
+	}
+	if got := send(http.MethodPost, "/api/customer/password", `{"email_proof":"forged","password":"long enough"}`, "", true); got.Code != http.StatusBadRequest {
+		t.Fatalf("forged proof: %d", got.Code)
+	}
+	proof, err := security.IssueEmailProof(secret, "new@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := send(http.MethodPost, "/api/customer/password", `{"email_proof":"`+proof+`","password":"short"}`, "", true); got.Code != http.StatusBadRequest {
+		t.Fatalf("short password: %d", got.Code)
+	}
+	signUp := send(http.MethodPost, "/api/customer/password", `{"email_proof":"`+proof+`","password":"long enough"}`, "", true)
+	if signUp.Code != http.StatusOK || len(signUp.Result().Cookies()) != 1 || !signUp.Result().Cookies()[0].HttpOnly {
+		t.Fatalf("sign-up: %d %v", signUp.Code, signUp.Result().Cookies())
+	}
+	if got := send(http.MethodPut, "/api/customer/profile", `{"name":"Rahim","phone":"01712345678"}`, "", true); got.Code != http.StatusUnauthorized {
+		t.Fatalf("profile without a session: %d", got.Code)
+	}
+	session := signUp.Result().Cookies()[0].Value
+	if got := send(http.MethodPut, "/api/customer/profile", `{"name":"Rahim","phone":"123"}`, session, true); got.Code != http.StatusBadRequest {
+		t.Fatalf("bad phone: %d", got.Code)
+	}
+	if got := send(http.MethodPut, "/api/customer/profile", `{"name":"Rahim Uddin","phone":"+8801712345678"}`, session, true); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"phone":"01712345678"`) {
+		t.Fatalf("profile: %d %s", got.Code, got.Body)
+	}
 }
+
+// countAll is a limiter that never reaches its limit in these tests.
+type countAll struct{}
+
+func (*countAll) Count(context.Context, string) (int, error) { return 1, nil }

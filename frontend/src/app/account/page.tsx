@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Heart, LogOut, Package, ShieldCheck, Truck } from "lucide-react";
+import { ArrowLeft, Heart, LogOut, Package, Pencil, ShieldCheck, Truck } from "lucide-react";
+import { CompleteProfileForm, EmailCodePasswordForm, PasswordSignInForm } from "@/components/AccountForms";
 import { GoogleSignInButton, googleSignInEnabled } from "@/components/GoogleSignInButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,10 +39,12 @@ const perks = [
   { icon: Heart, text: "Faster checkout next time" },
 ];
 
-/** AccountPage shows sign-in (and sign-up, which is the same Google step) when signed out, and the profile when signed in. */
+/** AccountPage shows sign-in / create account / reset password when signed out, asks for name and mobile
+ * until the profile is complete, and then shows the profile. */
 export default function AccountPage() {
   const { customer, ready, refresh, signedOut } = useCustomer();
   const [error, setError] = useState("");
+  const [resetting, setResetting] = useState(false);
 
   /** signIn sends Google's ID token to the backend, which sets the session cookie; the shared state then updates the header too. */
   async function signIn(credential: string) {
@@ -55,7 +58,20 @@ export default function AccountPage() {
   }
 
   if (!ready) return <section className="mx-auto max-w-4xl px-4 py-16 text-center text-muted-foreground">Loading…</section>;
-  if (customer) return <Profile customer={customer} onSignedOut={signedOut} />;
+  if (customer && (!customer.name || !customer.phone)) {
+    return (
+      <section className="mx-auto max-w-md px-4 py-10 md:py-16">
+        <Card>
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Finish your profile</CardTitle>
+            <CardDescription>Your name and mobile number help us deliver and confirm your orders.</CardDescription>
+          </CardHeader>
+          <CardContent><CompleteProfileForm customer={customer} onSaved={refresh} /></CardContent>
+        </Card>
+      </section>
+    );
+  }
+  if (customer) return <Profile customer={customer} onSignedOut={signedOut} onSaved={refresh} />;
 
   return (
     <section className="mx-auto max-w-4xl px-4 py-10 md:py-16">
@@ -76,6 +92,18 @@ export default function AccountPage() {
         </div>
 
         <div className="p-6 sm:p-10">
+          {resetting ? (
+            <div className="grid gap-6">
+              <button type="button" onClick={() => setResetting(false)} className="flex items-center gap-1 justify-self-start text-sm text-muted-foreground hover:text-foreground">
+                <ArrowLeft aria-hidden="true" className="size-4" /> Back to sign in
+              </button>
+              <div className="grid gap-1.5 text-center">
+                <h1 className="text-2xl font-bold">Reset your password</h1>
+                <p className="text-sm text-muted-foreground">We will email you a code to prove it is you.</p>
+              </div>
+              <EmailCodePasswordForm mode="reset" onSignedIn={refresh} />
+            </div>
+          ) : (
           <Tabs defaultValue="signin" className="gap-6">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="signin">Sign in</TabsTrigger>
@@ -87,30 +115,31 @@ export default function AccountPage() {
                 <p className="text-sm text-muted-foreground">Sign in to see your orders and checkout faster.</p>
               </div>
               <SignInMethod text="signin_with" onCredential={signIn} onError={setError} />
+              <OrDivider label="or with email" />
+              <PasswordSignInForm onSignedIn={refresh} onForgot={() => setResetting(true)} />
             </TabsContent>
             <TabsContent value="signup" className="grid gap-6">
               <div className="grid gap-1.5 text-center">
                 <h1 className="text-2xl font-bold">Create your account</h1>
-                <p className="text-sm text-muted-foreground">One click with Google. No new password to remember.</p>
+                <p className="text-sm text-muted-foreground">Use Google, or your email and a password.</p>
               </div>
               <SignInMethod text="signup_with" onCredential={signIn} onError={setError} />
+              <OrDivider label="or with email" />
+              <EmailCodePasswordForm mode="signup" onSignedIn={refresh} />
             </TabsContent>
           </Tabs>
+          )}
 
           {error ? <p role="alert" className="mt-4 text-center text-sm text-destructive">{error}</p> : null}
 
-          <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground uppercase">
-            <Separator className="flex-1" />
-            or
-            <Separator className="flex-1" />
-          </div>
+          <OrDivider label="or" />
           <div className="grid gap-2 sm:grid-cols-2">
             <Button asChild variant="outline"><Link href="/products">Continue as guest</Link></Button>
             <Button asChild variant="outline"><Link href="/track">Track an order</Link></Button>
           </div>
           <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
             <ShieldCheck aria-hidden="true" className="size-4" />
-            We only receive your name and email from Google.
+            We never store your password itself, only a secure hash. From Google we only receive your name and email.
           </p>
         </div>
       </Card>
@@ -118,16 +147,28 @@ export default function AccountPage() {
   );
 }
 
+/** OrDivider is the thin "or" line between sign-in choices. */
+function OrDivider({ label }: { label: string }) {
+  return (
+    <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground uppercase first:mt-0">
+      <Separator className="flex-1" />
+      {label}
+      <Separator className="flex-1" />
+    </div>
+  );
+}
+
 /** SignInMethod shows Google's button, or a plain notice while the owner has not set up Google sign-in. */
 function SignInMethod({ text, onCredential, onError }: { text: "signin_with" | "signup_with"; onCredential: (credential: string) => void; onError: (message: string) => void }) {
   if (!googleSignInEnabled) {
-    return <p className="text-center text-sm text-muted-foreground">Sign-in is not available yet. You can still order as a guest.</p>;
+    return <p className="text-center text-sm text-muted-foreground">Google sign-in is not available yet.</p>;
   }
   return <GoogleSignInButton text={text} onCredential={onCredential} onError={onError} />;
 }
 
 /** Profile is the signed-in view: who you are, earlier orders to add, and My orders. */
-function Profile({ customer, onSignedOut }: { customer: Customer; onSignedOut: () => void }) {
+function Profile({ customer, onSignedOut, onSaved }: { customer: Customer; onSignedOut: () => void; onSaved: () => Promise<unknown> }) {
+  const [editing, setEditing] = useState(false);
   const [orders, setOrders] = useState<CustomerOrder[] | null>(null);
   const [candidates, setCandidates] = useState(0);
   const [message, setMessage] = useState("");
@@ -182,10 +223,18 @@ function Profile({ customer, onSignedOut }: { customer: Customer; onSignedOut: (
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-2xl font-bold">{customer.name || "Your profile"}</h1>
             <p className="truncate text-sm text-muted-foreground">{customer.email}</p>
-            <Badge variant="secondary" className="mt-2">Signed in with Google</Badge>
+            <p className="text-sm text-muted-foreground">{customer.phone}</p>
           </div>
-          <Button variant="outline" onClick={signOut}><LogOut aria-hidden="true" />Sign out</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setEditing(!editing)}><Pencil aria-hidden="true" />Edit</Button>
+            <Button variant="outline" onClick={signOut}><LogOut aria-hidden="true" />Sign out</Button>
+          </div>
         </CardContent>
+        {editing ? (
+          <CardContent className="border-t pt-6">
+            <CompleteProfileForm customer={customer} onSaved={async () => { await onSaved(); setEditing(false); }} />
+          </CardContent>
+        ) : null}
       </Card>
 
       {candidates > 0 ? (
