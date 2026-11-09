@@ -129,9 +129,13 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	// CustomerCSRF guards every customer route, sign-in included; CustomerAuth then needs a session for the rest.
 	customer := router.Group("/api/customer", middleware.CustomerCSRF())
 	customer.POST("/google", customerAccount.SignIn)
+	customer.POST("/login", customerAccount.Login)
+	// Create account and forgot password share one step: the email code proves the email, then a password is set.
+	customer.POST("/password", customerAccount.SetPassword)
 	customer.POST("/logout", customerAccount.Logout)
 	signedIn := customer.Group("", middleware.CustomerAuth(customerService))
 	signedIn.GET("/me", customerAccount.Me)
+	signedIn.PUT("/profile", customerAccount.UpdateProfile)
 	signedIn.GET("/orders", customerAccount.Orders)
 	signedIn.GET("/link-candidates", customerAccount.LinkCandidates)
 	signedIn.POST("/link", customerAccount.Link)

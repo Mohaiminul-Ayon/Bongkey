@@ -6,6 +6,7 @@ import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, type AdvancePolicy, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
+import { useCustomer } from "@/lib/customer";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice, type Product } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
@@ -92,6 +93,11 @@ export default function CheckoutPage() {
   const [placedOrderId, setPlacedOrderId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
+  const { customer } = useCustomer();
+  // A signed-in customer's profile fills the contact fields; they can still change them for this order.
+  useEffect(() => {
+    if (customer) setEmail((current) => current || customer.email);
+  }, [customer]);
   // When the form appeared; the server treats a form sent within 3 seconds as a possible bot sign.
   const [formShownAt] = useState(() => Date.now());
   const [bkashOn, setBkashOn] = useState(false);
@@ -232,8 +238,8 @@ export default function CheckoutPage() {
           {error ? <p className="rounded-md bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p> : null}
           {placedOrderNumber ? <p role="status" className="rounded-md bg-amber-50 p-3 text-sm font-bold text-[#7b531c]">Order {placedOrderNumber} was placed, but this browser could not save access. <a className="underline" href="/track">Track it with your order number and phone</a>.</p> : null}
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-black">Name<input name="name" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Your full name" /></label>
-            <label className="grid gap-2 text-sm font-black">Phone<input name="phone" required className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="01XXXXXXXXX" /></label>
+            <label className="grid gap-2 text-sm font-black">Name<input key={`name-${customer?.name ?? ""}`} name="name" required defaultValue={customer?.name} autoComplete="name" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="Your full name" /></label>
+            <label className="grid gap-2 text-sm font-black">Phone<input key={`phone-${customer?.phone ?? ""}`} name="phone" required defaultValue={customer?.phone} autoComplete="tel" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="01XXXXXXXXX" /></label>
           </div>
           <div className="rounded-md border border-black/10 p-4">
             <label className="grid gap-2 text-sm font-black">Email (required)<input name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="you@example.com" /></label>

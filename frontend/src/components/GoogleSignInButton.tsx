@@ -33,31 +33,53 @@ function loadGoogleScript() {
   });
 }
 
-type Props = { onCredential: (credential: string) => void; onError: (message: string) => void };
+type Handlers = { onCredential: (credential: string) => void; onError: (message: string) => void };
+type Props = Handlers & { text?: "signin_with" | "signup_with" | "continue_with" };
+
+// Google allows one initialize per page, so the latest mounted button's handlers receive the credential.
+const active: { current: Handlers | null; initialized: boolean } = { current: null, initialized: false };
 
 /** GoogleSignInButton draws Google's own button and hands the ID token to onCredential. */
-export function GoogleSignInButton({ onCredential, onError }: Props) {
+export function GoogleSignInButton({ onCredential, onError, text = "signin_with" }: Props) {
   const box = useRef<HTMLDivElement>(null);
   // A ref keeps the latest callbacks without re-initialising Google's button on every render.
   const handlers = useRef({ onCredential, onError });
   useEffect(() => {
     handlers.current = { onCredential, onError };
+    active.current = handlers.current;
   });
 
   useEffect(() => {
     if (!googleSignInEnabled) return;
     let cancelled = false;
+    // draw renders the button at the form's width (Google allows up to 400 px) in the site's current theme;
+    // locale "en" keeps it English whatever the visitor's browser language is.
+    const draw = () => {
+      if (cancelled || !box.current || !window.google) return;
+      const dark = document.documentElement.dataset.theme === "dark";
+      window.google.accounts.id.renderButton(box.current, {
+        theme: dark ? "filled_black" : "outline", size: "large", text, shape: "rectangular",
+        width: Math.min(400, box.current.offsetWidth || 320), locale: "en", logo_alignment: "center",
+      });
+    };
+    // The theme toggle only changes data-theme on <html>, so redraw when it does.
+    const themeWatcher = new MutationObserver(draw);
     loadGoogleScript()
       .then(() => {
-        if (cancelled || !box.current || !window.google) return;
-        window.google.accounts.id.initialize({ client_id: clientId, callback: (response) => handlers.current.onCredential(response.credential) });
-        window.google.accounts.id.renderButton(box.current, { theme: "outline", size: "large", text: "signin_with", shape: "pill" });
+        if (cancelled || !window.google) return;
+        if (!active.initialized) {
+          window.google.accounts.id.initialize({ client_id: clientId, callback: (response) => active.current?.onCredential(response.credential) });
+          active.initialized = true;
+        }
+        draw();
+        themeWatcher.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       })
       .catch((err: Error) => handlers.current.onError(err.message));
     return () => {
       cancelled = true;
+      themeWatcher.disconnect();
     };
-  }, []);
+  }, [text]);
 
-  return <div ref={box} />;
+  return <div ref={box} className="flex min-h-11 w-full justify-center" />;
 }

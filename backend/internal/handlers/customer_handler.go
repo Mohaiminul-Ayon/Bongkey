@@ -6,6 +6,7 @@ import (
 
 	"bongkey/backend/internal/customers"
 	"bongkey/backend/internal/middleware"
+	"bongkey/backend/internal/security"
 	"github.com/gin-gonic/gin"
 )
 
@@ -42,6 +43,80 @@ func (h CustomerHandler) SignIn(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not sign in"})
 	default:
 		h.setSession(c, token, int(customers.SessionTTL.Seconds()))
+		c.JSON(http.StatusOK, customer)
+	}
+}
+
+// Login exchanges an email and password for a session cookie.
+func (h CustomerHandler) Login(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter your email and password"})
+		return
+	}
+	customer, token, err := h.Service.Login(c.Request.Context(), req.Email, req.Password, c.ClientIP())
+	switch {
+	case errors.Is(err, customers.ErrLoginFailed):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "wrong email or password"})
+	case errors.Is(err, customers.ErrLoginLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many tries; please wait 15 minutes or reset your password"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not sign in"})
+	default:
+		h.setSession(c, token, int(customers.SessionTTL.Seconds()))
+		c.JSON(http.StatusOK, customer)
+	}
+}
+
+// SetPassword creates an account or resets its password using the proof from the email-code step, then signs in.
+func (h CustomerHandler) SetPassword(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var req struct {
+		EmailProof string `json:"email_proof"`
+		Password   string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	customer, token, err := h.Service.SetPassword(c.Request.Context(), req.EmailProof, req.Password)
+	switch {
+	case errors.Is(err, customers.ErrInvalidProof):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "your email code has expired; please ask for a new one"})
+	case errors.Is(err, security.ErrWeakPassword):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "use a password of 8 to 72 characters"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save your password"})
+	default:
+		h.setSession(c, token, int(customers.SessionTTL.Seconds()))
+		c.JSON(http.StatusOK, customer)
+	}
+}
+
+// UpdateProfile saves the signed-in customer's name and mobile number.
+func (h CustomerHandler) UpdateProfile(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<10)
+	var req struct {
+		Name  string `json:"name"`
+		Phone string `json:"phone"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	customer, err := h.Service.UpdateProfile(c.Request.Context(), c.MustGet("customer").(customers.Customer), req.Name, req.Phone)
+	switch {
+	case errors.Is(err, customers.ErrInvalidName):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter your name (2 to 80 characters)"})
+	case errors.Is(err, customers.ErrInvalidPhone):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter a valid Bangladeshi mobile number"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save your profile"})
+	default:
 		c.JSON(http.StatusOK, customer)
 	}
 }

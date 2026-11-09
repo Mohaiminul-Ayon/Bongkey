@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,8 +16,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// TestPostgresLinkOrders proves an email-only match is refused, email + phone links, and repeats or other owners are safe.
-func TestPostgresLinkOrders(t *testing.T) {
+// localCustomersDB opens only the owner's local PostgreSQL and applies the customer migrations.
+func localCustomersDB(t *testing.T) *sql.DB {
+	t.Helper()
 	if os.Getenv("RUN_LOCAL_DB_QA") != "1" {
 		t.Skip("set RUN_LOCAL_DB_QA=1 for local PostgreSQL customer QA")
 	}
@@ -33,15 +35,23 @@ func TestPostgresLinkOrders(t *testing.T) {
 		t.Fatal("could not open local PostgreSQL")
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	for _, name := range []string{"020_customers.sql", "023_customer_passwords.sql"} {
+		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(migration)); err != nil {
+			t.Fatalf("apply %s: %v", name, err)
+		}
+	}
+	return db
+}
+
+// TestPostgresLinkOrders proves an email-only match is refused, email + phone links, and repeats or other owners are safe.
+func TestPostgresLinkOrders(t *testing.T) {
+	db := localCustomersDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "020_customers.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
-		t.Fatalf("apply customers migration: %v", err)
-	}
 
 	stamp := time.Now().UnixNano()
 	email := fmt.Sprintf("qa-link-%d@example.test", stamp)
@@ -107,5 +117,49 @@ func TestPostgresLinkOrders(t *testing.T) {
 	}
 	if _, err := store.SessionCustomer(ctx, hash); err != ErrNoSession {
 		t.Fatalf("expired session: %v", err)
+	}
+}
+
+// TestPostgresPasswordAccounts proves one account per email: a password sign-up, a Google sign-in with the
+// same email reaching that account, a reset ending old sessions, and a typed name surviving Google sign-in.
+func TestPostgresPasswordAccounts(t *testing.T) {
+	db := localCustomersDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stamp := time.Now().UnixNano()
+	email := fmt.Sprintf("qa-pass-%d@example.test", stamp)
+	store := PostgresStore{DB: db}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM customers WHERE LOWER(email) = $1`, email) })
+
+	first, err := store.SetPassword(ctx, email, "$2a$10$abcdefghijklmnopqrstuvabcdefghijklmnopqrstuvwxyzABCD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProfile(ctx, first.ID, "Typed Name", "01712345678"); err != nil {
+		t.Fatal(err)
+	}
+	session := security.SessionTokenHash(fmt.Sprintf("qa-pass-token-%d", stamp))
+	if err := store.CreateSession(ctx, first.ID, session, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	google, err := store.SaveGoogleCustomer(ctx, security.GoogleIdentity{Subject: fmt.Sprintf("qa-pass-sub-%d", stamp), Email: strings.ToUpper(email), Name: "Google Name"})
+	if err != nil || google.ID != first.ID || google.Name != "Typed Name" || google.Phone != "01712345678" {
+		t.Fatalf("Google sign-in for the same email = %+v, %v; want the password account with its typed profile", google, err)
+	}
+	again, err := store.SetPassword(ctx, strings.ToUpper(email), "$2a$10$zyxwvutsrqponmlkjihgfezyxwvutsrqponmlkjihgfedcbaZYXW")
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("reset = %+v, %v; want the same account", again, err)
+	}
+	if _, err := store.SessionCustomer(ctx, session); err != ErrNoSession {
+		t.Fatalf("session after reset: %v", err)
+	}
+	if _, hash, err := store.PasswordCustomer(ctx, email); err != nil || !strings.HasPrefix(hash, "$2a$10$zyx") {
+		t.Fatalf("stored hash after reset: %q %v", hash, err)
+	}
+	if _, _, err := store.PasswordCustomer(ctx, "nobody-"+email); err != ErrNotFound {
+		t.Fatalf("unknown email: %v", err)
+	}
+	if err := store.UpdateProfile(ctx, first.ID, "Typed Name", "12345"); err == nil {
+		t.Fatal("database accepted a malformed phone")
 	}
 }

@@ -620,6 +620,42 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - Local PostgreSQL `TestPostgresLinkOrders`: an email-only match is refused, email + phone links, a repeat links 0, another customer's order is never moved, an expired session is refused.
 - Live HTTP on the local server: all failure paths above, the preflight headers, and a customer cookie refused on `/api/admin/me`.
 - Browser: the signed-out page, the signed-in page with "We found 2 earlier orders", linking one order by phone, and sign-out back to the signed-out page. QA rows were removed.
+## ACCOUNT-01 — Email + password accounts and the required profile
+
+**Status:** Built 2026-11-09 on `feat/shadcn-ui` (owner decisions: email code at sign-up, phone typed for now, passwords of at least 8 characters). Real customers need working email delivery (Brevo, NOTIFY-01); locally, `EMAIL_TEST_CODE` with `@example.test` addresses stands in.
+
+**Data:** migration `023_customer_passwords.sql`:
+- `google_sub` becomes optional, so an account can be password-only;
+- `password_hash` (bcrypt, NULL for Google-only) and `phone` (`01XXXXXXXXX` or empty);
+- a unique index on `LOWER(email)`: one account per email.
+
+**Create account / forgot password (one flow):**
+1. The [EmailCodePasswordForm](../frontend/src/components/AccountForms.tsx) calls the existing `POST /api/email-otp/request`, then `POST /api/email-otp/verify`, which returns a 10-minute `email_proof`.
+2. `POST /api/customer/password` `{"email_proof","password"}` → `CustomerCSRF` (needs `X-Requested-With: bongkey`, else 403) → [CustomerHandler.SetPassword](../backend/internal/handlers/customer_handler.go) → [Service.SetPassword](../backend/internal/customers/customers.go): `security.VerifyEmailProof` (bad or expired → 400), `security.HashPassword` (under 8 or over 72 bytes → 400).
+3. [PostgresStore.SetPassword](../backend/internal/customers/repository.go) runs one transaction: insert the customer, or on the same email replace the hash; then delete every session of that customer. A reset therefore signs out every other device.
+4. `startSession` stores a new session hash; the handler sets the HttpOnly cookie and returns the customer.
+
+**Sign in:** `POST /api/customer/login` `{"email","password"}` → CustomerCSRF → `Login` → [Service.Login](../backend/internal/customers/customers.go):
+- counts tries per email (more than 5 in 15 minutes → 429) and per client (more than 20 → 429) in the shared limiter table;
+- `PasswordCustomer` reads the hash;
+- [security.CheckPassword](../backend/internal/security/password.go) runs bcrypt even for an unknown email or a Google-only account, so every failure is the same 401 "wrong email or password" with the same timing.
+
+**Google and password together:** [SaveGoogleCustomer](../backend/internal/customers/repository.go) looks up by Google ID, then adopts a password account with the same email (Google has verified it), then creates one. Google's name fills the profile only while it is empty.
+
+**Profile:** after any sign-in, the [Account page](../frontend/src/app/account/page.tsx) shows "Finish your profile" until both name and phone are set. `PUT /api/customer/profile` → CustomerCSRF → `CustomerAuth` (no session → 401) → `UpdateProfile`: name 2–80 characters, phone must be a Bangladeshi mobile (saved as `01XXXXXXXXX`; the database also checks the format). Checkout fills name, phone and email from the profile ([checkout page](../frontend/src/app/checkout/page.tsx)); the customer can still change them for one order.
+
+**Failure paths:** no CSRF header → 403; expired code proof → 400 "ask for a new code"; short password → 400; wrong password or unknown email → 401; too many tries → 429; a second code request within a minute → 429 from the email-code limiter; profile without a session → 401; bad phone → 400.
+
+**Limits:**
+- The phone is typed, not SMS-verified (marked `shortcut:` in `UpdateProfile`).
+- If Google later reports an email another account already uses, Google sign-in fails on the unique index (marked `shortcut:`).
+- There is no "change password while signed in" screen; "Forgot password?" covers it.
+
+**Evidence:**
+- Unit: `TestPasswordHashAndCheck`, `TestSetPasswordAndLogin`, `TestUpdateProfile`; HTTP: `TestCustomerSessionHTTP` (unknown login 401, forged proof 400, short password 400, sign-up cookie, profile 401 without session, bad phone 400, saved phone).
+- Local PostgreSQL `TestPostgresPasswordAccounts`: one account per email across Google and password, typed name kept, reset ends sessions, unknown email, database phone check.
+- Browser with test email mode: sign-up by code → "Finish your profile" → bad phone message → profile with initials in the header. API: wrong password 401, right password 200.
+
 ## SHOP-01 — Sale prices, card add-to-bag and browser wishlist (#80)
 
 **Status:** Built 2026-11-07 on `feat/storefront-ui`. The shadcn/ui swap waits for the owner's screenshots of layouts that break.

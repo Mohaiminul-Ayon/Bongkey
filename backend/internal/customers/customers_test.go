@@ -20,10 +20,30 @@ func (fakeGoogle) Verify(_ context.Context, raw string) (security.GoogleIdentity
 	return security.GoogleIdentity{Subject: "sub-1", Email: "rahim@example.test", Name: "Rahim"}, nil
 }
 
-// memoryStore keeps sessions in a map and records link calls.
+// memoryStore keeps sessions in a map, one password account, and records link and profile calls.
 type memoryStore struct {
 	sessions map[string]time.Time
 	linked   []string
+	// passwords maps email to bcrypt hash; profile is the last saved "name|phone".
+	passwords map[string]string
+	profile   string
+}
+
+func (m *memoryStore) PasswordCustomer(_ context.Context, email string) (Customer, string, error) {
+	hash, ok := m.passwords[email]
+	if !ok {
+		return Customer{}, "", ErrNotFound
+	}
+	return Customer{ID: 9, Email: email}, hash, nil
+}
+func (m *memoryStore) SetPassword(_ context.Context, email, hash string) (Customer, error) {
+	m.passwords[email] = hash
+	clear(m.sessions)
+	return Customer{ID: 9, Email: email}, nil
+}
+func (m *memoryStore) UpdateProfile(_ context.Context, _ int64, name, phone string) error {
+	m.profile = name + "|" + phone
+	return nil
 }
 
 func (m *memoryStore) SaveGoogleCustomer(_ context.Context, id security.GoogleIdentity) (Customer, error) {
@@ -118,5 +138,66 @@ func TestLinkRules(t *testing.T) {
 	}
 	if len(store.linked) != linkTriesPerWindow {
 		t.Fatalf("store reached %d times, want %d", len(store.linked), linkTriesPerWindow)
+	}
+}
+
+const testSecret = "synthetic-test-secret-at-least-thirty-two-characters"
+
+// TestSetPasswordAndLogin covers sign-up by email proof, sign-in, wrong passwords, unknown emails and the limit.
+func TestSetPasswordAndLogin(t *testing.T) {
+	ctx := context.Background()
+	store := &memoryStore{sessions: map[string]time.Time{}, passwords: map[string]string{}}
+	service := Service{Store: store, Limiter: &counter{}, Secret: testSecret}
+	proof, err := security.IssueEmailProof(testSecret, "new@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.SetPassword(ctx, "forged-proof", "long enough"); !errors.Is(err, ErrInvalidProof) {
+		t.Fatalf("forged proof: %v", err)
+	}
+	if _, _, err := service.SetPassword(ctx, proof, "short"); !errors.Is(err, security.ErrWeakPassword) {
+		t.Fatalf("short password: %v", err)
+	}
+	customer, token, err := service.SetPassword(ctx, proof, "long enough")
+	if err != nil || customer.Email != "new@example.test" || len(token) != 64 {
+		t.Fatalf("sign-up: %+v %v", customer, err)
+	}
+	if store.passwords["new@example.test"] == "long enough" {
+		t.Fatal("plain password stored")
+	}
+	if _, _, err := service.Login(ctx, " NEW@example.test ", "long enough", "203.0.113.5"); err != nil {
+		t.Fatalf("right password refused: %v", err)
+	}
+	for name, input := range map[string][2]string{
+		"wrong password": {"new@example.test", "long enougH"},
+		"unknown email":  {"nobody@example.test", "long enough"},
+		"bad email":      {"not-an-email", "long enough"},
+	} {
+		if _, _, err := service.Login(ctx, input[0], input[1], "203.0.113.5"); !errors.Is(err, ErrLoginFailed) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	limited := Service{Store: store, Limiter: &counter{n: loginTriesPerEmail}, Secret: testSecret}
+	if _, _, err := limited.Login(ctx, "new@example.test", "long enough", "203.0.113.5"); !errors.Is(err, ErrLoginLimited) {
+		t.Fatalf("over the limit: %v", err)
+	}
+}
+
+// TestUpdateProfile checks the name and phone rules and the saved, normalized values.
+func TestUpdateProfile(t *testing.T) {
+	store := &memoryStore{}
+	service := Service{Store: store}
+	customer := Customer{ID: 9, Email: "new@example.test"}
+	for name, input := range map[string][2]string{
+		"empty name": {" ", "01712345678"},
+		"bad phone":  {"Rahim Uddin", "12345"},
+	} {
+		if _, err := service.UpdateProfile(context.Background(), customer, input[0], input[1]); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	got, err := service.UpdateProfile(context.Background(), customer, "  Rahim   Uddin ", "+880 1712-345678")
+	if err != nil || got.Name != "Rahim Uddin" || got.Phone != "01712345678" || store.profile != "Rahim Uddin|01712345678" {
+		t.Fatalf("profile: %+v %q %v", got, store.profile, err)
 	}
 }
