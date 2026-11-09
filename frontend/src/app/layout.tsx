@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Footer } from "@/components/Footer";
 import { Header } from "@/components/Header";
 import { CartProvider } from "@/lib/cart";
+import { CustomerProvider } from "@/lib/customer";
 import { WishlistProvider } from "@/lib/wishlist";
 import "./globals.css";
 
@@ -26,9 +27,11 @@ export default function RootLayout({
       <body>
         <CartProvider>
           <WishlistProvider>
-            <Header />
-            <main className="min-h-screen">{children}</main>
-            <Footer />
+            <CustomerProvider>
+              <Header />
+              <main className="min-h-screen">{children}</main>
+              <Footer />
+            </CustomerProvider>
           </WishlistProvider>
         </CartProvider>
       </body>

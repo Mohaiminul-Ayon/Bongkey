@@ -1,4 +1,36 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind's dark: variant follows the shop's own toggle (data-theme on <html>), not the OS setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* shadcn/ui tokens point at the brand variables below, so its components match the shop and flip with dark mode.
+   Tailwind's radius scale is left alone on purpose: overriding it would reshape every existing rounded-* element. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--foreground);
+  --color-primary-foreground: var(--inverse);
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--surface-raised);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--surface-raised);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--sale);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--muted);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+}
 
 /* Clean optical palette: white pages, soft grey photo panels, one dark accent. */
 :root {
@@ -12,6 +44,11 @@
   --inverse: #ffffff;
   --radius: 16px;
   --sale: #b42318;
+  --chart-1: #1c1c1a;
+  --chart-2: #2f6f5e;
+  --chart-3: #c08a2e;
+  --chart-4: #8a8a84;
+  --chart-5: #b42318;
 }
 
 html[data-theme="dark"] {
@@ -24,11 +61,18 @@ html[data-theme="dark"] {
   --muted: #a9a9a4;
   --inverse: #121212;
   --sale: #ff8a80;
+  --chart-1: #f4f4f0;
+  --chart-2: #6fc2a8;
+  --chart-3: #e3b65c;
+  --chart-4: #8a8a84;
+  --chart-5: #ff8a80;
 }
 
 /* Element defaults live in the base layer so Tailwind utilities (e.g. text-white on a link) can override them. */
 @layer base {
   * { box-sizing: border-box; }
+  /* shadcn/ui parts carry data-slot; give only them the brand border colour so older markup keeps its look. */
+  [data-slot] { border-color: var(--border); }
   body {
     margin: 0;
     min-width: 320px;
@@ -126,6 +170,10 @@ html[data-theme="dark"] {
 .sale-badge { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--sale); color: var(--inverse); font-size: 11px; font-weight: 700; vertical-align: middle; }
 .product-card-was { display: block; white-space: nowrap; }
 .saved-link { display: inline-flex; height: 40px; align-items: center; gap: 4px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 600; }
+.signin-link { font-size: 14px; font-weight: 600; padding: 0 4px; }
+.signin-link[data-ready="false"] { visibility: hidden; }
+.profile-link { display: inline-flex; height: 40px; align-items: center; gap: 8px; padding: 0 12px 0 4px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; font-weight: 600; }
+.profile-avatar { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 999px; background: var(--foreground); color: var(--inverse); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
 .product-card-link { display: block; flex: 1; }
 .product-visual { aspect-ratio: 1 / 1; display: grid; place-items: center; position: relative; overflow: hidden; border-radius: var(--radius); background: var(--surface-raised); }
 .product-visual img { transition: transform .4s; }
@@ -267,6 +315,12 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
   .header-inner { gap: 4px 8px; min-height: 0; padding: 8px 16px; }
   .header-links { overflow-x: auto; gap: 16px; font-size: 14px; white-space: nowrap; }
   .brand-logo--sm { width: 128px; }
+  /* On phones the profile shows only its initials, so the header actions fit in 375 px. */
+  .header-actions { gap: 6px; }
+  .profile-link { padding: 0 4px; }
+  .profile-name { display: none; }
+  .saved-link { padding: 0 10px; }
+  .cart-link { padding: 0 12px; gap: 6px; }
   .home-hero { margin-top: 12px; padding: 0 16px; }
   .home-hero h1 { font-size: clamp(38px, 10vw, 56px); }
   .hero-description { font-size: 16px; }

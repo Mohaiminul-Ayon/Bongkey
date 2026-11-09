@@ -33,15 +33,20 @@ function loadGoogleScript() {
   });
 }
 
-type Props = { onCredential: (credential: string) => void; onError: (message: string) => void };
+type Handlers = { onCredential: (credential: string) => void; onError: (message: string) => void };
+type Props = Handlers & { text?: "signin_with" | "signup_with" | "continue_with" };
+
+// Google allows one initialize per page, so the latest mounted button's handlers receive the credential.
+const active: { current: Handlers | null; initialized: boolean } = { current: null, initialized: false };
 
 /** GoogleSignInButton draws Google's own button and hands the ID token to onCredential. */
-export function GoogleSignInButton({ onCredential, onError }: Props) {
+export function GoogleSignInButton({ onCredential, onError, text = "signin_with" }: Props) {
   const box = useRef<HTMLDivElement>(null);
   // A ref keeps the latest callbacks without re-initialising Google's button on every render.
   const handlers = useRef({ onCredential, onError });
   useEffect(() => {
     handlers.current = { onCredential, onError };
+    active.current = handlers.current;
   });
 
   useEffect(() => {
@@ -50,14 +55,18 @@ export function GoogleSignInButton({ onCredential, onError }: Props) {
     loadGoogleScript()
       .then(() => {
         if (cancelled || !box.current || !window.google) return;
-        window.google.accounts.id.initialize({ client_id: clientId, callback: (response) => handlers.current.onCredential(response.credential) });
-        window.google.accounts.id.renderButton(box.current, { theme: "outline", size: "large", text: "signin_with", shape: "pill" });
+        if (!active.initialized) {
+          window.google.accounts.id.initialize({ client_id: clientId, callback: (response) => active.current?.onCredential(response.credential) });
+          active.initialized = true;
+        }
+        // locale "en" keeps the button English whatever the visitor's browser language is.
+        window.google.accounts.id.renderButton(box.current, { theme: "outline", size: "large", text, shape: "pill", width: 280, locale: "en", logo_alignment: "left" });
       })
       .catch((err: Error) => handlers.current.onError(err.message));
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [text]);
 
-  return <div ref={box} />;
+  return <div ref={box} className="flex min-h-11 justify-center" />;
 }
