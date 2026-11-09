@@ -410,6 +410,7 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - Step times are the moments the owner changes the status, not courier scan times. Mark "Delivered" when the courier confirms.
 - The phone is a weak proof if someone already knows both the order number and the customer's phone. They see only status, items, amounts, a masked name and the city.
 - The tracking limiter shares the login limiter's table, with separate keys (marked `shortcut:` in routes).
+- Tracking by phone alone is refused on purpose (owner decision 2026-11-09): a phone number is not secret, and a visible order status makes scam calls believable. Instead the [Track page](../frontend/src/app/track/page.tsx) shows "Lost your order number?" help: the slip and order email, Google sign-in (My orders), and a WhatsApp message from the ordering phone. Phone + SMS code is planned after launch, once an SMS provider is chosen.
 
 **Evidence:**
 - Unit tests in [tracking_test.go](../backend/internal/orders/tracking_test.go) cover:
