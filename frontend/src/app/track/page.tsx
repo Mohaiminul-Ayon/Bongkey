@@ -3,11 +3,43 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { OrderTimeline } from "@/components/OrderTimeline";
-import { fetchPaymentOptions, trackOrder, type TrackedOrder } from "@/lib/api";
+import { fetchPaymentOptions, sendOrderNumbers, trackOrder, type TrackedOrder } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
 const inputClass = "rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]";
+
+/** EmailOrderNumbersForm emails a guest the order numbers placed with their email; no code is needed because
+ * the numbers go only to that inbox. */
+function EmailOrderNumbersForm() {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  async function send(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      setNotice((await sendOrderNumbers(String(form.get("email") ?? "").trim())).message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send the order numbers.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={send} className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+      <label className="grid gap-1 text-sm font-black">Email you ordered with<input name="email" type="email" required maxLength={254} autoComplete="email" placeholder="you@example.com" className={inputClass} /></label>
+      <button type="submit" disabled={busy} className="site-button button-secondary disabled:opacity-50">{busy ? "Sending..." : "Email my order numbers"}</button>
+      {notice ? <p role="status" className="text-green-800 sm:col-span-2">{notice}</p> : null}
+      {error ? <p role="alert" className="text-red-700 sm:col-span-2">{error}</p> : null}
+    </form>
+  );
+}
 
 /** TrackOrderPage finds an order by its number and the phone used at checkout, then shows its progress. */
 export default function TrackOrderPage() {
@@ -57,13 +89,15 @@ export default function TrackOrderPage() {
             <p className="font-black text-neutral-950">Lost your order number?</p>
             <ul className="mt-2 grid list-disc gap-1 pl-5">
               <li>It starts with ORD- and is on your order slip and in our order email.</li>
-              <li><Link href="/account" className="font-bold underline">Sign in with Google</Link> to see the orders placed with your email.</li>
+              <li>Gave us your email? We can email you your order numbers (below).</li>
+              <li>Have an account? <Link href="/account" className="font-bold underline">Sign in</Link> to see the orders placed with your email.</li>
               {whatsAppNumber ? (
                 <li><a className="font-bold text-green-800 underline" target="_blank" rel="noopener noreferrer" href={whatsAppLink("Hi Bongkey, I lost my order number. Can you help me find my order?")}>Message us on WhatsApp</a> from the phone you ordered with.</li>
               ) : (
                 <li>Call or message us from the phone you ordered with.</li>
               )}
             </ul>
+            <EmailOrderNumbersForm />
           </div>
         )}
       </div>

@@ -124,6 +124,33 @@ func TestOrderPlacedEmailHidesPrivateDetails(t *testing.T) {
 	}
 }
 
+// TestOrderNumbersEmail lists only numbers and dates, keys the queue by the email's HMAC and sends one per window.
+func TestOrderNumbersEmail(t *testing.T) {
+	store := newMemoryStore()
+	service := Service{Store: store, SiteURL: "https://shop.example"}
+	list := []orders.EmailedOrder{{OrderNumber: "ORD-000123", PlacedAt: time.Date(2026, 11, 3, 20, 0, 0, 0, time.UTC)}}
+	key := strings.Repeat("ab", 32)
+	service.OrderNumbers(context.Background(), "rahim@example.com", key, list)
+	service.OrderNumbers(context.Background(), "rahim@example.com", key, list)
+	if len(store.rows) != 1 {
+		t.Fatalf("a repeat in the same window must not queue again, got %d rows", len(store.rows))
+	}
+	for k, out := range store.rows {
+		if !strings.HasPrefix(k, "order_numbers:"+key[:24]+":") || strings.Contains(k, "rahim") {
+			t.Fatalf("queue key %q", k)
+		}
+		// 20:00 UTC is 2:00 on 4 Nov in Dhaka.
+		for _, want := range []string{"ORD-000123, placed 4 Nov 2026", "https://shop.example/track"} {
+			if !strings.Contains(out.Text, want) {
+				t.Fatalf("email lacks %q:\n%s", want, out.Text)
+			}
+		}
+		if out.To != "rahim@example.com" {
+			t.Fatalf("to = %q", out.To)
+		}
+	}
+}
+
 // TestInvoiceWaitsForConfirmedOrderAndEmail sends the invoice only after both the confirmation and the staff tick.
 func TestInvoiceWaitsForConfirmedOrderAndEmail(t *testing.T) {
 	order := sampleOrder()

@@ -481,3 +481,37 @@ func TestSignedInCheckoutLinksCustomerPostgres(t *testing.T) {
 		t.Fatalf("order customer = %v, want %d", saved, customerID)
 	}
 }
+
+// TestOptionalEmailAndOrderNumbersPostgres saves a guest order without an email and finds an order by its email.
+func TestOptionalEmailAndOrderNumbersPostgres(t *testing.T) {
+	db := localCheckoutDB(t)
+	id := checkoutFixtureProduct(t, db, 2)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	settings := delivery.Service{Store: delivery.PostgresRepository{DB: db}}
+	fee, err := settings.DeliveryFee(ctx, "Dhaka")
+	if err != nil {
+		t.Fatal("could not load the saved local delivery setting")
+	}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings}
+	numbers := map[string]string{}
+	for key, email := range map[string]string{"checkout-no-email-0001": "", "checkout-numbers-0001": " QA-Numbers@Example.test "} {
+		receipt, err := service.Place(ctx, CheckoutRequest{
+			IdempotencyKey: key, CustomerName: "QA", CustomerPhone: "01712345678", CustomerEmail: email,
+			ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
+		})
+		if err != nil {
+			t.Fatalf("checkout with email %q failed: %v", email, err)
+		}
+		numbers[email] = receipt.OrderNumber
+		t.Cleanup(func() {
+			if _, err := db.ExecContext(context.Background(), `DELETE FROM orders WHERE id = $1`, receipt.ID); err != nil {
+				t.Error("could not remove local order fixture")
+			}
+		})
+	}
+	list, err := (PostgresReader{DB: db}).OrdersByEmail(ctx, "qa-numbers@example.test", 10)
+	if err != nil || len(list) != 1 || list[0].OrderNumber != numbers[" QA-Numbers@Example.test "] || list[0].PlacedAt.IsZero() {
+		t.Fatalf("orders by email = %+v, err=%v", list, err)
+	}
+}
