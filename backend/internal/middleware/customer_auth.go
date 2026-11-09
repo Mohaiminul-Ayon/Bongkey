@@ -26,6 +26,22 @@ func CustomerCSRF() gin.HandlerFunc {
 	}
 }
 
+// OptionalCustomer supplies "customer" (customers.Customer) when the request carries a current session cookie
+// and the shop's X-Requested-With header; otherwise the request continues as a guest. It never rejects:
+// checkout must work signed out. The header check keeps a cross-site form from filing an order under
+// someone else's account, and a session-store failure falls back to a guest order rather than losing the sale.
+func OptionalCustomer(service customers.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token, _ := c.Cookie(CustomerCookie)
+		if token != "" && c.GetHeader("X-Requested-With") == "bongkey" {
+			if customer, err := service.Authenticate(c.Request.Context(), token); err == nil {
+				c.Set("customer", customer)
+			}
+		}
+		c.Next()
+	}
+}
+
 // CustomerAuth requires a current customer session cookie and supplies "customer" (customers.Customer) to handlers.
 // It aborts with 401 when the cookie is missing, unknown or expired, and 503 when the session store fails.
 // A customer session never satisfies AdminAuth: the two use different credentials and tables.

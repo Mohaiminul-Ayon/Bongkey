@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { OrderTimeline } from "@/components/OrderTimeline";
 import { fetchPaymentOptions, trackOrder, type TrackedOrder } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
+import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
 const inputClass = "rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]";
 
@@ -50,6 +51,21 @@ export default function TrackOrderPage() {
           <button type="submit" disabled={busy} className="site-button button-primary disabled:opacity-50">{busy ? "Searching..." : "Track"}</button>
         </form>
         {error ? <p role="alert" className="mt-3 text-red-700">{error}</p> : null}
+        {/* Phone alone is not enough to track: a phone number is not secret, and order status would make scam calls believable. */}
+        {order ? null : (
+          <div className="mt-5 border-t pt-4 text-sm text-neutral-700">
+            <p className="font-black text-neutral-950">Lost your order number?</p>
+            <ul className="mt-2 grid list-disc gap-1 pl-5">
+              <li>It starts with ORD- and is on your order slip and in our order email.</li>
+              <li><Link href="/account" className="font-bold underline">Sign in with Google</Link> to see the orders placed with your email.</li>
+              {whatsAppNumber ? (
+                <li><a className="font-bold text-green-800 underline" target="_blank" rel="noopener noreferrer" href={whatsAppLink("Hi Bongkey, I lost my order number. Can you help me find my order?")}>Message us on WhatsApp</a> from the phone you ordered with.</li>
+              ) : (
+                <li>Call or message us from the phone you ordered with.</li>
+              )}
+            </ul>
+          </div>
+        )}
       </div>
 
       {order ? (

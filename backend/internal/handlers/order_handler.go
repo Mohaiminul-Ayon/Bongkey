@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"bongkey/backend/internal/customers"
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/lens"
 	"bongkey/backend/internal/orders"
@@ -111,9 +112,14 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 			SPHRight: item.SPHRight, SPHLeft: item.SPHLeft, LensRequest: item.LensRequest, Prescription: files[i],
 		}
 	}
+	// OptionalCustomer sets "customer" only for a verified session; a guest has none and gets ID 0.
+	var customerID int64
+	if customer, ok := c.Get("customer"); ok {
+		customerID = customer.(customers.Customer).ID
+	}
 	receipt, err := h.Service.Place(c.Request.Context(), orders.CheckoutRequest{
-		IdempotencyKey: idempotencyKey,
-		CustomerName:   req.CustomerName, CustomerPhone: req.CustomerPhone,
+		IdempotencyKey: idempotencyKey, CustomerID: customerID,
+		CustomerName: req.CustomerName, CustomerPhone: req.CustomerPhone,
 		CustomerEmail: req.CustomerEmail, EmailProof: req.EmailProof, ShippingAddress: req.ShippingAddress,
 		City: req.City, DeliveryNote: req.DeliveryNote,
 		ExpectedDeliveryFee: req.ExpectedDeliveryFee, PaymentMethod: req.PaymentMethod, Items: items,

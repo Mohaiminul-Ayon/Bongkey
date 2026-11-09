@@ -129,6 +129,8 @@ type CheckoutRequest struct {
 	// EmailProof is optional since checkout stopped asking for an email code; a valid proof still marks the email verified.
 	EmailProof    string
 	EmailVerified bool
+	// CustomerID links the order to a signed-in customer's "My orders"; 0 is a guest. It comes only from a verified session, never from the request body.
+	CustomerID int64
 	// ClientIP rate-limits checkouts per client; FastSubmit records a form sent faster than a person types.
 	ClientIP            string
 	FastSubmit          bool
