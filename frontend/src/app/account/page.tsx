@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Heart, LogOut, Package, Pencil, ShieldCheck, Truck } from "lucide-react";
+import { LogOut, Package, Pencil } from "lucide-react";
 import { CompleteProfileForm, EmailCodePasswordForm, PasswordSignInForm } from "@/components/AccountForms";
 import { GoogleSignInButton, googleSignInEnabled } from "@/components/GoogleSignInButton";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +11,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   fetchCustomerOrders,
   fetchLinkCandidates,
@@ -33,18 +32,26 @@ const statusNames: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-const perks = [
-  { icon: Package, text: "All your orders and their status in one place" },
-  { icon: Truck, text: "New orders are saved to your profile automatically" },
-  { icon: Heart, text: "Faster checkout next time" },
-];
+type View = "signin" | "signup" | "reset";
+
+const headings: Record<View, string> = {
+  signin: "Sign in to Bongkey",
+  signup: "Create your Bongkey account",
+  reset: "Reset your password",
+};
 
 /** AccountPage shows sign-in / create account / reset password when signed out, asks for name and mobile
  * until the profile is complete, and then shows the profile. */
 export default function AccountPage() {
   const { customer, ready, refresh, signedOut } = useCustomer();
   const [error, setError] = useState("");
-  const [resetting, setResetting] = useState(false);
+  const [view, setView] = useState<View>("signin");
+
+  /** switchTo changes between sign-in and create-account and clears an old error. */
+  function switchTo(next: View) {
+    setError("");
+    setView(next);
+  }
 
   /** signIn sends Google's ID token to the backend, which sets the session cookie; the shared state then updates the header too. */
   async function signIn(credential: string) {
@@ -74,96 +81,44 @@ export default function AccountPage() {
   if (customer) return <Profile customer={customer} onSignedOut={signedOut} onSaved={refresh} />;
 
   return (
-    <section className="mx-auto max-w-4xl px-4 py-10 md:py-16">
-      <Card className="grid gap-0 overflow-hidden p-0 md:grid-cols-2">
-        <div className="hidden flex-col justify-between bg-primary p-10 text-primary-foreground md:flex">
-          <div>
-            <p className="text-sm font-semibold tracking-[0.2em] uppercase opacity-70">Bongkey</p>
-            <h2 className="mt-4 text-3xl font-bold leading-tight">See life clearly, and keep your orders close.</h2>
+    <section className="mx-auto grid w-full max-w-sm gap-6 px-4 py-12 md:py-16">
+      <div className="grid justify-items-center gap-4 text-center">
+        <span aria-hidden="true" className="grid size-12 place-items-center rounded-full bg-primary text-2xl font-bold italic text-primary-foreground">b</span>
+        <h1 className="text-2xl font-semibold">{headings[view]}</h1>
+        {view === "reset" ? <p className="text-sm text-muted-foreground">We will email you a code to prove it is you.</p> : null}
+      </div>
+
+      {view === "signin" ? <PasswordSignInForm onSignedIn={refresh} onForgot={() => setView("reset")} /> : null}
+      {view === "signup" ? <EmailCodePasswordForm mode="signup" onSignedIn={refresh} /> : null}
+      {view === "reset" ? <EmailCodePasswordForm mode="reset" onSignedIn={refresh} /> : null}
+
+      {view !== "reset" && googleSignInEnabled ? (
+        <>
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <Separator className="flex-1" />
+            or
+            <Separator className="flex-1" />
           </div>
-          <ul className="grid gap-4">
-            {perks.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-start gap-3 text-sm">
-                <Icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 opacity-80" />
-                <span>{text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+          {/* Remounting on a view change redraws Google's button with the matching wording. */}
+          <GoogleSignInButton key={view} text="continue_with" onCredential={signIn} onError={setError} />
+        </>
+      ) : null}
+      {error ? <p role="alert" className="text-center text-sm text-destructive">{error}</p> : null}
 
-        <div className="p-6 sm:p-10">
-          {resetting ? (
-            <div className="grid gap-6">
-              <button type="button" onClick={() => setResetting(false)} className="flex items-center gap-1 justify-self-start text-sm text-muted-foreground hover:text-foreground">
-                <ArrowLeft aria-hidden="true" className="size-4" /> Back to sign in
-              </button>
-              <div className="grid gap-1.5 text-center">
-                <h1 className="text-2xl font-bold">Reset your password</h1>
-                <p className="text-sm text-muted-foreground">We will email you a code to prove it is you.</p>
-              </div>
-              <EmailCodePasswordForm mode="reset" onSignedIn={refresh} />
-            </div>
-          ) : (
-          <Tabs defaultValue="signin" className="gap-6">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="signin">Sign in</TabsTrigger>
-              <TabsTrigger value="signup">Create account</TabsTrigger>
-            </TabsList>
-            <TabsContent value="signin" className="grid gap-6">
-              <div className="grid gap-1.5 text-center">
-                <h1 className="text-2xl font-bold">Welcome back</h1>
-                <p className="text-sm text-muted-foreground">Sign in to see your orders and checkout faster.</p>
-              </div>
-              <SignInMethod text="signin_with" onCredential={signIn} onError={setError} />
-              <OrDivider label="or with email" />
-              <PasswordSignInForm onSignedIn={refresh} onForgot={() => setResetting(true)} />
-            </TabsContent>
-            <TabsContent value="signup" className="grid gap-6">
-              <div className="grid gap-1.5 text-center">
-                <h1 className="text-2xl font-bold">Create your account</h1>
-                <p className="text-sm text-muted-foreground">Use Google, or your email and a password.</p>
-              </div>
-              <SignInMethod text="signup_with" onCredential={signIn} onError={setError} />
-              <OrDivider label="or with email" />
-              <EmailCodePasswordForm mode="signup" onSignedIn={refresh} />
-            </TabsContent>
-          </Tabs>
-          )}
-
-          {error ? <p role="alert" className="mt-4 text-center text-sm text-destructive">{error}</p> : null}
-
-          <OrDivider label="or" />
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Button asChild variant="outline"><Link href="/products">Continue as guest</Link></Button>
-            <Button asChild variant="outline"><Link href="/track">Track an order</Link></Button>
-          </div>
-          <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-            <ShieldCheck aria-hidden="true" className="size-4" />
-            We never store your password itself, only a secure hash. From Google we only receive your name and email.
-          </p>
-        </div>
-      </Card>
+      <p className="text-center text-sm">
+        {view === "signin" ? (
+          <>New to Bongkey? <button type="button" onClick={() => switchTo("signup")} className="font-medium text-foreground underline-offset-4 hover:underline">Create an account</button></>
+        ) : (
+          <>Already have an account? <button type="button" onClick={() => switchTo("signin")} className="font-medium text-foreground underline-offset-4 hover:underline">Sign in</button></>
+        )}
+      </p>
+      <p className="text-center text-sm text-muted-foreground">
+        <Link href="/products" className="underline-offset-4 hover:text-foreground hover:underline">Continue as a guest</Link>
+        <span aria-hidden="true"> · </span>
+        <Link href="/track" className="underline-offset-4 hover:text-foreground hover:underline">Track an order</Link>
+      </p>
     </section>
   );
-}
-
-/** OrDivider is the thin "or" line between sign-in choices. */
-function OrDivider({ label }: { label: string }) {
-  return (
-    <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground uppercase first:mt-0">
-      <Separator className="flex-1" />
-      {label}
-      <Separator className="flex-1" />
-    </div>
-  );
-}
-
-/** SignInMethod shows Google's button, or a plain notice while the owner has not set up Google sign-in. */
-function SignInMethod({ text, onCredential, onError }: { text: "signin_with" | "signup_with"; onCredential: (credential: string) => void; onError: (message: string) => void }) {
-  if (!googleSignInEnabled) {
-    return <p className="text-center text-sm text-muted-foreground">Google sign-in is not available yet.</p>;
-  }
-  return <GoogleSignInButton text={text} onCredential={onCredential} onError={onError} />;
 }
 
 /** Profile is the signed-in view: who you are, earlier orders to add, and My orders. */

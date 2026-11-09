@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, ReactNode, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,12 +9,15 @@ import { requestEmailCode, setCustomerPassword, signInWithPassword, updateCustom
 
 const message = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 
-/** PasswordField is a password input with a show/hide button. */
-function PasswordField({ id, autoComplete, label = "Password" }: { id: string; autoComplete: "current-password" | "new-password"; label?: string }) {
+/** PasswordField is a password input with a show/hide button; action sits at the right of the label (e.g. "Forgot password?"). */
+function PasswordField({ id, autoComplete, label = "Password", action }: { id: string; autoComplete: "current-password" | "new-password"; label?: string; action?: ReactNode }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id}>{label}</Label>
+        {action}
+      </div>
       <div className="relative">
         <Input id={id} name="password" type={visible ? "text" : "password"} required minLength={8} maxLength={72} autoComplete={autoComplete} className="pr-10" />
         <button type="button" onClick={() => setVisible(!visible)} aria-label={visible ? "Hide password" : "Show password"}
@@ -49,13 +52,12 @@ export function PasswordSignInForm({ onSignedIn, onForgot }: { onSignedIn: () =>
   return (
     <form onSubmit={submit} className="grid gap-4">
       <div className="grid gap-2">
-        <Label htmlFor="signin-email">Email</Label>
+        <Label htmlFor="signin-email">Email address</Label>
         <Input id="signin-email" name="email" type="email" required autoComplete="email" placeholder="you@gmail.com" />
       </div>
-      <PasswordField id="signin-password" autoComplete="current-password" />
-      <button type="button" onClick={onForgot} className="-mt-2 justify-self-end text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-        Forgot password?
-      </button>
+      <PasswordField id="signin-password" autoComplete="current-password" action={
+        <button type="button" onClick={onForgot} className="text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Forgot password?</button>
+      } />
       {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
       <Button type="submit" size="lg" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</Button>
     </form>
@@ -107,7 +109,7 @@ export function EmailCodePasswordForm({ mode, onSignedIn }: { mode: "signup" | "
     return (
       <form onSubmit={sendCode} className="grid gap-4">
         <div className="grid gap-2">
-          <Label htmlFor={`${mode}-email`}>Email</Label>
+          <Label htmlFor={`${mode}-email`}>Email address</Label>
           <Input id={`${mode}-email`} type="email" required autoComplete="email" placeholder="you@gmail.com" value={email} onChange={(event) => setEmail(event.target.value)} />
         </div>
         {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
