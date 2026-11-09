@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.37
+Version: 2.38
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -519,6 +519,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | GOOGLE-01 | R1 / REQ-05 | Optional customer Google sign-in (13.2): verified ID token, HttpOnly SameSite cookie session with expiry and logout, CSRF header, "My orders", phone-checked linking of earlier guest orders (#79) | Built 2026-11-07, off until the owner sets the Google client ID. Unit, HTTP and local PostgreSQL tests, live HTTP failure paths and a browser link/sign-out pass. Open: auto-attach orders placed while signed in after #84; real Google sign-in with the owner's client |
 | SHOP-01 | R1 / REQ-12 | Sale price highlight with % badge, add-to-bag on single-option cards (Choose options otherwise), browser wishlist with a saved page (#80) | Built 2026-11-07; desktop and 375 px browser checks. Open: gradual shadcn/ui after the owner shares screenshots of broken layouts |
 | LOG-01 | High / ops | Every request gets an ID in the `X-Request-ID` header and the access log; panics are logged with the ID and no request headers, and answer a generic 500 with the ID; shop errors on 5xx show "ref …" (#27) | Built 2026-11-07: middleware tests, live header/log match. Other background log lines do not carry the ID |
+| STOCK-01 | High / REQ-02 | Low-stock alert level per frame/option, dashboard low-stock list, stock history with reason and order for every change (checkout, cancellation, admin edit, new item) written in the same transaction (#20) | Built 2026-11-07: local PostgreSQL race, rollback, checkout link, cancellation and admin-edit history tests; live admin check with a temporary QA owner. Low-stock email not included |
 
 ### Separate execution checklists (2026-10-15)
 
@@ -725,3 +726,4 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.35 | GOOGLE-01 (#79): customer Google sign-in, cookie sessions, My orders and phone-checked order linking; off until `GOOGLE_CLIENT_ID` is set. |
 | 2026-11-07 | 2.36 | SHOP-01 (#80): sale price badges, card add-to-bag, browser wishlist; `option_count` on the product list. |
 | 2026-11-07 | 2.37 | LOG-01 (#27): request IDs in the response header, access log and panic log; a safe recovery that never logs headers; error references in the shop. |
+| 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |

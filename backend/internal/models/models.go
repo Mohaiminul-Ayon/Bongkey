@@ -35,4 +35,6 @@ type Product struct {
 	Variants        []Product `json:"variants,omitempty"`
 	// OptionCount is how many active colour/size options hang off this frame, so a list card knows to send shoppers to the product page.
 	OptionCount int `json:"option_count"`
+	// LowStockThreshold puts the item on the owner's low-stock list once stock falls to it; 0 means no alert.
+	LowStockThreshold int `json:"low_stock_threshold"`
 }

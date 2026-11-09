@@ -121,6 +121,7 @@ There is no separate migration command. Every time the backend starts, `MigrateA
    | `018_notifications.sql` | Saved emails waiting to be sent, and the order's "email confirmed" tick |
    | `019_order_risk_flags.sql` | Red-flag reasons saved on each order for staff |
    | `020_customers.sql` | Customer accounts from Google sign-in, their sessions, and `orders.customer_id` |
+   | `021_stock_history.sql` | Low-stock alert level per item, and a stock history written by a trigger on every stock change |
 
 3. Creates the first owner from `ADMIN_EMAIL` and `ADMIN_PASSWORD` if no admin exists, then seeds local catalog data.
 

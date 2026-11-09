@@ -15,6 +15,7 @@ var (
 	ErrCategoryRequired     = errors.New("category required")
 	ErrNamePriceRequired    = errors.New("name and price required")
 	ErrNegativeStock        = errors.New("negative stock")
+	ErrInvalidThreshold     = errors.New("invalid low-stock threshold")
 	ErrExpectedStockMissing = errors.New("expected stock required")
 	ErrInvalidVariant       = errors.New("invalid variant")
 	ErrDuplicateVariant     = errors.New("duplicate variant")
@@ -25,6 +26,7 @@ var (
 // ProductInput is the set of product fields the owner may edit.
 type ProductInput struct {
 	CategoryID, Price, OldPrice, StockQuantity int
+	LowStockThreshold                          int
 	ExpectedStockQuantity                      *int
 	Name, Slug, Description                    string
 	SKU                                        string
@@ -125,6 +127,9 @@ func (s ProductService) Save(ctx context.Context, id int, input ProductInput) (m
 	}
 	if input.StockQuantity < 0 {
 		return models.Product{}, ErrNegativeStock
+	}
+	if input.LowStockThreshold < 0 || input.LowStockThreshold > maxLowStockThreshold {
+		return models.Product{}, ErrInvalidThreshold
 	}
 	if input.SKU != "" {
 		input.SKU = strings.TrimSpace(input.SKU)

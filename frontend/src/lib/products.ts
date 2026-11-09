@@ -28,6 +28,8 @@ export type Product = {
   description?: string;
   imageUrl?: string;
   tryOnImageUrl?: string;
+  /** lowStockThreshold is the owner's alert level; 0 means no alert. */
+  lowStockThreshold?: number;
   isFeatured?: boolean;
   isActive?: boolean;
 };
