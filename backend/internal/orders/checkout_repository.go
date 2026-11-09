@@ -102,10 +102,10 @@ func (p postgresCheckoutTx) InsertOrder(ctx context.Context, request CheckoutReq
 	}
 	number := fmt.Sprintf("ORD-%06d", id)
 	_, err := p.Tx.ExecContext(ctx, `
-		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash, payment_method, payment_status, advance_mode, advance_value, advance_required)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		INSERT INTO orders (id, order_number, customer_name, customer_phone, customer_email, email_verified, shipping_address, city, delivery_note, subtotal, delivery_fee, total, guest_token_hash, idempotency_key_hash, idempotency_request_hash, payment_method, payment_status, advance_mode, advance_value, advance_required, customer_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NULLIF($21::bigint, 0))
 	`, id, number, request.CustomerName, request.CustomerPhone, request.CustomerEmail, request.EmailVerified, request.ShippingAddress, request.City, request.DeliveryNote, subtotal, deliveryFee, total, tokenHash, idempotencyKeyHash, requestHash,
-		terms.Method, terms.Status, terms.AdvanceMode, terms.AdvanceValue, terms.AdvanceRequired)
+		terms.Method, terms.Status, terms.AdvanceMode, terms.AdvanceValue, terms.AdvanceRequired, request.CustomerID)
 	if err != nil {
 		return 0, "", err
 	}

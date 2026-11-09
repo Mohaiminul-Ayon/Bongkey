@@ -114,7 +114,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.GET("/api/products/:slug/lens-packages", lensPackages.ListForProduct)
 	router.GET("/api/categories", categories.ListCategories)
 	router.GET("/api/delivery-settings", deliverySettings.Get)
-	router.POST("/api/orders", checkout.CreateOrder)
+	// OptionalCustomer never blocks checkout; it only lets a signed-in customer's order show in "My orders".
+	router.POST("/api/orders", middleware.OptionalCustomer(customerService), checkout.CreateOrder)
 	router.POST("/api/track", orderAccess.TrackOrder)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)

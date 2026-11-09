@@ -391,7 +391,7 @@ export async function createOrder(payload: OrderPayload, idempotencyKey: string,
   body.set("order", JSON.stringify(payload));
   files.forEach((file, index) => body.set(`prescription_${index}`, file));
   // The browser sets the multipart boundary itself, so no Content-Type header here.
-  const response = await fetch(`${API_URL}/api/orders`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body });
+  const response = await fetch(`${API_URL}/api/orders`, { method: "POST", headers: orderHeaders(idempotencyKey), credentials: "include", body });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw requestError(response, data, "Request failed");
   return data as PlacedOrder;
@@ -415,9 +415,15 @@ async function createJSONOrder(payload: OrderPayload, idempotencyKey: string) {
     guest_access_token: string;
   }>("/api/orders", {
     method: "POST",
-    headers: { "Idempotency-Key": idempotencyKey },
+    headers: orderHeaders(idempotencyKey),
+    credentials: "include",
     body: JSON.stringify(payload),
   });
+}
+
+/** orderHeaders adds the shop header the backend needs before it trusts the sign-in cookie, so a signed-in customer's order lands in "My orders"; guests are unaffected. */
+function orderHeaders(idempotencyKey: string) {
+  return { "Idempotency-Key": idempotencyKey, "X-Requested-With": "bongkey" };
 }
 
 /** requestEmailCode sends a short-lived code without exposing it to the browser. */

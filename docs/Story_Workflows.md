@@ -593,6 +593,12 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 
 **Logout:** `POST /api/customer/logout` deletes the session row and clears the cookie, so the old cookie stops working at once.
 
+**Ordering while signed in (added 2026-11-09):** checkout's `POST /api/orders` now sends the cookie (`credentials: "include"`) and `X-Requested-With: bongkey` from [createOrder](../frontend/src/lib/api.ts).
+1. [OptionalCustomer](../backend/internal/middleware/customer_auth.go) runs before the handler. With both the cookie and the header it calls `customers.Service.Authenticate`; a valid session sets `customer`. It never aborts: no cookie, no header, an unknown session or a session-store failure all continue as a guest order.
+2. [CheckoutHandler.CreateOrder](../backend/internal/handlers/order_handler.go) reads `customer` (if any) and passes its ID as `CheckoutRequest.CustomerID`. The ID never comes from the request body.
+3. [InsertOrder](../backend/internal/orders/checkout_repository.go) saves `customer_id` (NULL for 0) in the same transaction as the order, so the order shows in "My orders" at once. No phone step is needed: the signed-in person placed it.
+- Why the header: without it a cross-site form could file an order under someone else's account. Such a request still places a plain guest order.
+
 **Failure paths:**
 - No `X-Requested-With` header: 403 from CustomerCSRF; the handler never runs.
 - `GOOGLE_CLIENT_ID` unset: sign-in answers 503 and the page says sign-in is not available yet.
@@ -603,7 +609,8 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 **Limits:**
 - One fixed 30-day session with no refresh rotation (marked `shortcut:`).
 - "My orders" shows number, date, total and status, capped at 100. Details still go through Track order.
-- Orders placed while signed in are not attached automatically yet; the customer links them with the same phone step. Auto-attach comes after guest checkout (#84) is merged.
+- Orders placed while signed in are attached automatically (2026-11-09). Earlier guest orders still need the phone step.
+- Evidence for auto-attach: `TestOptionalCustomer` (signed in, guest, no header, unknown session, store down) and the local PostgreSQL `TestSignedInCheckoutLinksCustomerPostgres`; live preflight allows credentials and the header, and a bad cookie still reaches checkout. A real Google sign-in has not been tried: it needs the owner's client ID.
 - The cookie only works when the API and the shop share a site (for example `api.example.com` and `example.com`).
 
 **Evidence:**

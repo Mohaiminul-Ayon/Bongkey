@@ -47,8 +47,8 @@ func localCheckoutDB(t *testing.T) *sql.DB {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable with app credentials")
 	}
-	// Status changes write the delivery-tracking times, order reads include the email tick and red flags, and stock changes write history, so every order test needs those migrations.
-	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql", "018_notifications.sql", "019_order_risk_flags.sql", "021_stock_history.sql"} {
+	// Status changes write the delivery-tracking times, order reads include the email tick and red flags, orders may link a customer, and stock changes write history, so every order test needs those migrations.
+	for _, name := range []string{"005_checkout_idempotency.sql", "016_delivery_tracking.sql", "018_notifications.sql", "019_order_risk_flags.sql", "020_customers.sql", "021_stock_history.sql"} {
 		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
 		if err != nil {
 			t.Fatal(err)
@@ -439,5 +439,45 @@ func TestNonnegativeStockConstraintPostgres(t *testing.T) {
 	var pgErr *pq.Error
 	if !errors.As(err, &pgErr) || string(pgErr.Code) != "23514" {
 		t.Fatalf("negative stock should violate CHECK constraint, got %T", err)
+	}
+}
+
+// TestSignedInCheckoutLinksCustomerPostgres checks a signed-in order is saved with its customer, so it shows in "My orders".
+func TestSignedInCheckoutLinksCustomerPostgres(t *testing.T) {
+	db := localCheckoutDB(t)
+	id := checkoutFixtureProduct(t, db, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var customerID int64
+	if err := db.QueryRowContext(ctx, `INSERT INTO customers (google_sub, email) VALUES ('qa-signed-in-checkout', 'qa@example.test') RETURNING id`).Scan(&customerID); err != nil {
+		t.Fatal("could not create local customer fixture")
+	}
+	// Cleanups run last-first: the order goes before the customer it references.
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM customers WHERE id = $1`, customerID); err != nil {
+			t.Error("could not remove local customer fixture")
+		}
+	})
+	settings := delivery.Service{Store: delivery.PostgresRepository{DB: db}}
+	fee, err := settings.DeliveryFee(ctx, "Dhaka")
+	if err != nil {
+		t.Fatal("could not load the saved local delivery setting")
+	}
+	service := CheckoutService{Store: PostgresCheckoutStore{DB: db}, OrderTokenSecret: testOrderTokenSecret, DeliveryFeeProvider: settings}
+	receipt, err := service.Place(ctx, CheckoutRequest{
+		IdempotencyKey: "checkout-signed-in-0001", CustomerID: customerID, CustomerName: "QA", CustomerPhone: "01712345678", CustomerEmail: "qa@example.test",
+		ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: id, Quantity: 1}},
+	})
+	if err != nil {
+		t.Fatal("local signed-in checkout could not persist an order")
+	}
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DELETE FROM orders WHERE id = $1`, receipt.ID); err != nil {
+			t.Error("could not remove local order fixture")
+		}
+	})
+	var saved sql.NullInt64
+	if err := db.QueryRowContext(ctx, `SELECT customer_id FROM orders WHERE id = $1`, receipt.ID).Scan(&saved); err != nil || saved.Int64 != customerID {
+		t.Fatalf("order customer = %v, want %d", saved, customerID)
 	}
 }
