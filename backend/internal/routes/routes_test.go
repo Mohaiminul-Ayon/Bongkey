@@ -123,6 +123,7 @@ func TestPaymentReviewRoutesRequireAdmin(t *testing.T) {
 		{http.MethodPut, "/api/admin/orders/1/email-confirmed", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/stock/low", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/products/1/stock-history", http.StatusUnauthorized},
+		{http.MethodGet, "/api/admin/audit", http.StatusUnauthorized},
 		{http.MethodGet, "/api/orders/1/payments", http.StatusNotFound},
 		{http.MethodPost, "/api/orders/1/payments", http.StatusNotFound},
 	} {

@@ -699,6 +699,34 @@ Existing stock is untouched.
   - the save worked, and a -1 threshold gave 400;
   - the low list, history and dashboard list showed it, and the edit page showed "Edited by owner -12 → 2";
   - stock, threshold, QA history rows and the QA owner were then restored or removed.
+## AUDIT-01 — Admin audit log (#26)
+
+**Status:** Built 2026-11-07 on `feat/admin-audit-log`. Recovering a lost admin account is not included (the issue's open question).
+
+**Data:** migration `022_audit_log.sql` adds `audit_log` (table, record, action, changed columns as `{"col":{"from":…,"to":…}}`, time) and the trigger function `audit_change(key, columns…)` on:
+- `products` (price, old price, published);
+- `store_settings` (both delivery charges);
+- `payment_methods` (bKash on/off, receiving number, instructions);
+- `advance_policies`;
+- `lens_packages` (price, active);
+- `payments` updates (approve/reject);
+- `orders` updates (status, payment status, paid amount, total);
+- `order_items` (lens price).
+
+Each entry is written in the same transaction as the change, so a failed or rolled-back change leaves nothing. Only the listed columns are stored: no names, phones, addresses, emails, tokens or files. Stock changes have their own history (STOCK-01).
+
+**Append-only:** the app has no edit or delete path, and a `BEFORE UPDATE OR DELETE` trigger on `audit_log` raises an error for anyone else.
+
+**Owner request:** `GET /api/admin/audit?before=<id>` → `AdminAuth` → [AuditHandler.List](../backend/internal/handlers/audit_handler.go) (a bad `before` gives 400) → [audit.Reader.Recent](../backend/internal/audit/audit.go): 100 entries, newest first. The [Audit log page](../frontend/src/app/admin/audit/page.tsx) (admin menu) shows "price: 100 → 150" style lines, with "Show older".
+
+**Limits:**
+- Entries do not name the admin, because the shop has one owner.
+- Test fixtures on a local database leave entries behind, by design.
+
+**Evidence:**
+- Local PostgreSQL `TestAuditLogPostgres`: a rolled-back price change leaves no entry; a stock-only change leaves none; a committed change records exactly `price 100 → 150`; UPDATE and DELETE on the log are refused.
+- Route test: `/api/admin/audit` needs login.
+- Live: 401 without a token, 400 for a bad page, and the page showed entries in the browser with a temporary no-login QA owner (removed afterwards).
 
 ## Stories without a completed request flow
 
