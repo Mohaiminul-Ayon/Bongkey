@@ -58,7 +58,7 @@ export default function ProductDetailsPage() {
       {showTryOn ? <TryOnModal product={variant} onClose={() => setShowTryOn(false)} /> : null}
       {/* Rendered outside the sticky info column, which is its own layer and would sit under the site header. */}
       {showLenses ? <LensPanel slug={product.slug} productName={product.name} framePrice={variant.price}
-        onAdd={(lens) => { addItem(variant, lens); setAdded(lens ? "Added to your bag with lenses." : "Added to your bag."); }} onClose={() => setShowLenses(false)} /> : null}
+        onAdd={(lens) => { addItem(variant, lens); setAdded("Added to your bag with lenses."); }} onClose={() => setShowLenses(false)} /> : null}
       <div className="product-layout">
         <div className="product-gallery"><ProductVisual product={variant} /></div>
 
@@ -80,14 +80,11 @@ export default function ProductDetailsPage() {
           </div> : null}
 
           <div className="product-actions">
-            {/* Eyeglasses have one clear action; "Frame only" is the last choice inside the panel. Sunglasses are
-                mostly bought as they are, so they keep a direct Add to bag and offer power lenses second. */}
-            {(variant.stockQuantity ?? 0) < 1 ? <Button disabled>Out of stock</Button>
-              : product.shape === "sunglass" ? <>
-                <Button onClick={() => { addItem(variant); setAdded("Added to your bag."); }}>Add to bag</Button>
-                <Button variant="secondary" onClick={() => { setAdded(""); setShowLenses(true); }}>Add power lenses</Button>
-              </>
-              : <Button onClick={() => { setAdded(""); setShowLenses(true); }}>Select lenses</Button>}
+            {/* Frame only is the default: Add to bag puts the bare frame in the bag at once; lenses are chosen in the panel. */}
+            {(variant.stockQuantity ?? 0) < 1 ? <Button disabled>Out of stock</Button> : <>
+              <Button onClick={() => { addItem(variant); setAdded("Added to your bag (frame only)."); }}>Add to bag</Button>
+              <Button variant="secondary" onClick={() => { setAdded(""); setShowLenses(true); }}>{product.shape === "sunglass" ? "With power lenses" : "With lenses"}</Button>
+            </>}
             <Button variant="secondary" disabled={!variant.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try on</Button>
           </div>
           {added ? <p role="status" className="info-note">{added}</p> : null}

@@ -1,21 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, ChevronRight, Eye, Glasses, MessageSquareText, Monitor, X } from "lucide-react";
-import { fetchLensPackages, type LensPackage } from "@/lib/api";
+import { ArrowLeft, Check, ChevronRight, Eye, MessageSquareText, Monitor, PhoneCall, Upload, X } from "lucide-react";
+import { fetchLensPackages, requestCallback, type LensPackage } from "@/lib/api";
+import { useCustomer } from "@/lib/customer";
 import { formatPower, lensFromPackage, lensPrice, lensPriceKnown, maxLensRequest, sphOptions, type CartLens } from "@/lib/lens";
+import { acceptedPrescriptionTypes, keepPrescription, prescriptionProblem } from "@/lib/prescriptionFiles";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
 type Step = "type" | "package" | "power" | "custom" | "review";
 type Power = "no_power" | "with_power";
-type TypeKind = Power | "custom" | "frame";
+type TypeKind = Power | "custom";
 
 const titles: Record<Step, string> = {
   type: "Choose lens type",
   package: "Choose your lens",
   power: "Your eye power",
-  custom: "Tell us what you need",
+  custom: "Talk to us about your lens",
   review: "Review your glasses",
 };
 
@@ -33,13 +35,14 @@ type LensPanelProps = {
   productName: string;
   /** framePrice is the selected frame option's price, for the total */
   framePrice: number;
-  /** onAdd puts the frame in the bag, with this lens or (no argument) frame only */
-  onAdd: (lens?: CartLens) => void;
+  /** onAdd puts the frame in the bag with this lens; frame only is the product page's own button */
+  onAdd: (lens: CartLens) => void;
   /** onClose hides the panel without adding anything */
   onClose: () => void;
 };
 
-/** LensPanel walks the shopper through lens type, lens package, eye power and a review, one step at a time, over the product page. */
+/** LensPanel walks the shopper through lens type, lens package, eye power with the prescription file and a review,
+ * one step at a time, over the product page. A custom lens is a call-back request instead of a bag line. */
 export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: LensPanelProps) {
   const [packages, setPackages] = useState<LensPackage[] | null>(null);
   const [steps, setSteps] = useState<Step[]>(["type"]);
@@ -48,8 +51,21 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
   // "" = not chosen yet, "unsure" = customer is not sure, otherwise hundredths as text.
   const [sphRight, setSphRight] = useState("");
   const [sphLeft, setSphLeft] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState("");
+  const { customer } = useCustomer();
+  // The call-back form starts from a signed-in customer's profile; a guest types both.
   const [request, setRequest] = useState("");
-  const [custom, setCustom] = useState(false);
+  const [name, setName] = useState(customer?.name ?? "");
+  const [phone, setPhone] = useState(customer?.phone ?? "");
+  const [callback, setCallback] = useState<"idle" | "sending" | "sent">("idle");
+  const [callbackError, setCallbackError] = useState("");
+  // The profile loads after the panel opens; fill only what the shopper has not typed.
+  useEffect(() => {
+    if (!customer) return;
+    setName((current) => current || customer.name);
+    setPhone((current) => current || customer.phone);
+  }, [customer]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const step = steps[steps.length - 1];
   const stage = stageOf[step];
@@ -96,16 +112,12 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
     setSelected(pkg);
     setSphRight("");
     setSphLeft("");
+    setFile(null);
     go(kind === "with_power" ? "power" : "review");
   }
 
-  // chooseType adds the bare frame, starts the custom request, or opens the lens list (skipped when only one lens fits).
+  // chooseType starts the call-back request or opens the lens list (skipped when only one lens fits).
   function chooseType(kind: TypeKind) {
-    if (kind === "frame") {
-      onAdd();
-      return close();
-    }
-    setCustom(kind === "custom");
     if (kind === "custom") return go("custom");
     setPower(kind);
     const list = listFor(kind);
@@ -113,16 +125,41 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
     else go("package");
   }
 
-  const choice: CartLens | null = custom
-    ? { kind: "custom", request: request.trim() }
-    : selected ? lensFromPackage(selected, power, parse(sphRight), parse(sphLeft)) : null;
+  const choice: CartLens | null = selected ? lensFromPackage(selected, power, parse(sphRight), parse(sphLeft)) : null;
+
+  // chooseFile keeps one prescription for this lens after a size check; the server checks the content again.
+  function chooseFile(next: File | undefined) {
+    const problem = next ? prescriptionProblem(next) : "";
+    setFileError(problem);
+    if (!problem) setFile(next ?? null);
+  }
+
+  // addToBag remembers the prescription for checkout under the same line the cart creates, then adds the pair.
+  function addToBag(lens: CartLens) {
+    if (power === "with_power") keepPrescription(slug, lens, file ?? undefined);
+    onAdd(lens);
+    close();
+  }
+
+  // sendCallback saves the request for staff; the shopper stays on the page and nothing goes in the bag.
+  async function sendCallback() {
+    setCallback("sending");
+    setCallbackError("");
+    try {
+      await requestCallback({ name: name.trim(), phone: phone.trim(), product_slug: slug, message: request.trim() });
+      setCallback("sent");
+    } catch (reason) {
+      setCallback("idle");
+      setCallbackError(reason instanceof Error ? reason.message : "Could not send your request. Please try again.");
+    }
+  }
+  const callbackReady = request.trim().length >= 5 && name.trim().length >= 2 && /^(?:\+?88)?01[3-9]\d{8}$/.test(phone.replace(/[\s-]/g, ""));
 
   // A lens type with no lenses for this frame is hidden; the tags state facts, not sales claims.
   const typeOptions = [
-    { kind: "with_power" as const, icon: Eye, title: "With power", tag: "Prescription", hint: "Made to your eye prescription. You upload it at checkout.", count: packages?.length ?? 0 },
+    { kind: "with_power" as const, icon: Eye, title: "With power", tag: "Prescription", hint: "Made to your eye prescription. Upload it here or at checkout.", count: packages?.length ?? 0 },
     { kind: "no_power" as const, icon: Monitor, title: "Without power", tag: "No prescription", hint: "Zero power lenses for screens, style or sun.", count: noPowerList.length },
-    { kind: "custom" as const, icon: MessageSquareText, title: "Something else", tag: "Price by call", hint: "High or complex power, or special needs. We call you with the price.", count: 1 },
-    { kind: "frame" as const, icon: Glasses, title: "Frame only", tag: "Cash on delivery", hint: "Just the frame, no lenses made. Goes straight to your bag.", count: 1 },
+    { kind: "custom" as const, icon: MessageSquareText, title: "Customized lens", tag: "We call you", hint: "High or complex power, progressive or special needs. Tell us and we call or chat with you.", count: 1 },
   ].filter((option) => option.count > 0);
 
   // 129 powers: the phone's own picker scrolls a list this long better than a custom menu.
@@ -138,8 +175,8 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
 
   const footer: Partial<Record<Step, { label: string; ready: boolean; action: () => void }>> = {
     power: { label: "Continue", ready: sphRight !== "" && sphLeft !== "", action: () => go("review") },
-    custom: { label: "Continue", ready: request.trim().length >= 5, action: () => go("review") },
-    review: { label: "Add to bag", ready: choice !== null, action: () => { if (choice) onAdd(choice); close(); } },
+    ...(callback === "sent" ? {} : { custom: { label: callback === "sending" ? "Sending..." : "Request a call", ready: callbackReady && callback === "idle", action: () => void sendCallback() } }),
+    review: { label: "Add to bag", ready: choice !== null, action: () => { if (choice) addToBag(choice); } },
   };
   const action = footer[step];
 
@@ -213,18 +250,44 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
                 {powerSelect("Right eye power (SPH)", sphRight, setSphRight)}
                 {powerSelect("Left eye power (SPH)", sphLeft, setSphLeft)}
               </div>
-              <p className="text-sm text-[var(--muted)]">Pick "Not sure" if you don&apos;t know. The fixed price covers powers up to ±{formatPower(selected.max_power).replace("+", "")}. You upload your prescription (PDF or photo) at checkout.</p>
+              <p className="text-sm text-[var(--muted)]">Pick &quot;Not sure&quot; if you don&apos;t know; we read it from your prescription. The fixed price covers powers up to ±{formatPower(selected.max_power).replace("+", "")}.</p>
+              <label className={`flex cursor-pointer items-center gap-3 rounded-[2px] border border-dashed p-4 text-sm transition-colors focus-within:border-[var(--foreground)] ${file ? "border-[var(--foreground)]" : "border-[var(--border)] hover:border-[var(--foreground)]"}`}>
+                <span className="grid size-11 shrink-0 place-items-center rounded-full bg-[var(--surface-raised)]">
+                  {file ? <Check aria-hidden="true" className="size-5" /> : <Upload aria-hidden="true" className="size-5" strokeWidth={1.6} />}
+                </span>
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <strong className="truncate font-semibold">{file ? file.name : "Upload your prescription"}</strong>
+                  <span className="text-[var(--muted)]">{file ? "Tap to choose another file." : "PDF or a clear photo, up to 5 MB. You can also add it at checkout."}</span>
+                </span>
+                <input type="file" className="sr-only" accept={acceptedPrescriptionTypes} onChange={(event) => chooseFile(event.target.files?.[0])} />
+              </label>
+              {fileError ? <p role="alert" className="text-sm text-red-700">{fileError}</p> : null}
             </>
           ) : null}
 
-          {step === "custom" ? (
+          {step === "custom" && callback === "sent" ? (
+            <div role="status" className="grid justify-items-center gap-3 rounded-[2px] border border-[var(--border)] p-6 text-center">
+              <span className="grid size-12 place-items-center rounded-full bg-[var(--surface-raised)]"><PhoneCall aria-hidden="true" className="size-5" /></span>
+              <strong className="text-base font-semibold">Thanks, {name.trim()}. We will call you soon.</strong>
+              <span className="text-sm text-[var(--muted)]">Our team calls {phone.trim()} to talk through your lens and the price. Nothing is added to your bag and you pay nothing yet.</span>
+            </div>
+          ) : null}
+          {step === "custom" && callback !== "sent" ? (
             <>
-              <label className="grid gap-1 text-sm font-semibold">Your lens needs
+              <label className="grid gap-1 text-sm font-semibold">Describe your lens needs
                 <textarea className="product-select min-h-28 font-normal" maxLength={maxLensRequest} value={request} onChange={(event) => setRequest(event.target.value)}
                   placeholder="e.g. -8.50 both eyes, thin and light lens, anti-glare. Or: progressive for reading and distance." />
-                <span className="text-xs font-normal text-[var(--muted)]">{request.trim().length < 5 ? "Write a few words to continue. " : ""}You can attach your prescription at checkout.</span>
               </label>
-              <p className="info-note"><strong>The lens price is not fixed yet.</strong> We check your needs and call you with the price before you pay anything.</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm font-semibold">Your name
+                  <input className="product-select font-normal" autoComplete="name" maxLength={80} value={name} onChange={(event) => setName(event.target.value)} />
+                </label>
+                <label className="grid gap-1 text-sm font-semibold">Mobile number
+                  <input className="product-select font-normal" type="tel" inputMode="tel" autoComplete="tel" placeholder="01XXXXXXXXX" value={phone} onChange={(event) => setPhone(event.target.value)} />
+                </label>
+              </div>
+              <p className="text-sm text-[var(--muted)]">Our team calls you to understand your lens and tell you the price. Nothing is ordered until you agree.</p>
+              {callbackError ? <p role="alert" className="text-sm text-red-700">{callbackError}</p> : null}
             </>
           ) : null}
 
@@ -232,10 +295,11 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
             <>
               <dl className="grid gap-3 rounded-[2px] border border-[var(--border)] p-4 text-sm">
                 <div className="flex justify-between gap-3"><dt className="text-[var(--muted)]">Frame: {productName}</dt><dd>{formatPrice(framePrice)}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-[var(--muted)]">Lens: {choice.kind === "custom" ? "Custom lens" : `${choice.name} · ${choice.power === "no_power" ? "no power" : "with power"}`}</dt>
-                  <dd>{choice.kind === "custom" ? "By call" : formatPrice(lensPrice(choice))}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-[var(--muted)]">Lens: {choice.kind === "package" ? `${choice.name} · ${choice.power === "no_power" ? "no power" : "with power"}` : "Custom lens"}</dt>
+                  <dd>{formatPrice(lensPrice(choice))}</dd></div>
+                {power === "with_power" ? <div className="flex justify-between gap-3"><dt className="text-[var(--muted)]">Prescription</dt><dd className="min-w-0 truncate">{file ? file.name : "Add at checkout"}</dd></div> : null}
                 <div className="flex items-baseline justify-between gap-3 border-t border-[var(--border)] pt-3 font-semibold"><dt>Total</dt>
-                  <dd className="text-xl">{choice.kind === "custom" ? `${formatPrice(framePrice)} + lens` : formatPrice(framePrice + lensPrice(choice))}</dd></div>
+                  <dd className="text-xl">{formatPrice(framePrice + lensPrice(choice))}</dd></div>
               </dl>
               {choice.kind === "package" && !lensPriceKnown(choice) ? (
                 <p role="status" className="info-note">{sphRight === "unsure" || sphLeft === "unsure" ? "We'll read the power from your prescription" : "Your power is above the fixed-price range, so the lens costs extra"}. We&apos;ll call you with the final price before you pay anything.</p>
@@ -244,9 +308,13 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
             </>
           ) : null}
 
-          {whatsAppNumber && step !== "review" ? (
+          {whatsAppNumber && step === "custom" ? (
+            <a className="site-button button-secondary w-full" target="_blank" rel="noopener noreferrer"
+              href={whatsAppLink(`Hi Bongkey, I'm looking at ${productName} and need a customized lens.${request.trim() ? ` My needs: ${request.trim()}` : ""}`)}>Prefer chat? Message us on WhatsApp</a>
+          ) : null}
+          {whatsAppNumber && step !== "review" && step !== "custom" ? (
             <p className="text-sm text-[var(--muted)]">Not sure which lens? <a className="font-semibold text-[var(--foreground)] underline underline-offset-4" target="_blank" rel="noopener noreferrer"
-              href={whatsAppLink(`Hi Bongkey, I'm looking at ${productName}.${step === "custom" && request.trim() ? ` My lens needs: ${request.trim()}` : " Which lens should I choose?"}`)}>Ask us on WhatsApp</a></p>
+              href={whatsAppLink(`Hi Bongkey, I'm looking at ${productName}. Which lens should I choose?`)}>Ask us on WhatsApp</a></p>
           ) : null}
         </div>
 

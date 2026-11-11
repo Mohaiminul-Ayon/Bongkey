@@ -8,6 +8,7 @@ import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetc
 import { useCart, type CartItem } from "@/lib/cart";
 import { useCustomer } from "@/lib/customer";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
+import { acceptedPrescriptionTypes, keepPrescription, prescriptionFor, prescriptionProblem } from "@/lib/prescriptionFiles";
 import { formatPrice, type Product } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -30,10 +31,6 @@ async function fetchCartLensTypes(items: CartItem[]) {
   const lists = await Promise.all(slugs.map((slug) => fetchLensPackages(slug)));
   return new Map<string, LensPackage[]>(slugs.map((slug, i) => [slug, lists[i]]));
 }
-
-// acceptedPrescriptionTypes matches what the server accepts; the server still checks the file's content.
-const acceptedPrescriptionTypes = ".pdf,.jpg,.jpeg,.png,.heic,application/pdf,image/jpeg,image/png,image/heic";
-const maxPrescriptionBytes = 5 * 1024 * 1024;
 
 /** validBangladeshMobile mirrors the server check: 01, an operator digit 3-9 and 8 digits, with an optional +88 / 88. */
 function validBangladeshMobile(value: string) {
@@ -95,8 +92,10 @@ export default function CheckoutPage() {
   const [formShownAt] = useState(() => Date.now());
   const [bkashOn, setBkashOn] = useState(false);
   const [payWith, setPayWith] = useState<"cash_on_delivery" | "bkash">("cash_on_delivery");
-  // Prescription files by bag line; files stay in memory and are sent only with the order.
-  const [prescriptions, setPrescriptions] = useState<Map<string, File>>(new Map());
+  // Prescription files stay in this tab's memory (picked here or in the lens panel) and are sent only with the
+  // order; the counter re-renders after a change because the files live outside React state.
+  const [, setPrescriptionChanges] = useState(0);
+  const fileFor = (item: CartItem) => prescriptionFor(item.product.slug, item.lens);
   const hasLens = items.some((item) => item.lens);
   const pricePending = items.some((item) => item.lens && !lensPriceKnown(item.lens));
   // Mirrors the server's fixed rule: any lens in the bag means the full total first. A cash-on-delivery frame
@@ -126,16 +125,13 @@ export default function CheckoutPage() {
     // Run once after the saved cart loads; later cart edits already use refreshed products.
   }, [ready]);
 
-  /** choosePrescription keeps one file per line after a quick type and size check; the server checks the content again. */
-  function choosePrescription(lineId: string, file: File | undefined) {
-    setError("");
-    const next = new Map(prescriptions);
-    if (!file) next.delete(lineId);
-    else if (file.size > maxPrescriptionBytes) {
-      setError("A prescription file must be 5 MB or smaller.");
-      return;
-    } else next.set(lineId, file);
-    setPrescriptions(next);
+  /** choosePrescription keeps one file per line after a quick size check; the server checks the content again. */
+  function choosePrescription(item: CartItem, file: File | undefined) {
+    const problem = file ? prescriptionProblem(file) : "";
+    setError(problem);
+    if (problem || !item.lens) return;
+    keepPrescription(item.product.slug, item.lens, file);
+    setPrescriptionChanges((count) => count + 1);
   }
 
   /** submitOrder stores the returned token only after the server accepts the order. */
@@ -154,7 +150,7 @@ export default function CheckoutPage() {
       setError("An item in your cart is no longer available. Remove it and add it again from the shop.");
       return;
     }
-    if (items.some((item) => needsPrescription(item.lens) && !prescriptions.has(item.lineId))) {
+    if (items.some((item) => needsPrescription(item.lens) && !fileFor(item))) {
       setError("Upload a prescription for each pair with power.");
       return;
     }
@@ -189,7 +185,7 @@ export default function CheckoutPage() {
       };
       const files = new Map<number, File>();
       items.forEach((item, index) => {
-        const file = prescriptions.get(item.lineId);
+        const file = fileFor(item);
         if (file && item.lens) files.set(index, file);
       });
       const order = await createOrder(payload, checkoutIdempotencyKey(payload), files);
@@ -247,7 +243,7 @@ export default function CheckoutPage() {
               <legend className="text-lg font-black">Prescriptions</legend>
               <p className="-mt-1 text-sm text-neutral-600">Upload one file for each item below: a PDF or a clear photo, up to 5 MB.</p>
               {items.filter((item) => item.lens?.kind === "custom" || needsPrescription(item.lens)).map((item) => (
-                <PrescriptionCard key={item.lineId} item={item} file={prescriptions.get(item.lineId)} onChoose={(file) => choosePrescription(item.lineId, file)} />
+                <PrescriptionCard key={item.lineId} item={item} file={fileFor(item)} onChoose={(file) => choosePrescription(item, file)} />
               ))}
             </fieldset>
           ) : null}
