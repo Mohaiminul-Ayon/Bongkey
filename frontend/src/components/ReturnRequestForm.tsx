@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, type ReactNode, useState } from "react";
 import type { ReturnKind } from "@/lib/api";
 import { acceptedPrescriptionTypes, maxPrescriptionBytes } from "@/lib/prescriptionFiles";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
@@ -16,26 +16,31 @@ const kinds: { kind: ReturnKind; label: string; hint: string; days: number }[] =
 ];
 
 type ReturnRequestFormProps = {
-  orderNumber: string;
-  status: string;
-  /** deliveredAt is when the courier delivered the order; nothing can be requested before that */
-  deliveredAt: string | null;
+  /** orderNumber is known on order pages; the standalone request page asks for it in children instead */
+  orderNumber?: string;
+  /** status and deliveredAt hide the form before delivery and hide choices whose time is over. Without them
+   * (the standalone page) every choice shows and the server alone decides. */
+  status?: string;
+  deliveredAt?: string | null;
   /** send posts the form (kind, message, photos) through the page's own order access */
   send: (form: FormData) => Promise<{ id: number }>;
+  /** children are extra fields at the top of the form (order number and phone on the request page) */
+  children?: ReactNode;
 };
 
 /** ReturnRequestForm lets a customer open a return or exchange request after delivery. Staff then call or chat;
  * nothing is refunded or swapped automatically. */
-export function ReturnRequestForm({ orderNumber, status, deliveredAt, send }: ReturnRequestFormProps) {
-  const [open, setOpen] = useState(false);
+export function ReturnRequestForm({ orderNumber, status, deliveredAt, send, children }: ReturnRequestFormProps) {
+  const standalone = status === undefined;
+  const [open, setOpen] = useState(standalone);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [ticket, setTicket] = useState<number | null>(null);
+  const [sent, setSent] = useState<{ id: number; order: string } | null>(null);
   // Read the clock once per render; the windows are days long, so seconds of drift do not matter.
   const [now] = useState(() => Date.now());
 
-  if (status !== "delivered" || !deliveredAt) return null;
-  const since = now - new Date(deliveredAt).getTime();
+  if (!standalone && (status !== "delivered" || !deliveredAt)) return null;
+  const since = deliveredAt ? now - new Date(deliveredAt).getTime() : 0;
   const available = kinds.filter((item) => since <= item.days * dayMs);
   const policyLink = <Link href="/return-policy" className="font-semibold underline underline-offset-4">return &amp; exchange policy</Link>;
 
@@ -57,7 +62,8 @@ export function ReturnRequestForm({ orderNumber, status, deliveredAt, send }: Re
     setBusy(true);
     setError("");
     try {
-      setTicket((await send(form)).id);
+      const order = orderNumber ?? String(form.get("order_number") ?? "").trim();
+      setSent({ id: (await send(form)).id, order });
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not send your request.");
     } finally {
@@ -65,12 +71,12 @@ export function ReturnRequestForm({ orderNumber, status, deliveredAt, send }: Re
     }
   }
 
-  if (ticket !== null) {
+  if (sent !== null) {
     return (
       <div role="status" className="grid gap-2 rounded-md border border-[var(--border)] p-4 text-sm">
-        <strong className="text-base">Request #{ticket} sent.</strong>
+        <strong className="text-base">Request #{sent.id} sent.</strong>
         <span>We will call you to understand the problem and agree a solution.</span>
-        {whatsAppNumber ? <a className="site-button button-secondary w-fit" target="_blank" rel="noopener noreferrer" href={whatsAppLink(`Hi Bongkey, I opened return request #${ticket} for order ${orderNumber}.`)}>Chat with us on WhatsApp</a> : null}
+        {whatsAppNumber ? <a className="site-button button-secondary w-fit" target="_blank" rel="noopener noreferrer" href={whatsAppLink(`Hi Bongkey, I opened return request #${sent.id} for order ${sent.order}.`)}>Chat with us on WhatsApp</a> : null}
       </div>
     );
   }
@@ -86,7 +92,8 @@ export function ReturnRequestForm({ orderNumber, status, deliveredAt, send }: Re
 
   return (
     <form onSubmit={submit} className="grid gap-3 rounded-md border border-[var(--border)] p-4 text-sm">
-      <h2 className="text-lg font-semibold">Return or exchange request</h2>
+      {standalone ? null : <h2 className="text-lg font-semibold">Return or exchange request</h2>}
+      {children}
       <fieldset className="grid gap-2">
         <legend className="mb-1 font-semibold">What do you need?</legend>
         {available.map((item, index) => (
@@ -106,7 +113,7 @@ export function ReturnRequestForm({ orderNumber, status, deliveredAt, send }: Re
       {error ? <p role="alert" className="text-red-700">{error}</p> : null}
       <div className="flex flex-wrap gap-2">
         <button type="submit" disabled={busy} className="site-button button-primary disabled:opacity-50">{busy ? "Sending..." : "Send request"}</button>
-        <button type="button" onClick={() => setOpen(false)} className="site-button button-secondary">Cancel</button>
+        {standalone ? null : <button type="button" onClick={() => setOpen(false)} className="site-button button-secondary">Cancel</button>}
       </div>
     </form>
   );

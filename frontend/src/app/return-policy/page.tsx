@@ -43,7 +43,7 @@ const sections: { title: string; points: string[] }[] = [
   {
     title: "How to ask",
     points: [
-      "Open your order (or find it on the Track page with your order number and phone) and press \"Request a return or exchange\".",
+      "Open the return request page, enter your order number and the phone you ordered with, and tell us what you need.",
       "Tell us what happened and add photos if you can. We call you to agree a solution, and you can chat with us on WhatsApp.",
     ],
   },
@@ -67,7 +67,9 @@ export default function ReturnPolicyPage() {
           </ul>
         </div>
       ))}
-      <p className="border-t border-[var(--border)] pt-6 text-sm text-[var(--muted)]">Find your order on the <Link className="font-semibold text-[var(--foreground)] underline underline-offset-4" href="/track">Track page</Link> to start a request.</p>
+      <div className="border-t border-[var(--border)] pt-6">
+        <Link href="/return-request" className="site-button button-primary">Request a return or exchange</Link>
+      </div>
     </section>
   );
 }

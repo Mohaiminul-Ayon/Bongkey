@@ -116,7 +116,10 @@ export default function AccountPage() {
         <Link href="/products" className="underline-offset-4 hover:text-foreground hover:underline">Continue as a guest</Link>
         <span aria-hidden="true"> · </span>
         <Link href="/track" className="underline-offset-4 hover:text-foreground hover:underline">Track an order</Link>
+        <span aria-hidden="true"> · </span>
         <Link href="/return-policy" className="underline-offset-4 hover:text-foreground hover:underline">Returns &amp; exchanges</Link>
+        <span aria-hidden="true"> · </span>
+        <Link href="/return-request" className="underline-offset-4 hover:text-foreground hover:underline">Return request</Link>
       </p>
     </section>
   );
@@ -213,7 +216,7 @@ function Profile({ customer, onSignedOut, onSaved }: { customer: Customer; onSig
       <Card>
         <CardHeader>
           <CardTitle>My orders</CardTitle>
-          <CardDescription>For delivery details, open <Link className="underline underline-offset-4" href="/track">Track order</Link> with the order number.</CardDescription>
+          <CardDescription>For delivery details, open <Link className="underline underline-offset-4" href="/track">Track order</Link> with the order number. A problem with an order? Send a <Link className="underline underline-offset-4" href="/return-request">return request</Link>.</CardDescription>
         </CardHeader>
         <CardContent>
           {orders === null ? (

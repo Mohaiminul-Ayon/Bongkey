@@ -251,10 +251,11 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 - **Defect, wrong colour or wrong item:** within **15 days**; replaced, or refunded if it can't be replaced. The refund is due within 15 days of the request.
 - Lenses are not refunded; a returned frame's refund loses the lens price and the courier charge. A problem found while the delivery person is there is handed back at once for free (with the courier, not on the site); after that the customer pays the courier charge.
 - The rules live on a plain policy page ([/return-policy](../frontend/src/app/return-policy/page.tsx)) linked from the footer and account page, with a one-line note at checkout and in the bKash box. The rules are fixed in code for the pilot.
+- (2026-11-12, follow-up) A "Return request" page ([/return-request](../frontend/src/app/return-request/page.tsx)) where the customer types the order number and phone, picks the reason, writes the problem and adds optional photos. Linked from the footer, the account page (signed in and out) and a button on the policy page.
 
 **Request:** `POST /api/track/returns` (multipart) with `order_number=ORD-000200`, `phone=01712345678`, `kind=defect`, `message=The left hinge is loose`, `photos=<hinge.jpg>`.
 
-1. [ReturnRequestForm](../frontend/src/components/ReturnRequestForm.tsx) shows only after delivery and only the kinds still inside their window; on the Track page it adds the number and phone the customer typed, and [requestReturnFromTrack](../frontend/src/lib/api.ts) sends it. The private order page sends the same form to `POST /api/orders/:id/returns` with the order secret instead.
+1. [ReturnRequestForm](../frontend/src/components/ReturnRequestForm.tsx) has three homes. On the **Return request page** it shows all three reasons with the number and phone fields on top (the page does not know the delivery date, so the server alone decides). On the Track page and the private order page it shows only after delivery and only the reasons still inside their window. The Track page and the request page send it with [requestReturnFromTrack](../frontend/src/lib/api.ts); the private order page sends it to `POST /api/orders/:id/returns` with the order secret instead.
 2. [routes.go](../backend/internal/routes/routes.go) registers both routes as public; access is checked in the handler.
 3. [ReturnsHandler.CreateFromTrack](../backend/internal/handlers/returns_handler.go) limits the body to 16 KB plus three 5 MB photos, reads `kind`, `message` and only `photos` files (`returnForm`), then calls `orders.AccessService.Track` — the same rate-limited number + phone check as the Track page. A wrong phone is 404. `CreateFromOrderPage` uses `AccessService.Guest` with the order secret instead.
 4. [returns.Service.Create](../backend/internal/returns/returns.go) trims the message (5–1000), allows 3 photos, and `Eligible` checks the order is `delivered` with a `delivered_at` and that now is within 3 days (exchange) or 15 days (defect / wrong item). Each photo goes through `lens.PrescriptionStore` (content check, random name, private folder `backend/private/return-photos`); if a later photo or the database fails, the saved photos are removed.
@@ -268,7 +269,7 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 - Not delivered yet or cancelled: 409 "after the order is delivered".
 - Exchange on day 4 or a problem on day 16: 409 "the time for this request is over".
 - A second request while one is open: 409.
-- A wrong phone on the Track route: 404; too many tries: 429 (the Track limiter).
+- A wrong phone on the Track route: 404 ("no order matches this order number and phone", shown on the request page); too many tries: 429 (the Track limiter).
 - No order secret on the order-page route: 404. Admin routes without login: 401 from `AdminAuth`.
 - A photo that is not a real JPG/PNG/HEIC (or too small or above 5 MB): 400.
 
