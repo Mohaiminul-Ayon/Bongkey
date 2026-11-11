@@ -52,7 +52,7 @@ var (
 	ErrPaymentUnavailable = errors.New("payment method unavailable")
 	// ErrInvalidPhone means the delivery phone is not a Bangladesh mobile number.
 	ErrInvalidPhone = errors.New("invalid delivery phone")
-	// ErrInvalidEmail means the email is missing or not one plain address.
+	// ErrInvalidEmail means a given email is not one plain address.
 	ErrInvalidEmail = errors.New("invalid email")
 	// ErrCheckoutLimited means one phone or client placed too many orders in a short time.
 	ErrCheckoutLimited = errors.New("too many orders")
@@ -274,8 +274,9 @@ func (s CheckoutService) Place(ctx context.Context, request CheckoutRequest) (Ch
 		if request.ExpectedDeliveryFee == nil || *request.ExpectedDeliveryFee < 0 {
 			return ErrInvalidCheckout
 		}
-		// Checked after the retry lookup, so an accepted order from before emails were required keeps its receipt.
-		if !plainEmail(request.CustomerEmail) {
+		// The email is optional because the phone is the customer's identity (staff confirm every order by
+		// phone); a given email must still be one plain address. Checked after the retry lookup, as before.
+		if request.CustomerEmail != "" && !plainEmail(request.CustomerEmail) {
 			return ErrInvalidEmail
 		}
 		if s.DeliveryFeeProvider == nil {

@@ -142,7 +142,7 @@ func (tx *checkoutTxStub) InsertOrder(_ context.Context, request CheckoutRequest
 	return 7, "ORD-000007", nil
 }
 
-// TestCheckoutEmailWithoutCode needs a plain email but no code; only a matching proof marks it verified.
+// TestCheckoutEmailWithoutCode takes an optional plain email without a code; only a matching proof marks it verified.
 func TestCheckoutEmailWithoutCode(t *testing.T) {
 	proof, err := security.IssueEmailProof(testEmailProofSecret, "buyer@example.com")
 	if err != nil {
@@ -150,7 +150,7 @@ func TestCheckoutEmailWithoutCode(t *testing.T) {
 	}
 	fee := 80
 	base := CheckoutRequest{IdempotencyKey: "checkout-email-0001", CustomerName: "QA", CustomerPhone: "01712345678", ShippingAddress: "Local", City: "Dhaka", ExpectedDeliveryFee: &fee, Items: []CheckoutItem{{ProductID: 1, Quantity: 1}}}
-	for _, email := range []string{"", "buyer@", "Buyer <buyer@example.com>"} {
+	for _, email := range []string{"buyer@", "Buyer <buyer@example.com>"} {
 		store := &checkoutStoreStub{tx: &checkoutTxStub{}}
 		input := base
 		input.CustomerEmail, input.EmailProof = email, proof
@@ -162,6 +162,7 @@ func TestCheckoutEmailWithoutCode(t *testing.T) {
 		email, proof string
 		verified     bool
 	}{
+		"no email":       {"", "", false},
 		"no code":        {"buyer@example.com", "", false},
 		"expired proof":  {"buyer@example.com", "expired-proof", false},
 		"other mailbox":  {"other@example.com", proof, false},

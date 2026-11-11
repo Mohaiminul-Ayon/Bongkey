@@ -133,6 +133,11 @@ export async function trackOrder(orderNumber: string, phone: string) {
   return request<TrackedOrder>("/api/track", { method: "POST", body: JSON.stringify({ order_number: orderNumber, phone }), cache: "no-store" });
 }
 
+/** sendOrderNumbers asks the shop to email the order numbers placed with an email; the answer is the same whether or not any exist. */
+export async function sendOrderNumbers(email: string) {
+  return request<{ message: string }>("/api/track/order-numbers", { method: "POST", body: JSON.stringify({ email }), cache: "no-store" });
+}
+
 /** setEmailConfirmed saves whether staff read the customer's email back on the confirmation call. */
 export async function setEmailConfirmed(id: number, confirmed: boolean) {
   return adminRequest(`/api/admin/orders/${id}/email-confirmed`, { method: "PUT", body: JSON.stringify({ confirmed }) });

@@ -242,8 +242,8 @@ export default function CheckoutPage() {
             <label className="grid gap-2 text-sm font-black">Phone<input key={`phone-${customer?.phone ?? ""}`} name="phone" required defaultValue={customer?.phone} autoComplete="tel" className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="01XXXXXXXXX" /></label>
           </div>
           <div className="rounded-md border border-black/10 p-4">
-            <label className="grid gap-2 text-sm font-black">Email (required)<input name="email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="you@example.com" /></label>
-            <p className="mt-2 text-sm text-neutral-600">We email your order number here, and your invoice after we confirm the order by phone.</p>
+            <label className="grid gap-2 text-sm font-black">Email (optional)<input name="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="rounded-md border border-neutral-300 px-4 py-3 font-normal outline-none focus:border-[#173c34]" placeholder="you@example.com" /></label>
+            <p className="mt-2 text-sm text-neutral-600">We email your order number here, and your invoice after we confirm the order by phone. No email? Leave it empty; we call your phone.</p>
           </div>
           {/* Hidden from people, screen readers and autofill; bots that fill every field reveal themselves. */}
           <div aria-hidden="true" style={{ position: "absolute", left: "-10000px", width: 1, height: 1, overflow: "hidden" }}>

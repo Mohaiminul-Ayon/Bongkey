@@ -57,6 +57,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	mailer := mail.New(cfg)
 	// Emails are queued in the database after each change commits and sent by the worker that serve starts.
 	notifier := notifications.Service{Store: notifications.PostgresStore{DB: database.DB}, Orders: orderAccess.Service, OwnerEmail: cfg.OwnerNotifyEmail, SiteURL: cfg.SiteURL}
+	// Same shared limiter table as tracking, with its own "order-numbers-ip" key kind.
+	orderAccess.Numbers = orders.OrderNumberService{Orders: orders.PostgresReader{DB: database.DB}, Sender: notifier, Limiter: auth.PostgresLoginLimiter{DB: database.DB}, Secret: cfg.JWTSecret}
 	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}, Notifier: notifier}
 	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
@@ -114,6 +116,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	// OptionalCustomer never blocks checkout; it only lets a signed-in customer's order show in "My orders".
 	router.POST("/api/orders", middleware.OptionalCustomer(customerService), checkout.CreateOrder)
 	router.POST("/api/track", orderAccess.TrackOrder)
+	router.POST("/api/track/order-numbers", orderAccess.SendOrderNumbers)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
 	router.GET("/api/orders/:id/slip.pdf", orderAccess.GetSlip)
