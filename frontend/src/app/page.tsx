@@ -74,7 +74,8 @@ export default function Home() {
             ))}
           </div>
         </div>
-        <div className="product-grid" aria-live="polite">
+        {/* The key restarts the fade when the visitor switches tabs. */}
+        <div key={shelf} className="product-grid shelf-grid" aria-live="polite">
           {shown.map((product) => <ProductCard key={product.slug} product={product} />)}
         </div>
         {shown.length === 0 ? <p className="empty-note">Frames will appear here soon.</p> : null}
