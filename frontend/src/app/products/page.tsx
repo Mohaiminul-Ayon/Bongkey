@@ -35,9 +35,10 @@ function wholeTaka(value: string | null) {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
-// The slider moves in ৳100 steps and its top end is the dearest frame rounded up to the next ৳500.
+// The slider moves in ৳100 steps up to a fixed top end (owner, 2026-11-12).
+// shortcut: the top is fixed at ৳50,000 for now; derive it from the dearest frame if prices outgrow it.
 const priceStep = 100;
-const roundUp = (value: number) => Math.max(500, Math.ceil(value / 500) * 500);
+const priceCeiling = 50_000;
 
 /** ProductsPage waits for the URL's filters before rendering the catalog. */
 export default function ProductsPage() {
@@ -57,15 +58,10 @@ function Catalog() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState("");
-  // topPrice is the dearest frame in the whole catalog, read once, so the slider's scale does not shrink as it filters.
-  const [topPrice, setTopPrice] = useState<number | null>(null);
-  const ceiling = roundUp(Math.max(topPrice ?? 0, maxPrice ?? 0));
+  // A shared link with a higher max still fits on the scale.
+  const ceiling = Math.max(priceCeiling, Math.ceil((maxPrice ?? 0) / priceStep) * priceStep);
   // The handles' positions while dragging; the URL (and the list) changes only when a handle is let go.
   const [range, setRange] = useState<[number, number]>([minPrice ?? 0, maxPrice ?? ceiling]);
-
-  useEffect(() => {
-    fetchProducts().then((items) => setTopPrice(Math.max(0, ...items.map((item) => item.price)))).catch(() => setTopPrice(0));
-  }, []);
 
   // Keep the handles in step when the URL changes from outside the slider (header links, back button, reset).
   useEffect(() => { setRange([minPrice ?? 0, maxPrice ?? ceiling]); }, [minPrice, maxPrice, ceiling]);
@@ -133,10 +129,8 @@ function Catalog() {
             <span id="price-range-label">Price</span>
             <output aria-live="polite">{formatPrice(range[0])} – {formatPrice(range[1])}</output>
           </div>
-          {topPrice === null ? <div className="h-5" aria-hidden="true" /> : (
-            <Slider min={0} max={ceiling} step={priceStep} minStepsBetweenThumbs={1} value={range} thumbLabels={["Minimum price", "Maximum price"]}
-              onValueChange={(value) => setRange([value[0], value[1]])} onValueCommit={applyPrice} />
-          )}
+          <Slider min={0} max={ceiling} step={priceStep} minStepsBetweenThumbs={1} value={range} thumbLabels={["Minimum price", "Maximum price"]}
+            onValueChange={(value) => setRange([value[0], value[1]])} onValueCommit={applyPrice} />
           {filtered ? <button className="price-reset" type="button" onClick={resetFilters}>Reset filters</button> : null}
         </div>
         <div className="sort-select">
