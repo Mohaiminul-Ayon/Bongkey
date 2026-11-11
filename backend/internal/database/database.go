@@ -133,14 +133,14 @@ var eyeglassCategories = []string{"blue-cut-glasses", "mens-frames", "womens-fra
 
 // starterLenses are common lens types sold in Bangladesh. Prices are rough placeholders, not market quotes.
 var starterLenses = []starterLens{
-	{"Clear anti-glare", "Single vision with anti-reflective and UV coating. Everyday wear.", 1200, 600, false, eyeglassCategories},
-	{"Blue-cut", "Filters part of the blue light from phone and computer screens.", 1800, 600, false, eyeglassCategories},
-	{"Photochromic", "Clear indoors, darkens in sunlight.", 2500, 600, false, eyeglassCategories},
-	{"Photochromic + blue-cut", "Darkens in sunlight and filters screen blue light.", 3500, 400, false, eyeglassCategories},
-	{"Thin high-index 1.67", "Thinner, lighter lens for strong powers.", 4500, 1000, true, eyeglassCategories},
-	{"Progressive (distance + reading)", "One lens for far, middle and near vision, no visible line.", 6500, 400, true, eyeglassCategories},
-	{"Power tinted sunglass lens", "Your prescription in a dark tinted sun lens.", 2800, 400, true, []string{"sunglasses"}},
-	{"Power polarized sunglass lens", "Your prescription with polarized glare cut for driving and water.", 3800, 400, true, []string{"sunglasses"}},
+	{"Clear anti-glare", "Anti-glare coating\nUV protection\nEveryday wear", 1200, 600, false, eyeglassCategories},
+	{"Blue-cut", "Filters screen blue light\nAnti-glare coating\nFor phone and computer use", 1800, 600, false, eyeglassCategories},
+	{"Photochromic", "Clear indoors\nDarkens in sunlight\nUV protection", 2500, 600, false, eyeglassCategories},
+	{"Photochromic + blue-cut", "Darkens in sunlight\nFilters screen blue light\nUV protection", 3500, 400, false, eyeglassCategories},
+	{"Thin high-index 1.67", "Thinner and lighter\nFor strong powers\nAnti-glare coating", 4500, 1000, true, eyeglassCategories},
+	{"Progressive (distance + reading)", "Far, middle and near in one lens\nNo visible line", 6500, 400, true, eyeglassCategories},
+	{"Power tinted sunglass lens", "Your prescription in a dark sun lens\nUV protection", 2800, 400, true, []string{"sunglasses"}},
+	{"Power polarized sunglass lens", "Your prescription, polarized\nCuts glare for driving and water", 3800, 400, true, []string{"sunglasses"}},
 }
 
 // seedLensPackages adds the starter lens types only when none exist, so the owner's later edits and renames are never overwritten.

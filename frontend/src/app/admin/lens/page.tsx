@@ -77,7 +77,7 @@ export default function AdminLensPage() {
               <label className="grid gap-1 text-sm font-bold">Fixed price covers power up to ±<input name="max_power" required type="number" min={0.25} max={20} step={0.25} defaultValue={editing ? editing.max_power / 100 : 6} className={inputClass} /></label>
               <label className="flex items-center gap-2 self-end pb-2 text-sm font-bold"><input type="checkbox" name="prescription_required" defaultChecked={editing?.prescription_required} />Prescription always required (no &quot;No power&quot; choice, e.g. power sunglass lenses)</label>
             </div>
-            <label className="grid gap-1 text-sm font-bold">Description<input name="description" maxLength={300} defaultValue={editing?.description} placeholder="Filters blue light from screens" className={inputClass} /></label>
+            <label className="grid gap-1 text-sm font-bold">Features (one per line)<textarea name="description" rows={3} maxLength={300} defaultValue={editing?.description} placeholder={"Filters screen blue light\nAnti-glare coating"} className={inputClass} /></label>
             <fieldset className="flex flex-wrap gap-4 text-sm">
               <legend className="mb-1 font-bold">Fits frames in</legend>
               {categories.map((category) => (
@@ -100,7 +100,7 @@ export default function AdminLensPage() {
               <article key={pkg.id} className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-neutral-200 p-4">
                 <div>
                   <strong>{pkg.name}</strong> <span className="font-bold">{formatPrice(pkg.price)}</span>
-                  {pkg.description ? <p className="text-sm text-neutral-600">{pkg.description}</p> : null}
+                  {pkg.description ? <ul className="list-disc pl-5 text-sm text-neutral-600">{pkg.description.split("\n").map((line) => <li key={line}>{line}</li>)}</ul> : null}
                   <p className="mt-1 text-sm text-neutral-600">Fits: {pkg.category_ids?.length ? pkg.category_ids.map(categoryName).join(", ") : "no category (hidden)"} · Fixed price up to ±{(pkg.max_power / 100).toFixed(2)}{pkg.prescription_required ? " · Prescription always required" : ""}</p>
                 </div>
                 <div className="flex items-center gap-2">
