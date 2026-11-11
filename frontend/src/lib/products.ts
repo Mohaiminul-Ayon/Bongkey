@@ -28,6 +28,8 @@ export type Product = {
   description?: string;
   imageUrl?: string;
   tryOnImageUrl?: string;
+  /** galleryUrls are extra photos shown after imageUrl on the product page, in order. */
+  galleryUrls?: string[];
   /** lowStockThreshold is the owner's alert level; 0 means no alert. */
   lowStockThreshold?: number;
   isFeatured?: boolean;

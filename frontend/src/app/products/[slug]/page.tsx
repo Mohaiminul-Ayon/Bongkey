@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
 import { LensPanel } from "@/components/LensPanel";
 import { ProductCard } from "@/components/ProductCard";
-import { ProductVisual } from "@/components/ProductVisual";
+import { ProductGallery } from "@/components/ProductGallery";
 import { TryOnModal } from "@/components/TryOnModal";
 import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
@@ -60,7 +60,7 @@ export default function ProductDetailsPage() {
       {showLenses ? <LensPanel slug={product.slug} productName={product.name} framePrice={variant.price}
         onAdd={(lens) => { addItem(variant, lens); setAdded("Added to your bag with lenses."); }} onClose={() => setShowLenses(false)} /> : null}
       <div className="product-layout">
-        <div className="product-gallery"><ProductVisual product={variant} /></div>
+        <div className="product-gallery"><ProductGallery key={variant.id} product={variant} /></div>
 
         <div className="product-info">
           <p className="kicker">{product.category}</p>

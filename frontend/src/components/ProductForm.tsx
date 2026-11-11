@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { assetUrl, adminRequest, adminUpload, fetchCategories, type Category } from "@/lib/api";
 import type { Product } from "@/lib/products";
 
+// The server allows the same number (catalog.MaxGalleryPhotos).
+const maxGalleryPhotos = 6;
+const imageAccept = ".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp";
+
 type ProductFormProps = {
   product?: Product;
 };
@@ -16,7 +20,8 @@ export function ProductForm({ product }: ProductFormProps) {
   const [error, setError] = useState("");
   const [imageUrl, setImageUrl] = useState(product?.imageUrl ?? "");
   const [tryOnImageUrl, setTryOnImageUrl] = useState(product?.tryOnImageUrl ?? "");
-  const [uploading, setUploading] = useState<"product" | "try-on" | "">("");
+  const [gallery, setGallery] = useState<string[]>(product?.galleryUrls ?? []);
+  const [uploading, setUploading] = useState<"product" | "try-on" | "gallery" | "">("");
   const [uploadMessage, setUploadMessage] = useState("");
 
   useEffect(() => {
@@ -26,7 +31,8 @@ export function ProductForm({ product }: ProductFormProps) {
   useEffect(() => {
     setImageUrl(product?.imageUrl ?? "");
     setTryOnImageUrl(product?.tryOnImageUrl ?? "");
-  }, [product?.imageUrl, product?.tryOnImageUrl]);
+    setGallery(product?.galleryUrls ?? []);
+  }, [product?.imageUrl, product?.tryOnImageUrl, product?.galleryUrls]);
 
   async function uploadImage(file: File | undefined, type: "product" | "try-on") {
     if (!file) return;
@@ -45,6 +51,30 @@ export function ProductForm({ product }: ProductFormProps) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not upload image");
+    } finally {
+      setUploading("");
+    }
+  }
+
+  // uploadGallery uploads the chosen extra photos one by one, keeping those that finished if a later one fails.
+  async function uploadGallery(files: File[]) {
+    if (files.length === 0) return;
+    const room = maxGalleryPhotos - gallery.length;
+    if (files.length > room) {
+      setError(`You can add ${room} more photo${room === 1 ? "" : "s"} (${maxGalleryPhotos} at most).`);
+      return;
+    }
+    setError("");
+    setUploadMessage("");
+    setUploading("gallery");
+    try {
+      for (const file of files) {
+        const result = await adminUpload("/api/admin/uploads/product-image", file);
+        setGallery((current) => [...current, result.url]);
+      }
+      setUploadMessage("Extra photos uploaded. Save the product to keep them.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not upload photo");
     } finally {
       setUploading("");
     }
@@ -81,6 +111,7 @@ export function ProductForm({ product }: ProductFormProps) {
       temple_length: formString(form, "temple_length"),
       image_url: imageUrl,
       try_on_image_url: tryOnImageUrl,
+      gallery_urls: gallery,
       is_featured: form.get("is_featured") === "on",
       is_active: form.get("is_active") === "on",
     };
@@ -140,6 +171,7 @@ export function ProductForm({ product }: ProductFormProps) {
           onUpload={(file) => uploadImage(file, "try-on")}
         />
       </div>
+      <GalleryEditor urls={gallery} uploading={uploading === "gallery"} onChange={setGallery} onUpload={(files) => void uploadGallery(files)} />
       <label className="grid gap-2 text-sm font-black">Description<textarea name="description" className="min-h-28 rounded-md border px-4 py-3 font-normal" defaultValue={product?.description} /></label>
       <div className="flex flex-wrap gap-5">
         <label className="font-bold"><input name="is_featured" type="checkbox" defaultChecked={product?.isFeatured} /> Featured</label>
@@ -147,6 +179,50 @@ export function ProductForm({ product }: ProductFormProps) {
       </div>
       <button className="rounded-md bg-neutral-950 px-5 py-3 font-black text-white" type="submit">Save Product</button>
     </form>
+  );
+}
+
+/** GalleryEditor lists a frame's extra photos with move and remove buttons; the first one shows right after the cover. */
+function GalleryEditor({ urls, uploading, onChange, onUpload }: {
+  urls: string[];
+  uploading: boolean;
+  onChange: (urls: string[]) => void;
+  onUpload: (files: File[]) => void;
+}) {
+  // move swaps a photo with its neighbour so the owner can set the display order.
+  function move(index: number, step: -1 | 1) {
+    const next = [...urls];
+    [next[index], next[index + step]] = [next[index + step], next[index]];
+    onChange(next);
+  }
+  const full = urls.length >= maxGalleryPhotos;
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-black/10 bg-neutral-50 p-4">
+      <div>
+        <p className="text-sm font-black text-neutral-950">More photos ({urls.length}/{maxGalleryPhotos})</p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-neutral-600">Side, angle, folded or on-face photos of this colour. Shown after the display image on the product page. Each colour has its own photos.</p>
+      </div>
+      {urls.length > 0 ? (
+        <ol className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+          {urls.map((url, index) => (
+            <li key={`${url}-${index}`} className="grid gap-1 rounded-md border border-neutral-200 bg-white p-2">
+              <img alt={`Extra photo ${index + 1}`} className="aspect-square w-full object-contain" src={assetUrl(url)} />
+              <div className="flex justify-between gap-1 text-sm font-black">
+                <button type="button" aria-label={`Move photo ${index + 1} left`} disabled={index === 0} onClick={() => move(index, -1)} className="rounded border px-2 disabled:opacity-30">←</button>
+                <button type="button" aria-label={`Remove photo ${index + 1}`} onClick={() => onChange(urls.filter((_, i) => i !== index))} className="rounded border px-2 text-red-700">×</button>
+                <button type="button" aria-label={`Move photo ${index + 1} right`} disabled={index === urls.length - 1} onClick={() => move(index, 1)} className="rounded border px-2 disabled:opacity-30">→</button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      <label htmlFor="gallery-upload" className={`rounded-md px-4 py-3 text-center text-sm font-black text-white ${uploading || full ? "bg-neutral-500" : "cursor-pointer bg-neutral-950"}`}>
+        {uploading ? "Uploading..." : full ? "6 photos added" : "Upload more photos"}
+        <input id="gallery-upload" className="hidden" type="file" multiple accept={imageAccept} disabled={uploading || full}
+          onChange={(event) => { onUpload(Array.from(event.target.files ?? [])); event.target.value = ""; }} />
+      </label>
+    </div>
   );
 }
 
@@ -184,7 +260,7 @@ function ImageUpload({
       </div>
       <label htmlFor={inputId} className={`cursor-pointer rounded-md px-4 py-3 text-center text-sm font-black text-white ${uploading ? "bg-neutral-500" : "bg-neutral-950"}`}>
         {uploading ? "Uploading..." : buttonLabel}
-        <input id={inputId} className="hidden" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" disabled={uploading} onChange={(event) => onUpload(event.target.files?.[0])} />
+        <input id={inputId} className="hidden" type="file" accept={imageAccept} disabled={uploading} onChange={(event) => onUpload(event.target.files?.[0])} />
       </label>
       <label className="grid gap-2 text-xs font-black text-neutral-700">
         Image URL

@@ -17,7 +17,7 @@ const productSelectSQL = `
 SELECT p.id, COALESCE(p.parent_product_id, 0), p.sku, COALESCE(p.category_id, 0), COALESCE(c.name, ''), p.name, p.slug, p.description,
 	p.price, p.old_price, p.brand_tier, p.frame_type, p.gender, p.material, p.color, p.size,
 	p.lens_width, p.bridge_width, p.temple_length, p.stock_quantity, p.image_url,
-	p.try_on_image_url, p.is_featured, p.is_active, p.low_stock_threshold,
+	p.try_on_image_url, p.gallery_urls, p.is_featured, p.is_active, p.low_stock_threshold,
 	(SELECT COUNT(*) FROM products o WHERE o.parent_product_id = p.id AND o.is_active) AS option_count
 FROM products p
 LEFT JOIN categories c ON c.id = p.category_id
@@ -125,11 +125,11 @@ func (r PostgresProductRepository) Save(ctx context.Context, id int, input Produ
 			INSERT INTO products (
 				category_id, name, slug, description, price, old_price, brand_tier, frame_type, gender,
 				material, color, size, lens_width, bridge_width, temple_length, stock_quantity,
-				image_url, try_on_image_url, is_featured, is_active, sku, low_stock_threshold
+				image_url, try_on_image_url, is_featured, is_active, sku, low_stock_threshold, gallery_urls
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,COALESCE(NULLIF($21,''), 'BK-' || UPPER(SUBSTR(REPLACE(gen_random_uuid()::text, '-', ''), 1, 12))),$22)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,COALESCE(NULLIF($21,''), 'BK-' || UPPER(SUBSTR(REPLACE(gen_random_uuid()::text, '-', ''), 1, 12))),$22,$23)
 			RETURNING id
-		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, input.SKU, input.LowStockThreshold).Scan(&id)
+		`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, input.SKU, input.LowStockThreshold, pq.Array(input.GalleryURLs)).Scan(&id)
 		if err != nil {
 			return models.Product{}, variantWriteError(err)
 		}
@@ -161,9 +161,9 @@ func (r PostgresProductRepository) update(ctx context.Context, id int, input Pro
 			brand_tier=$7, frame_type=$8, gender=$9, material=$10, color=$11, size=$12,
 			lens_width=$13, bridge_width=$14, temple_length=$15, stock_quantity=$16,
 			image_url=$17, try_on_image_url=$18, is_featured=$19, is_active=$20, sku=COALESCE(NULLIF($23,''),sku),
-			low_stock_threshold=$24, updated_at=NOW()
+			low_stock_threshold=$24, gallery_urls=$25, updated_at=NOW()
 		WHERE id=$21 AND stock_quantity=$22
-	`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, id, *input.ExpectedStockQuantity, input.SKU, input.LowStockThreshold)
+	`, input.CategoryID, input.Name, input.Slug, input.Description, input.Price, input.OldPrice, input.BrandTier, input.FrameType, input.Gender, input.Material, input.Color, input.Size, input.LensWidth, input.BridgeWidth, input.TempleLength, input.StockQuantity, input.ImageURL, input.TryOnImageURL, input.IsFeatured, input.IsActive, id, *input.ExpectedStockQuantity, input.SKU, input.LowStockThreshold, pq.Array(input.GalleryURLs))
 	if err != nil {
 		return variantWriteError(err)
 	}
@@ -204,7 +204,10 @@ type productScanner interface{ Scan(...any) error }
 // scanProduct keeps the read column mapping next to its SQL definition.
 func scanProduct(row productScanner) (models.Product, error) {
 	var product models.Product
-	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, &product.IsFeatured, &product.IsActive, &product.LowStockThreshold, &product.OptionCount)
+	err := row.Scan(&product.ID, &product.ParentProductID, &product.SKU, &product.CategoryID, &product.CategoryName, &product.Name, &product.Slug, &product.Description, &product.Price, &product.OldPrice, &product.BrandTier, &product.FrameType, &product.Gender, &product.Material, &product.Color, &product.Size, &product.LensWidth, &product.BridgeWidth, &product.TempleLength, &product.StockQuantity, &product.ImageURL, &product.TryOnImageURL, pq.Array(&product.GalleryURLs), &product.IsFeatured, &product.IsActive, &product.LowStockThreshold, &product.OptionCount)
+	if product.GalleryURLs == nil {
+		product.GalleryURLs = []string{} // JSON [] rather than null for products without extra photos
+	}
 	return product, err
 }
 
