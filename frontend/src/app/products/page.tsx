@@ -119,8 +119,8 @@ function Catalog() {
   return (
     <section className="catalog-page">
       <div className="catalog-intro">
-        <p className="eyebrow">Shop</p>
-        <h1>{current.title}</h1>
+        <p className="kicker">Shop</p>
+        <h1 className="display">{current.title}</h1>
         <p>Every frame lists its size, material and price up front. Pay cash when it arrives.</p>
       </div>
       <div className="catalog-toolbar">
