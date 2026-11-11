@@ -230,8 +230,7 @@ html[data-theme="dark"] {
 .catalog-filters { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin: 0 0 36px; }
 .price-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .price-filter label, .sort-select { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
-.price-filter input, .sort-select select { width: 140px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--foreground); font-size: 14px; letter-spacing: 0; text-transform: none; }
-.sort-select select { width: 200px; }
+.price-filter input { width: 140px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--foreground); font-size: 14px; letter-spacing: 0; text-transform: none; }
 .price-filter .filter-chip { min-height: 41px; background: transparent; color: var(--foreground); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
 .price-reset { padding: 9px 4px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
 .price-error { margin: -16px 0 24px; color: #ae3333; font-size: 14px; }
