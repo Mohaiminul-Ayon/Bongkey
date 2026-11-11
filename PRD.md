@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.41
+Version: 2.42
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -81,7 +81,7 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 
 ### 5.2 Checkout data and behavior
 
-- Required: customer name, email (not verified at checkout since 13.2), delivery phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice.
+- Required: customer name, delivery phone, district/area and detailed delivery address, selected items/options/quantities, and available payment choice. Email is optional since 2026-11-09 (LOOKUP-01): the phone is the customer's identity; a given email must be one plain address and is not verified.
 - Optional: alternate phone and delivery note. Prescription requirements depend on the selected lens option.
 - Show itemized frame/lens prices, discounts, delivery, grand total, advance due now, and amount due on delivery before submission.
 - Detect changed cart prices/availability and require the customer to review the updated checkout before submission.
@@ -730,4 +730,5 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-09 | 2.42 | LOOKUP-01: checkout email optional (phone is the identity); Track page "Email my order numbers" sends only order numbers and dates to that inbox, no code, one per email per 20 minutes and 5 requests per client per 15 minutes. The "Email confirmed" tick is not used for email access. |
 | 2026-11-09 | 2.41 | Home page redesign: full-width photo hero, serif display headings, one Featured / Eyeglasses / Sunglasses shelf, a product-photo story and corrected ordering steps (phone confirmation instead of the removed email code). Own design and Bongkey photos only. |

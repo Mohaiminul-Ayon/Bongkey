@@ -132,7 +132,7 @@ func (h CheckoutHandler) CreateOrder(c *gin.Context) {
 		case errors.Is(err, orders.ErrInvalidPhone):
 			c.JSON(http.StatusBadRequest, gin.H{"error": "enter a Bangladesh mobile number like 01712345678"})
 		case errors.Is(err, orders.ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "enter one email address like name@example.com"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "enter one email address like name@example.com, or leave it empty"})
 		case errors.Is(err, orders.ErrCheckoutLimited):
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many orders in a short time; please wait 15 minutes or message us on WhatsApp"})
 		case errors.Is(err, lens.ErrInvalidPrescription):

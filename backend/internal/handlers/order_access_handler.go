@@ -16,6 +16,33 @@ type OrderAccessHandler struct {
 	Service orders.AccessService
 	// SiteURL is printed on the order slip so the customer knows where to track the order.
 	SiteURL string
+	// Numbers emails a guest the order numbers placed with their email.
+	Numbers orders.OrderNumberService
+}
+
+// SendOrderNumbers emails the order numbers placed with an email. Found or not, the answer is the same 202,
+// so the form cannot be used to learn whether someone ordered with an email.
+func (h OrderAccessHandler) SendOrderNumbers(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
+	var req struct {
+		Email string `json:"email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter the email you ordered with"})
+		return
+	}
+	err := h.Numbers.SendOrderNumbers(c.Request.Context(), req.Email, c.ClientIP())
+	switch {
+	case errors.Is(err, orders.ErrTrackLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many requests; please wait 15 minutes"})
+	case errors.Is(err, orders.ErrInvalidEmail):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enter a valid email address"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not send the order numbers"})
+	default:
+		c.JSON(http.StatusAccepted, gin.H{"message": "If we have orders for this email, we have sent their order numbers to it."})
+	}
 }
 
 // GetInvoice downloads a snapshot PDF after order-scoped guest authorization.

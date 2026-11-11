@@ -199,6 +199,27 @@ func (s Service) PaymentReviewed(ctx context.Context, paymentID int) {
 	s.enqueue(ctx, Outgoing{Key: event("payment_reviewed", paymentID), To: order.CustomerEmail, Subject: subject, Text: text})
 }
 
+// orderNumbersWindow lets one email receive at most one reminder per window (three an hour), so repeated
+// requests cannot flood an inbox.
+const orderNumbersWindow = 20 * time.Minute
+
+// OrderNumbers queues the "your order numbers" reminder for a guest who lost them. It lists only numbers and
+// dates because the checkout email was never verified and may belong to someone else. emailKey is an HMAC of
+// the address, so the queue key and logs never contain the email itself.
+func (s Service) OrderNumbers(ctx context.Context, to, emailKey string, list []orders.EmailedOrder) {
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	var b strings.Builder
+	b.WriteString("Hello,\n\nYou asked for the order numbers placed with this email at Bongkey:\n\n")
+	for _, order := range list {
+		fmt.Fprintf(&b, "- %s, placed %s\n", order.OrderNumber, order.PlacedAt.In(dhaka).Format("2 Jan 2006"))
+	}
+	fmt.Fprintf(&b, "\nTrack an order at %s/track with its order number and the phone number you ordered with.\n\nIf you did not ask for this, you can ignore this email.\n\nBongkey", s.SiteURL)
+	window := time.Now().Truncate(orderNumbersWindow).Unix()
+	key := fmt.Sprintf("order_numbers:%s:%d", emailKey[:24], window)
+	s.enqueue(ctx, Outgoing{Key: key, To: to, Subject: "Your Bongkey order numbers", Text: b.String()})
+}
+
 // order loads one order for an email; a failure is logged by event and ID only.
 func (s Service) order(ctx context.Context, orderID int, kind string) (orders.AdminDetail, bool) {
 	order, err := s.Orders.Admin(ctx, strconv.Itoa(orderID))

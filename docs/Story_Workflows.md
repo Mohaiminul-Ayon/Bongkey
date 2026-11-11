@@ -529,7 +529,7 @@ Orders that were already shipped before the migration get `shipped_at` from thei
    - normalizes the phone with `NormalizeMobile` ([phone.go](../backend/internal/orders/phone.go), now shared with payments) and refuses anything that is not `01[3-9]` plus 8 digits (`ErrInvalidPhone`, 400);
    - marks the email verified only if an old client sent a matching proof;
    - counts the order in [limit](../backend/internal/orders/checkout.go:461): at most 5 per phone and 10 per client in 15 minutes, otherwise `ErrCheckoutLimited` and 429. The keys are HMACs, so no phone or IP is stored.
-4. Inside the transaction, after the retry lookup (so old accepted retries keep their receipt), the email must be one plain address ([line 274](../backend/internal/orders/checkout.go:274), `ErrInvalidEmail`, 400).
+4. Inside the transaction, after the retry lookup (so old accepted retries keep their receipt), a given email must be one plain address ([line 279](../backend/internal/orders/checkout.go:279), `ErrInvalidEmail`, 400). Since LOOKUP-01 the email is optional.
 5. [PhoneHistory](../backend/internal/orders/checkout_repository.go:146) reads earlier orders with the same last 11 digits **before** the insert: how many were placed today (Bangladesh time) and whether a different name was used in the last 30 days.
 6. [riskFlags](../backend/internal/orders/risk.go:43) can set: `disposable_email`, `short_address` (fewer than 10 letters or a single word), `odd_name`, `repeat_phone` (2 earlier orders today), `phone_other_name`, `high_value_cod` (৳10,000 or more cash on delivery) and `fast_submit`. Bangla vowel signs count as letters. `FlagOrder` saves them in the same transaction.
 7. The admin list and the order page show them in red through [RiskFlags](../frontend/src/components/RiskFlags.tsx).
@@ -544,7 +544,7 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - A guest invoice before confirmation: 409 with a pointer to the slip.
 
 **Limits:**
-- After #83 merges, email-code access to the private order page should also accept an order whose email staff ticked as confirmed (`EmailVerified || EmailConfirmed` in `guestRecord`). Until then, an unverified order opened on another device must use the Track page.
+- Dropped 2026-11-09 (LOOKUP-01): counting the "Email confirmed" tick for email access. A guest on another device uses the Track page, the emailed order numbers, or a call.
 - The fill time is sent by the browser, so a careful bot can fake it. The phone limit and the confirmation call remain the real protection.
 - The throwaway-domain list is short (`shortcut:` in risk.go).
 - Phone history scans without an index (`shortcut:`).
@@ -563,6 +563,42 @@ Orders that were already shipped before the migration get `shipped_at` from thei
   - `TestRenderSlip`.
 - Local HTTP: the bot case gave 200 and saved nothing; the honeypot gave 400; a bad phone gave 400; orders without a code were accepted with the phone saved as `01712000004`; the slip PDF downloaded; the invoice gave 409; the flags were saved (`short_address odd_name phone_other_name fast_submit`).
 - Browser: the checkout has no email-code step and the honeypot is off-screen; a browser order reached its order page, which showed **Download order slip** and no invoice button.
+## LOOKUP-01 — Optional checkout email and emailed order numbers
+
+**Status:** Built 2026-11-09 on `feat/optional-email-lookup`.
+
+**Owner decisions (2026-11-09):**
+- The phone is the customer's identity. A guest may order with no email or a wrong one; staff confirm every order by phone.
+- A guest who lost the order number either calls (staff search the admin Orders list by phone) or, if they gave an email, asks the Track page to email the order numbers to it.
+- No email code for this: the numbers go only to that inbox, so only its owner can read them.
+- The "Email confirmed" tick is **not** used for email access (the #84 follow-up in GUEST-01 is dropped).
+
+**Checkout change:** [CheckoutService.Place](../backend/internal/orders/checkout.go:279) refuses an email only when one is given and it is not one plain address. An empty email saves `''`; every order email already skips an empty address, and the admin order page shows "No email recorded". The [checkout page](../frontend/src/app/checkout/page.tsx) labels the field "Email (optional)".
+
+**Request:** `POST /api/track/order-numbers` `{"email":"rahim@example.com"}`.
+
+1. The [Track page](../frontend/src/app/track/page.tsx) form `EmailOrderNumbersForm` calls `sendOrderNumbers` in [api.ts](../frontend/src/lib/api.ts). The email travels in the body, never in the URL.
+2. The route is public, with no middleware beyond the global ones ([routes.go:122](../backend/internal/routes/routes.go:122)).
+3. [OrderAccessHandler.SendOrderNumbers](../backend/internal/handlers/order_access_handler.go:25) caps the body at 1 KB, binds the JSON and passes `c.ClientIP()`.
+4. [OrderNumberService.SendOrderNumbers](../backend/internal/orders/order_numbers.go:47):
+   - fails closed without a limiter;
+   - counts the client in the shared limiter table with its own `order-numbers-ip` HMAC key: 5 requests per 15 minutes, then `ErrTrackLimited` (429);
+   - lower-cases and trims the email and refuses a non-plain address (`ErrInvalidEmail`, 400);
+   - reads up to 10 newest orders with [PostgresReader.OrdersByEmail](../backend/internal/orders/order_numbers.go:71) (`LOWER(TRIM(customer_email))`, parameterized);
+   - with no orders, returns nil, so the caller gives the same answer;
+   - otherwise calls the notifier with the address and an HMAC of it.
+5. [notifications.Service.OrderNumbers](../backend/internal/notifications/notifications.go:209) writes only order numbers and dates (Bangladesh time) plus the Track link, and queues it with key `order_numbers:<first 24 hex of the HMAC>:<20-minute window>`. The unique key means one email per address per 20 minutes (three an hour), and neither the key nor the logs contain the address. The worker sends it later like every other email.
+6. The handler answers **202** "If we have orders for this email, we have sent their order numbers to it." whether or not orders exist.
+
+**Failure paths:** a malformed email gets 400; the sixth request from one client in 15 minutes gets 429 before any lookup; a database error gets 500 "could not send the order numbers"; a queue failure is logged by key only and the customer still sees 202.
+
+**Limits:** emails go out only after Brevo is set up; until then they wait in the queue. Someone who typed a stranger's email at checkout lets that stranger receive the order number and date, but never the address or phone.
+
+**Evidence:**
+- Unit: `TestSendOrderNumbers` (normalized email, HMAC key, no send for unknown email, bad emails, client limit, missing limiter), `TestOrderNumbersEmail` (text, key without the address, one per window), `TestSendOrderNumbersHTTP` (same 202 for known and unknown, 400, 429), `TestCheckoutEmailWithoutCode` (now includes "no email").
+- Local PostgreSQL: `TestOptionalEmailAndOrderNumbersPostgres` saves an order with no email and finds a mixed-case email's order.
+- Browser: the Track page form showed the neutral 202 message for an email with no orders.
+
 ## GOOGLE-01 — Customer Google sign-in and order linking (#79)
 
 **Status:** Built 2026-11-07 on `feat/customer-google-signin`. It is off until the owner creates a Google OAuth client and sets `GOOGLE_CLIENT_ID` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID`. Guest checkout is unchanged.
