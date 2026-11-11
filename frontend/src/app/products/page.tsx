@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/ProductCard";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { fetchProducts, type CatalogFilter } from "@/lib/api";
 import { formatPrice, type Product } from "@/lib/products";
 
@@ -34,6 +35,10 @@ function wholeTaka(value: string | null) {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
+// The slider moves in ৳100 steps and its top end is the dearest frame rounded up to the next ৳500.
+const priceStep = 100;
+const roundUp = (value: number) => Math.max(500, Math.ceil(value / 500) * 500);
+
 /** ProductsPage waits for the URL's filters before rendering the catalog. */
 export default function ProductsPage() {
   return <Suspense fallback={<section className="catalog-page" />}><Catalog /></Suspense>;
@@ -52,15 +57,18 @@ function Catalog() {
 
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState("");
-  const [priceError, setPriceError] = useState("");
-  const [minInput, setMinInput] = useState(minPrice ? String(minPrice) : "");
-  const [maxInput, setMaxInput] = useState(maxPrice ? String(maxPrice) : "");
+  // topPrice is the dearest frame in the whole catalog, read once, so the slider's scale does not shrink as it filters.
+  const [topPrice, setTopPrice] = useState<number | null>(null);
+  const ceiling = roundUp(Math.max(topPrice ?? 0, maxPrice ?? 0));
+  // The handles' positions while dragging; the URL (and the list) changes only when a handle is let go.
+  const [range, setRange] = useState<[number, number]>([minPrice ?? 0, maxPrice ?? ceiling]);
 
-  // Keep the inputs in step when the URL changes from outside the form (header links, back button).
   useEffect(() => {
-    setMinInput(minPrice ? String(minPrice) : "");
-    setMaxInput(maxPrice ? String(maxPrice) : "");
-  }, [minPrice, maxPrice]);
+    fetchProducts().then((items) => setTopPrice(Math.max(0, ...items.map((item) => item.price)))).catch(() => setTopPrice(0));
+  }, []);
+
+  // Keep the handles in step when the URL changes from outside the slider (header links, back button, reset).
+  useEffect(() => { setRange([minPrice ?? 0, maxPrice ?? ceiling]); }, [minPrice, maxPrice, ceiling]);
 
   useEffect(() => {
     let active = true;
@@ -83,28 +91,13 @@ function Catalog() {
     router.push(query ? `/products?${query}` : "/products", { scroll: false });
   }
 
-  /** applyPrice checks the range in the browser first so the shopper gets a clear message instead of a failed request. */
-  function applyPrice(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const min = minInput.trim() === "" ? 0 : Number(minInput);
-    const max = maxInput.trim() === "" ? 0 : Number(maxInput);
-    if (![min, max].every((value) => Number.isSafeInteger(value) && value >= 0)) {
-      setPriceError("Enter whole taka amounts of 0 or more.");
-      return;
-    }
-    if (max > 0 && min > max) {
-      setPriceError("Minimum price can't be more than the maximum.");
-      return;
-    }
-    setPriceError("");
-    go({ min: min ? String(min) : undefined, max: max ? String(max) : undefined });
+  /** applyPrice filters by the released handles; a handle at either end means no limit on that side. */
+  function applyPrice([low, high]: number[]) {
+    go({ min: low > 0 ? String(low) : undefined, max: high < ceiling ? String(high) : undefined });
   }
 
   /** resetFilters clears price and sort but keeps the chosen frame type. */
   function resetFilters() {
-    setMinInput("");
-    setMaxInput("");
-    setPriceError("");
     go({ min: undefined, max: undefined, sort: undefined });
   }
 
@@ -135,12 +128,17 @@ function Catalog() {
       </div>
 
       <div className="catalog-filters">
-        <form aria-label="Price range" className="price-filter" onSubmit={applyPrice} noValidate>
-          <label>Min price (৳)<input inputMode="numeric" min="0" name="min" placeholder="0" step="1" type="number" value={minInput} onChange={(event) => setMinInput(event.target.value)} /></label>
-          <label>Max price (৳)<input inputMode="numeric" min="0" name="max" placeholder="Any" step="1" type="number" value={maxInput} onChange={(event) => setMaxInput(event.target.value)} /></label>
-          <button className="filter-chip" type="submit">Apply</button>
-          {filtered ? <button className="price-reset" type="button" onClick={resetFilters}>Reset</button> : null}
-        </form>
+        <div role="group" aria-labelledby="price-range-label" className="price-filter">
+          <div className="price-filter-head">
+            <span id="price-range-label">Price</span>
+            <output aria-live="polite">{formatPrice(range[0])} – {formatPrice(range[1])}</output>
+          </div>
+          {topPrice === null ? <div className="h-5" aria-hidden="true" /> : (
+            <Slider min={0} max={ceiling} step={priceStep} minStepsBetweenThumbs={1} value={range} thumbLabels={["Minimum price", "Maximum price"]}
+              onValueChange={(value) => setRange([value[0], value[1]])} onValueCommit={applyPrice} />
+          )}
+          {filtered ? <button className="price-reset" type="button" onClick={resetFilters}>Reset filters</button> : null}
+        </div>
         <div className="sort-select">
           <span aria-hidden="true">Sort by</span>
           <Select value={sort ?? "newest"} onValueChange={(value) => go({ sort: value === "newest" ? undefined : value })}>
@@ -153,7 +151,6 @@ function Catalog() {
           </Select>
         </div>
       </div>
-      {priceError ? <p role="alert" className="price-error">{priceError}</p> : null}
 
       {error ? <p role="alert" className="empty-note">{error}</p> : null}
       {!error && shown.length === 0 && (products.length > 0 || filtered) ? (
