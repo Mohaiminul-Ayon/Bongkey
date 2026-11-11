@@ -133,50 +133,15 @@ func (h PaymentHandler) RejectPayment(c *gin.Context) {
 	respondPaymentReview(c, h.Service.Reject(c.Request.Context(), paymentID, c.GetInt64("admin_id"), req.Reason))
 }
 
-// PaymentOptions tells the checkout page which online payments it may offer and the advance rules it uses
-// to preview the amount due now; it never returns the receiving number. The server recomputes the amount.
+// PaymentOptions tells the checkout page whether it may offer bKash; it never returns the receiving number.
+// The advance rule is fixed, so the page previews it itself and the server computes the real amount.
 func (h PaymentHandler) PaymentOptions(c *gin.Context) {
 	enabled, err := h.Service.Enabled(c.Request.Context(), payments.MethodBkash)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load payment options"})
 		return
 	}
-	policies, err := h.Service.Policies(c.Request.Context())
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not load payment options"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"bkash": enabled, "policies": policies})
-}
-
-// AdvancePolicies returns both advance rules for the owner's settings page.
-func (h PaymentHandler) AdvancePolicies(c *gin.Context) {
-	c.Header("Cache-Control", "no-store")
-	policies, err := h.Service.Policies(c.Request.Context())
-	if err != nil {
-		respondPayment(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, policies)
-}
-
-// SaveAdvancePolicy changes the rule for future frame or lens orders.
-func (h PaymentHandler) SaveAdvancePolicy(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<10)
-	var req struct {
-		Mode  string `json:"mode"`
-		Value int    `json:"value"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid advance rule"})
-		return
-	}
-	err := h.Service.SavePolicy(c.Request.Context(), payments.Policy{Kind: c.Param("kind"), Mode: req.Mode, Value: req.Value})
-	if errors.Is(err, payments.ErrInvalidPayment) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid advance rule: lens orders need full, a percent (1-100) or a fixed amount; frame orders need none, the delivery fee, a percent or a fixed amount"})
-		return
-	}
-	respondPaymentReview(c, err)
+	c.JSON(http.StatusOK, gin.H{"bkash": enabled})
 }
 
 // PaymentMethod returns one method's settings for the owner.
@@ -220,7 +185,7 @@ func respondPaymentReview(c *gin.Context, err error) {
 func respondPayment(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, payments.ErrInvalidPayment):
-		c.JSON(http.StatusBadRequest, gin.H{"error": "check the transaction ID, the bKash number (01XXXXXXXXX) and the amount"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "check the transaction ID, the bKash number (01XXXXXXXXX) and that the amount is exactly what is due"})
 	case errors.Is(err, payments.ErrNotFound), errors.Is(err, orders.ErrNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 	case errors.Is(err, payments.ErrPriceNotFinal):
@@ -229,6 +194,8 @@ func respondPayment(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"error": "this order is not waiting for a payment"})
 	case errors.Is(err, payments.ErrMethodOff):
 		c.JSON(http.StatusConflict, gin.H{"error": "bKash payment is not available right now"})
+	case errors.Is(err, payments.ErrPaymentPending):
+		c.JSON(http.StatusConflict, gin.H{"error": "we are still checking your last payment; please wait for it"})
 	case errors.Is(err, payments.ErrTooManyPayments):
 		c.JSON(http.StatusConflict, gin.H{"error": "too many payments on this order; please contact us"})
 	case errors.Is(err, payments.ErrOverpaid):

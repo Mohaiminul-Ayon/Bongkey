@@ -133,25 +133,20 @@ func TestSettles(t *testing.T) {
 	}
 }
 
-// TestValidPolicy accepts only rules the database allows and refuses cash on delivery for lenses.
-func TestValidPolicy(t *testing.T) {
-	for p, want := range map[Policy]bool{
-		{Kind: "lens", Mode: "full"}:                     true,
-		{Kind: "lens", Mode: "percent", Value: 50}:       true,
-		{Kind: "lens", Mode: "fixed", Value: 1000}:       true,
-		{Kind: "lens", Mode: "none"}:                     false,
-		{Kind: "lens", Mode: "delivery_fee"}:             false,
-		{Kind: "lens", Mode: "percent", Value: 0}:        false,
-		{Kind: "lens", Mode: "percent", Value: 101}:      false,
-		{Kind: "frame", Mode: "delivery_fee"}:            true,
-		{Kind: "frame", Mode: "none"}:                    true,
-		{Kind: "frame", Mode: "full"}:                    false,
-		{Kind: "frame", Mode: "fixed", Value: 0}:         false,
-		{Kind: "frame", Mode: "delivery_fee", Value: 80}: false,
-		{Kind: "both", Mode: "full"}:                     false,
+// TestAmountDue asks for the whole rest of the advance first, then the whole remaining balance.
+func TestAmountDue(t *testing.T) {
+	for name, tc := range map[string]struct {
+		state OrderState
+		want  int
+	}{
+		"full advance, nothing paid":       {OrderState{Total: 5000, Required: 5000}, 5000},
+		"delivery charge first":            {OrderState{Total: 5000, Required: 80}, 80},
+		"old part advance, part paid":      {OrderState{Total: 5000, Required: 2500, Paid: 1000}, 1500},
+		"advance paid, rest optional":      {OrderState{Total: 5000, Required: 80, Paid: 80}, 4920},
+		"cash on delivery without advance": {OrderState{Total: 5000}, 5000},
 	} {
-		if validPolicy(p) != want {
-			t.Fatalf("%+v: valid = %v", p, !want)
+		if got := amountDue(tc.state); got != tc.want {
+			t.Fatalf("%s: %d, want %d", name, got, tc.want)
 		}
 	}
 }

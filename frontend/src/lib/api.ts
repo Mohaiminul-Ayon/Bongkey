@@ -316,22 +316,9 @@ export async function fetchCategories() {
 /** fetchDeliverySettings keeps the cart estimate aligned with the server setting. */
 export type AdvanceMode = "none" | "delivery_fee" | "percent" | "fixed" | "full";
 
-/** AdvancePolicy is the owner's rule for frame-only or lens orders; value is a percent or a taka amount. */
-export type AdvancePolicy = { kind: "frame" | "lens"; mode: AdvanceMode; value: number };
-
-/** fetchPaymentOptions tells checkout whether bKash can be offered and the rules to preview the amount due now. */
+/** fetchPaymentOptions tells checkout whether bKash can be offered. */
 export async function fetchPaymentOptions() {
-  return request<{ bkash: boolean; policies: AdvancePolicy[] }>("/api/payment-options", { cache: "no-store" });
-}
-
-/** fetchAdvancePolicies reads both advance rules for the owner. */
-export async function fetchAdvancePolicies() {
-  return adminRequest<AdvancePolicy[]>("/api/admin/advance-policies");
-}
-
-/** saveAdvancePolicy changes one rule for future orders. */
-export async function saveAdvancePolicy(policy: AdvancePolicy) {
-  return adminRequest(`/api/admin/advance-policies/${policy.kind}`, { method: "PUT", body: JSON.stringify({ mode: policy.mode, value: policy.value }) });
+  return request<{ bkash: boolean }>("/api/payment-options", { cache: "no-store" });
 }
 
 export async function fetchDeliverySettings() {
