@@ -228,12 +228,12 @@ html[data-theme="dark"] {
 .filter-chips .filter-chip[aria-current="page"] { border-color: var(--foreground); color: var(--foreground); font-weight: 600; }
 .catalog-count { color: var(--muted); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
 .catalog-filters { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin: 0 0 36px; }
-.price-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
-.price-filter label, .sort-select { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
-.price-filter input { width: 140px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--foreground); font-size: 14px; letter-spacing: 0; text-transform: none; }
-.price-filter .filter-chip { min-height: 41px; background: transparent; color: var(--foreground); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
-.price-reset { padding: 9px 4px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
-.price-error { margin: -16px 0 24px; color: #ae3333; font-size: 14px; }
+/* The price slider takes the width a pair of boxes used to; the range it shows sits above the track. */
+.price-filter { display: grid; gap: 14px; width: min(100%, 340px); }
+.price-filter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.price-filter-head span, .sort-select { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
+.price-filter-head output { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.price-reset { justify-self: start; padding: 0; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
 
 /* Product details */
 .product-page { max-width: 1320px; margin: auto; padding: 48px 32px 96px; }
