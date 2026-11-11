@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.43
+Version: 2.44
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -730,6 +730,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-11 | 2.44 | Subtle motion: slow hero zoom with staggered headline, scroll reveal of cards and sections (browser scroll timeline, static elsewhere), tab fade, heart pop and "Added" tick. Off for reduced-motion visitors. |
 | 2026-11-11 | 2.43 | Shop and product pages restyled to match the home page: serif titles, underline type tabs, squared uppercase actions and filters, thin lens option cards with only the chosen one outlined. No behaviour change. |
 | 2026-11-09 | 2.42 | LOOKUP-01: checkout email optional (phone is the identity); Track page "Email my order numbers" sends only order numbers and dates to that inbox, no code, one per email per 20 minutes and 5 requests per client per 15 minutes. The "Email confirmed" tick is not used for email access. |
 | 2026-11-09 | 2.41 | Home page redesign: full-width photo hero, serif display headings, one Featured / Eyeglasses / Sunglasses shelf, a product-photo story and corrected ordering steps (phone confirmation instead of the removed email code). Own design and Bongkey photos only. |
