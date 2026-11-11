@@ -286,6 +286,65 @@ export async function openPrescription(orderId: number, itemId: number) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/** ReturnKind is what the customer needs: an exchange (3 days), or a defect / wrong item (15 days). */
+export type ReturnKind = "exchange" | "defect" | "wrong_item";
+
+/** ReturnTicket is one return or exchange request as staff see it. */
+export type ReturnTicket = {
+  id: number; order_id: number; order_number: string; customer_name: string; customer_phone: string;
+  order_total: number; delivery_fee: number; kind: ReturnKind; message: string; photo_count: number;
+  status: "open" | "in_progress" | "closed"; outcome: "" | "exchanged" | "replaced" | "refunded" | "declined"; staff_note: string;
+  refund_amount: number | null; refund_method: "" | "bkash" | "cash"; refund_reference: string; refunded_at: string | null;
+  created_at: string; closed_at: string | null; refund_due: string | null; overdue: boolean;
+};
+
+/** sendForm posts a multipart form; the browser sets the boundary, so no Content-Type header here. */
+async function sendForm<T>(path: string, body: FormData, headers: Record<string, string> = {}) {
+  const response = await fetch(`${API_URL}${path}`, { method: "POST", headers, body, cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw requestError(response, data, "Request failed");
+  return data as T;
+}
+
+/** requestReturn opens a return or exchange request from the private order page (kind, message, photos). */
+export async function requestReturn(orderId: string, token: string, body: FormData) {
+  return sendForm<{ id: number }>(`/api/orders/${encodeURIComponent(orderId)}/returns`, body, { Authorization: `Bearer ${token}` });
+}
+
+/** requestReturnFromTrack opens a request from the Track page; the form also carries order_number and phone. */
+export async function requestReturnFromTrack(body: FormData) {
+  return sendForm<{ id: number }>("/api/track/returns", body);
+}
+
+/** fetchReturns lists return requests for staff; status "" means all. */
+export async function fetchReturns(status: "" | ReturnTicket["status"]) {
+  return adminRequest<ReturnTicket[]>(`/api/admin/returns${status ? `?status=${status}` : ""}`);
+}
+
+/** updateReturn moves a request along or closes it as exchanged, replaced or declined. */
+export async function updateReturn(id: number, change: { status: ReturnTicket["status"]; outcome: ReturnTicket["outcome"]; note: string }) {
+  return adminRequest(`/api/admin/returns/${id}`, { method: "PATCH", body: JSON.stringify(change) });
+}
+
+/** recordReturnRefund records money actually sent back and closes the request as refunded. */
+export async function recordReturnRefund(id: number, refund: { amount: number; method: "bkash" | "cash"; reference: string; paid_on: string; note: string }) {
+  return adminRequest(`/api/admin/returns/${id}/refund`, { method: "POST", body: JSON.stringify(refund) });
+}
+
+/** openReturnPhoto shows one private request photo in a new tab without putting the admin token in a URL. */
+export async function openReturnPhoto(id: number, index: number) {
+  const viewer = window.open("", "_blank");
+  const response = await fetch(`${API_URL}/api/admin/returns/${id}/photos/${index}`, { headers: { Authorization: `Bearer ${getAdminToken()}` }, cache: "no-store" });
+  if (!response.ok) {
+    viewer?.close();
+    throw new Error("Could not open the photo.");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  if (viewer) viewer.location.href = url;
+  else window.location.href = url;
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
 /** CatalogFilter mirrors the backend's optional price range and sort query values. */
 export type CatalogFilter = { minPrice?: number; maxPrice?: number; sort?: "price_asc" | "price_desc" };
 

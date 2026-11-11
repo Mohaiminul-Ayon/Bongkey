@@ -38,8 +38,10 @@ type Config struct {
 	ProjectRoot     string
 	// PrescriptionDir is the private folder for prescription files; it is never served as static files.
 	PrescriptionDir string
-	EnvFile         string
-	EnvFileHint     string
+	// ReturnPhotoDir is the private folder for photos attached to return requests; never served as static files.
+	ReturnPhotoDir string
+	EnvFile        string
+	EnvFileHint    string
 }
 
 func Load() (Config, error) {
@@ -74,6 +76,7 @@ func Load() (Config, error) {
 		FrontendOrigins:  strings.Split(getEnv("FRONTEND_ORIGIN", "http://localhost:3000"), ","),
 		ProjectRoot:      projectRoot,
 		PrescriptionDir:  filepath.Join(projectRoot, "backend", "private", "prescriptions"),
+		ReturnPhotoDir:   filepath.Join(projectRoot, "backend", "private", "return-photos"),
 		EnvFile:          loadedEnvFile,
 		EnvFileHint:      envFileHint,
 	}

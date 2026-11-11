@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.48
+Version: 2.49
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -168,12 +168,14 @@ The repository README describes an existing Go/Gin backend, Next.js/TypeScript f
 
 ### 10.1 Confirmed default policy
 
-- Lens-equipped custom glasses are not eligible for ordinary returns/exchanges after manufacture.
-- Frame-only customers may request return/refund or replacement within 15 days of receiving the product.
-- For eligible approved refunds, money must be returned no later than 15 days after the refund request was submitted, not 15 days after approval.
-- Return delivery charge is borne by the customer under the ordinary policy. Admin configures the amount and whether collected separately or deducted from the refund.
-- Admin can configure eligibility, request window, refund deadline, charges, and whether returns/exchanges/refunds are offered. Snapshot the policy accepted at checkout.
-- Wrong/damaged items have a separate complaint review path rather than automatic rejection under the ordinary no-return rule.
+Confirmed by the owner on 2026-11-12 and fixed in code for the pilot (no admin settings yet). Shown on `/return-policy`, linked from the footer, account, checkout and the bKash box.
+
+- A customer checks the parcel with the delivery person; a problem found then is handed back at once for free (with the courier, not on the site).
+- Change of mind: exchange the frame for another within 3 days of delivery. Same price costs nothing more; a pricier frame means the customer pays the difference. No refund for a change of mind.
+- Defect, colour problem or wrong item: within 15 days of delivery; replaced, or refunded if it cannot be replaced. Refunds only for these problems, paid within 15 days of the request (not of approval).
+- Lenses are made to order and are not refunded or exchanged. A returned frame's refund loses the lens price, and a new lens for an exchanged frame is paid again.
+- After the delivery person leaves, the customer pays the courier charge for sending it back; the original delivery charge is not refunded.
+- Requests are tickets: staff call or chat and agree a solution. One open ticket per order.
 
 ### 10.2 Workflow and accounting
 
@@ -510,6 +512,7 @@ Owner for all rows: business owner/developer with AI assistance. `FIX-01`–`FIX
 | IDEMP-01 | Critical / REQ-08 | A repeated checkout with the same idempotency key and payload returns the original receipt; it never creates a second order/invoice or decrements stock twice; reusing the key with a different payload is rejected safely | Done 2026-10-18: local PostgreSQL concurrent retries left one order/invoice and one stock reservation; restarted HTTP returned the same receipt on replay and 409 on changed payload; QA fixtures removed |
 | EMAIL-01 | High / REQ-05,08 | Required verified email at guest checkout and email OTP recovery of private order/invoice summary; PDF remains a separate story | Done 2026-10-20: real Gmail checkout/recovery, reload, tokenless denial, matching-email proof, abuse/single-use checks, provider-failure redaction, and the full supported race suite passed. Both exact browser fixtures were removed; order 20 stock was restored and fixture 21 had no stock item. The earlier one-off 503 was not reproduced and is covered by safe stage diagnostics; PDF remains separate work |
 | LENS-01 | High / REQ-03,04,07,08 | Admin lens types (fixed price, max power, categories); shopper picks frame only, a lens type with/without power, or a described custom lens; server prices lines; "with power" needs a private prescription; lens orders are advance-only; owner reviews file, price and advance before confirmation; files deleted 180 days after delivery/cancellation | Merged 2026-11-05 as PR #70 (closes #14, #15, #16): Go unit/handler tests, local PostgreSQL lifecycle (attach WhatsApp file, note, retention), CI, frontend type check, local API attack pass and browser checks of picker, bag, checkout cards and custom request. Owner real lens order with email code and real lens prices remain. Supersedes the FRAME-01 frame-only guard |
+| RETURN-01 | High / REQ-09 | After delivery the customer opens a ticket (exchange within 3 days; defect, wrong colour or wrong item within 15 days) with a description and up to 3 private photos, from the order page or Track page; one open ticket per order; staff close it as exchanged, replaced, declined or refunded; a refund (problems only, up to the order total) records amount, method, TrxID and date, due within 15 days of the request with an overdue flag; owner email per ticket; audit log | Built 2026-11-12 (#22, #23): Go unit tests with a fixed clock, email and route tests, local PostgreSQL ticket lifecycle, browser request with a photo on a temporary order (deleted). Admin page with the owner's login and the policy wording review pending |
 | CALLBACK-01 | High / REQ-03,04 | Customized lens from the lens panel is a call-back request (name, Bangladesh mobile, needs, frame), rate limited per phone and client, saved for staff with an owner email; Admin → Call-backs lists them with call / WhatsApp / mark done; nothing is ordered until staff and customer agree | Built 2026-11-11: Go unit, email and route tests, local PostgreSQL table checks, browser request from the panel (QA row deleted). Owner inbox test pending |
 | PAY-01 | High / REQ-07,08 | Frame-only orders choose cash on delivery or bKash now; lens orders always pay an advance (never COD). The customer sends money by bKash Send Money to the owner's number set in admin, then reports TrxID, sender and amount; owner approves (order becomes advance received) or rejects with a reason; SSLCOMMERZ in phase 2 | Built 2026-11-05 (#18): Go unit/route tests, local PostgreSQL lifecycle (concurrent duplicate, open price, exact one-transfer amounts since 2026-11-11, reject and resend), HTTP attack checks and a browser check of the customer box. Owner must enter the real bKash number and approve one real payment |
 | ADV-01 | High / REQ-07,08 | Fixed rule (since 2026-11-11, no owner settings): orders with any lens pay the full total first; frame-only cash on delivery pays the delivery charge first (nothing while bKash is off); each order saves its rule, required advance and paid amount; each bKash payment is one transfer of the exact amount due; confirmation waits for the advance; invoice shows paid, balance and due | Built 2026-11-05 (#19); fixed rule and one-transfer check 2026-11-11: Go unit tests and local PostgreSQL lens full advance with price change, exact-amount, part-payment and pending-transfer checks. Browser checkout preview, order page and invoice PDF checked 2026-11-05. No real order yet |
@@ -731,6 +734,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-12 | 2.49 | RETURN-01: return and exchange requests as tickets. Change of mind is a frame exchange within 3 days of delivery; a defect, wrong colour or wrong item within 15 days (replace, or refund if not possible, within 15 days of the request). Lenses not refunded; a frame refund loses the lens price and the courier charge. Customers ask from the order page or the Track page with photos; staff work them in Admin → Returns with deadlines and overdue alerts, and refunds are recorded with their real payment details. Policy page linked from footer, account, checkout and the bKash box. Migration 025. |
 | 2026-11-12 | 2.48 | Catalog price filter becomes a two-handle slider (৳0 to the dearest frame on the site, ৳100 steps) that filters when a handle is released; the number boxes and Apply button are gone. |
 | 2026-11-11 | 2.47 | Lens panel v2 and CALLBACK-01: the product page defaults to frame only (Add to bag + With lenses); the prescription can be uploaded inside the panel; a customized lens becomes a call-back request (name, mobile, needs) that staff see in Admin → Call-backs and get by email, with a WhatsApp option. Migration 024. |
 | 2026-11-11 | 2.46 | Owner rule: no part payments. Orders with lenses always pay the full total first; frame-only cash on delivery pays the delivery charge first. The admin advance-rule settings are removed (rule fixed in code). Every bKash payment must be one transfer of the exact amount due, and only one may wait for review. |

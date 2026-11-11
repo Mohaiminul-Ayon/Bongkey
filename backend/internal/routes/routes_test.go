@@ -124,6 +124,11 @@ func TestPaymentReviewRoutesRequireAdmin(t *testing.T) {
 		{http.MethodGet, "/api/admin/audit", http.StatusUnauthorized},
 		{http.MethodGet, "/api/admin/callback-requests", http.StatusUnauthorized},
 		{http.MethodPost, "/api/admin/callback-requests/1/done", http.StatusUnauthorized},
+		{http.MethodGet, "/api/admin/returns", http.StatusUnauthorized},
+		{http.MethodPatch, "/api/admin/returns/1", http.StatusUnauthorized},
+		{http.MethodPost, "/api/admin/returns/1/refund", http.StatusUnauthorized},
+		{http.MethodGet, "/api/admin/returns/1/photos/0", http.StatusUnauthorized},
+		{http.MethodPost, "/api/orders/1/returns", http.StatusNotFound},
 		{http.MethodGet, "/api/orders/1/payments", http.StatusNotFound},
 		{http.MethodPost, "/api/orders/1/payments", http.StatusNotFound},
 	} {

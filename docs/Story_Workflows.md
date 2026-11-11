@@ -241,6 +241,45 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence:** unit tests in [checkout_lens_test.go](../backend/internal/orders/checkout_lens_test.go), [prescriptions_test.go](../backend/internal/lens/prescriptions_test.go), [lens_order_handler_test.go](../backend/internal/handlers/lens_order_handler_test.go); local PostgreSQL [TestLensOrderLifecyclePostgres](../backend/internal/orders/lens_order_integration_test.go) runs checkout → price above limit stays open → owner price updates order and invoice → confirm blocked at each step → confirmed. Browser: lens chooser, custom lens through bag to checkout.
 
+## RETURN-01 — Return and exchange requests (#22, #23)
+
+**Status:** Built 2026-11-12 on `feat/returns-tickets`. The admin Returns page has not been tried while signed in, and no real request yet.
+
+**Owner decisions (2026-11-12):**
+- A request is a **ticket**, not an automatic return: staff call or chat, agree a solution, then close it.
+- Change of mind: **exchange** for another frame within **3 days** of delivery (a pricier frame means the customer pays the difference). No money back for a change of mind.
+- **Defect, wrong colour or wrong item:** within **15 days**; replaced, or refunded if it can't be replaced. The refund is due within 15 days of the request.
+- Lenses are not refunded; a returned frame's refund loses the lens price and the courier charge. A problem found while the delivery person is there is handed back at once for free (with the courier, not on the site); after that the customer pays the courier charge.
+- The rules live on a plain policy page ([/return-policy](../frontend/src/app/return-policy/page.tsx)) linked from the footer and account page, with a one-line note at checkout and in the bKash box. The rules are fixed in code for the pilot.
+
+**Request:** `POST /api/track/returns` (multipart) with `order_number=ORD-000200`, `phone=01712345678`, `kind=defect`, `message=The left hinge is loose`, `photos=<hinge.jpg>`.
+
+1. [ReturnRequestForm](../frontend/src/components/ReturnRequestForm.tsx) shows only after delivery and only the kinds still inside their window; on the Track page it adds the number and phone the customer typed, and [requestReturnFromTrack](../frontend/src/lib/api.ts) sends it. The private order page sends the same form to `POST /api/orders/:id/returns` with the order secret instead.
+2. [routes.go](../backend/internal/routes/routes.go) registers both routes as public; access is checked in the handler.
+3. [ReturnsHandler.CreateFromTrack](../backend/internal/handlers/returns_handler.go) limits the body to 16 KB plus three 5 MB photos, reads `kind`, `message` and only `photos` files (`returnForm`), then calls `orders.AccessService.Track` — the same rate-limited number + phone check as the Track page. A wrong phone is 404. `CreateFromOrderPage` uses `AccessService.Guest` with the order secret instead.
+4. [returns.Service.Create](../backend/internal/returns/returns.go) trims the message (5–1000), allows 3 photos, and `Eligible` checks the order is `delivered` with a `delivered_at` and that now is within 3 days (exchange) or 15 days (defect / wrong item). Each photo goes through `lens.PrescriptionStore` (content check, random name, private folder `backend/private/return-photos`); if a later photo or the database fails, the saved photos are removed.
+5. [PostgresStore.Create](../backend/internal/returns/repository.go) inserts the ticket (migration `025_return_requests.sql`). A partial unique index allows one unfinished ticket per order, so a double submit or a second device gets `ErrOpenTicket` (409).
+6. `Notifier.ReturnRequested` queues one owner email (`owner_return:<id>`); the handler answers 201 with only the ID, and the form shows "Request #4 sent" with a WhatsApp button.
+7. Staff: **Admin → Returns** ([page](../frontend/src/app/admin/returns/page.tsx)) → `GET /api/admin/returns?status=open` → `AdminAuth` → `AdminList`. Unfinished tickets come first, oldest first. Problem tickets show "refund or solve by" (request + 15 days, counted from the request, not approval); an open one past it is red (`Overdue`). Photos open through `GET /api/admin/returns/:id/photos/:index`, never a public URL.
+8. `PATCH /api/admin/returns/:id` → `Service.Update`: in progress, or closed as exchanged / replaced / declined (declined needs a note). A closed ticket cannot be reopened.
+9. `POST /api/admin/returns/:id/refund` → `Service.RecordRefund`: only an unfinished defect or wrong-item ticket, amount 1 to the order total, bKash needs its TrxID, the date cannot be in the future. The update closes the ticket as `refunded` in one statement; the table's checks refuse a refund on an exchange too. Ticket decisions and refunds are written to the audit log by a trigger.
+
+**Failure paths:**
+- Not delivered yet or cancelled: 409 "after the order is delivered".
+- Exchange on day 4 or a problem on day 16: 409 "the time for this request is over".
+- A second request while one is open: 409.
+- A wrong phone on the Track route: 404; too many tries: 429 (the Track limiter).
+- No order secret on the order-page route: 404. Admin routes without login: 401 from `AdminAuth`.
+- A photo that is not a real JPG/PNG/HEIC (or too small or above 5 MB): 400.
+
+**Limits:**
+- The exchange's price difference and the new frame are arranged by staff; nothing changes stock or the order automatically. Write the agreement in the staff note.
+- A refund does not change the order's paid amount or stock; the ticket is the record.
+- Photos are kept until someone deletes them (`shortcut`-level gap: no automatic clean-up like prescriptions).
+- The customer does not see the ticket's status on the site; staff call or chat.
+
+**Evidence:** `returns_test.go` (windows with a fixed clock, cleanup of saved photos, update and refund rules, deadline from the request and overdue), `TestReturnEmail`, route protection, local PostgreSQL `TestReturnTicketsPostgres` (one open ticket, table refusing a refund on an exchange, closed tickets stay closed, refund closes, audit rows). Browser and HTTP 2026-11-12 on a temporary delivered order (deleted afterwards with its ticket, photo and email): the Track page showed the form at phone width in dark mode with all three choices, a defect request with a photo became request #4, a second request got 409, a wrong phone 404, the order-page route without a secret 404, and the admin list without login 401.
+
 ## CALLBACK-01 — Custom lens call-back requests
 
 **Status:** Built 2026-11-11 on `feat/lens-panel-v2`. Not yet tried with the owner's real inbox.
@@ -855,4 +894,4 @@ Each entry is written in the same transaction as the change, so a failed or roll
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.
 - `ACCOUNT-01` beyond GOOGLE-01 (saved addresses, reorder, order details in the account) is deferred to R2.
-- Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, returns/refunds and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.
+- Lens pricing/prescription review, flexible delivery-zone administration beyond the fixed two-zone MVP rule, automatic stock and order changes for returns (RETURN-01 is a ticket workflow) and other remaining R1 work are still backlog or partial work in the PRD; this document will gain their flows only after implementation and evidence.

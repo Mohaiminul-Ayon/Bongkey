@@ -116,6 +116,7 @@ export default function AccountPage() {
         <Link href="/products" className="underline-offset-4 hover:text-foreground hover:underline">Continue as a guest</Link>
         <span aria-hidden="true"> · </span>
         <Link href="/track" className="underline-offset-4 hover:text-foreground hover:underline">Track an order</Link>
+        <Link href="/return-policy" className="underline-offset-4 hover:text-foreground hover:underline">Returns &amp; exchanges</Link>
       </p>
     </section>
   );

@@ -6,7 +6,8 @@ import { BkashPaymentBox } from "@/components/BkashPaymentBox";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
 import { OrderTimeline } from "@/components/OrderTimeline";
-import { downloadInvoice, downloadOrderSlip, fetchOrder, requestEmailCode, verifyEmailCode, type OrderTracking } from "@/lib/api";
+import { ReturnRequestForm } from "@/components/ReturnRequestForm";
+import { downloadInvoice, downloadOrderSlip, fetchOrder, requestEmailCode, requestReturn, verifyEmailCode, type OrderTracking } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -134,6 +135,8 @@ export default function OrderSuccessPage() {
               </div>
             ) : null}
             <div className="mt-4"><OrderTimeline status={order.order_status} tracking={order.tracking} /></div>
+            {accessToken ? <ReturnRequestForm orderNumber={order.order_number} status={order.order_status} deliveredAt={order.tracking.delivered_at}
+              send={(form) => requestReturn(params.orderId, accessToken, form)} /> : null}
             {accessToken ? <BkashPaymentBox orderId={params.orderId} token={accessToken} orderNumber={order.order_number} total={order.total} lensOrder={order.lens_order} /> : null}
             {!order.pay_in_advance ? <p className="mt-4 rounded-md bg-amber-50 p-4 font-semibold text-[#7b531c]">Payment method: Cash on delivery. We call you to confirm the order; your invoice comes after that.</p> : null}
             <div className="flex flex-wrap gap-3">

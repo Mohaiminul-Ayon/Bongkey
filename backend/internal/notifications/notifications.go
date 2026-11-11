@@ -12,6 +12,7 @@ import (
 
 	"bongkey/backend/internal/callbacks"
 	"bongkey/backend/internal/orders"
+	"bongkey/backend/internal/returns"
 )
 
 // Outgoing is one email to queue; Key names the business event so the same event is queued only once.
@@ -214,6 +215,26 @@ func (s Service) CallbackRequested(ctx context.Context, r callbacks.Request) {
 	}
 	text := fmt.Sprintf("A customer asked to be called about a custom lens.\n\nName: %s\nPhone: %s\nFrame: %s\n\nTheir lens needs:\n%s\n\nMark it done after the call at %s/admin/callbacks\n", r.Name, r.Phone, frame, r.Message, s.SiteURL)
 	s.enqueue(ctx, Outgoing{Key: "owner_callback:" + strconv.FormatInt(r.ID, 10), To: s.OwnerEmail, Subject: "Call back " + r.Name + " " + r.Phone + " about a custom lens", Text: text})
+}
+
+// returnKinds names ticket kinds in the owner's email.
+var returnKinds = map[string]string{
+	returns.KindExchange:  "exchange for another frame",
+	returns.KindDefect:    "defect or colour problem",
+	returns.KindWrongItem: "wrong item received",
+}
+
+// ReturnRequested alerts the owner at once: a problem ticket must be refunded or solved within 15 days of
+// the request, so it should not wait for the evening summary.
+func (s Service) ReturnRequested(ctx context.Context, t returns.Ticket) {
+	if s.OwnerEmail == "" {
+		return
+	}
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	text := fmt.Sprintf("A customer opened a return request.\n\nOrder: %s\nCustomer: %s, %s\nRequest: %s\nPhotos: %d\n\nWhat they wrote:\n%s\n\nCall them and update the request at %s/admin/returns\n",
+		t.OrderNumber, t.CustomerName, t.CustomerPhone, returnKinds[t.Kind], t.PhotoCount, t.Message, s.SiteURL)
+	s.enqueue(ctx, Outgoing{Key: "owner_return:" + strconv.FormatInt(t.ID, 10), To: s.OwnerEmail, Subject: "Return request on " + t.OrderNumber + ": " + returnKinds[t.Kind], Text: text})
 }
 
 // orderNumbersWindow lets one email receive at most one reminder per window (three an hour), so repeated

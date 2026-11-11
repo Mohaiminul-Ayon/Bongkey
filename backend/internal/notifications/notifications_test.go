@@ -11,6 +11,7 @@ import (
 	"bongkey/backend/internal/callbacks"
 	"bongkey/backend/internal/mail"
 	"bongkey/backend/internal/orders"
+	"bongkey/backend/internal/returns"
 )
 
 // memoryStore is an in-memory queue whose unique keys behave like the database's.
@@ -170,6 +171,24 @@ func TestCallbackEmail(t *testing.T) {
 		t.Fatalf("queued = %+v", store.rows)
 	}
 	for _, want := range []string{"01712345678", "https://shop.example/products/eid-gold", "-8.50 both eyes", "https://shop.example/admin/callbacks"} {
+		if !strings.Contains(out.Text, want) {
+			t.Fatalf("email lacks %q:\n%s", want, out.Text)
+		}
+	}
+}
+
+// TestReturnEmail alerts the owner once per ticket with the order, the customer's phone and what they wrote.
+func TestReturnEmail(t *testing.T) {
+	store := newMemoryStore()
+	service := Service{Store: store, SiteURL: "https://shop.example", OwnerEmail: "owner@example.com"}
+	ticket := returns.Ticket{ID: 4, OrderNumber: "ORD-000200", CustomerName: "Rahim", CustomerPhone: "01712345678", Kind: returns.KindDefect, Message: "left hinge is loose", PhotoCount: 2}
+	service.ReturnRequested(context.Background(), ticket)
+	service.ReturnRequested(context.Background(), ticket)
+	out, ok := store.rows["owner_return:4"]
+	if !ok || len(store.rows) != 1 || out.To != "owner@example.com" || !strings.Contains(out.Subject, "defect or colour problem") {
+		t.Fatalf("queued = %+v", store.rows)
+	}
+	for _, want := range []string{"ORD-000200", "01712345678", "left hinge is loose", "Photos: 2", "https://shop.example/admin/returns"} {
 		if !strings.Contains(out.Text, want) {
 			t.Fatalf("email lacks %q:\n%s", want, out.Text)
 		}

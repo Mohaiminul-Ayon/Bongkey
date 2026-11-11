@@ -11,6 +11,7 @@ const links = [
   ["/admin/orders", "Orders"],
   ["/admin/payments", "Payments"],
   ["/admin/callbacks", "Call-backs"],
+  ["/admin/returns", "Returns"],
   ["/admin/products", "Products"],
   ["/admin/products/new", "Add product"],
   ["/admin/categories", "Categories"],

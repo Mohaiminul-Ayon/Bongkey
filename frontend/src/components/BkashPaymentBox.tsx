@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { fetchOrderPayments, submitPayment, type GuestPaymentView } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
@@ -109,6 +110,7 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
         </>
       ) : null}
       {error ? <p role="alert" className="mt-2 text-red-700">{error}</p> : null}
+      {view.payable === "yes" ? <p className="mt-2 text-xs text-neutral-600">Before you pay, see our <Link href="/return-policy" className="font-bold underline">return &amp; exchange policy</Link>.</p> : null}
       {view.payments.length > 0 ? (
         <ul className="mt-3 grid gap-2">
           {view.payments.map((p) => (
