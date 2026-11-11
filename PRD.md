@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.49
+Version: 2.50
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -734,6 +734,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-12 | 2.50 | RETURN-01 follow-up: a standalone "Return request" page (order number + phone, reason, problem, optional photos) linked from the footer, the account page and the policy page. |
 | 2026-11-12 | 2.49 | RETURN-01: return and exchange requests as tickets. Change of mind is a frame exchange within 3 days of delivery; a defect, wrong colour or wrong item within 15 days (replace, or refund if not possible, within 15 days of the request). Lenses not refunded; a frame refund loses the lens price and the courier charge. Customers ask from the order page or the Track page with photos; staff work them in Admin → Returns with deadlines and overdue alerts, and refunds are recorded with their real payment details. Policy page linked from footer, account, checkout and the bKash box. Migration 025. |
 | 2026-11-12 | 2.48 | Catalog price filter becomes a two-handle slider (৳0 to the dearest frame on the site, ৳100 steps) that filters when a handle is released; the number boxes and Apply button are gone. |
 | 2026-11-11 | 2.47 | Lens panel v2 and CALLBACK-01: the product page defaults to frame only (Add to bag + With lenses); the prescription can be uploaded inside the panel; a customized lens becomes a call-back request (name, mobile, needs) that staff see in Admin → Call-backs and get by email, with a WhatsApp option. Migration 024. |

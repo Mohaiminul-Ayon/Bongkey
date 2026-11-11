@@ -19,6 +19,7 @@ export function Footer() {
           <Link href="/cart">Your bag</Link>
           <Link href="/track">Track order</Link>
           <Link href="/return-policy">Returns &amp; exchanges</Link>
+          <Link href="/return-request">Return request</Link>
           <Link href="/admin/login">Admin</Link>
         </div>
       </div>
