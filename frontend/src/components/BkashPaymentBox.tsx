@@ -67,6 +67,9 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
   const paid = view.amount_paid;
   const dueNow = Math.max(0, view.advance_required - paid);
   const onDelivery = Math.max(0, total - Math.max(paid, view.advance_required));
+  // One transfer carries the exact amount due (the server refuses anything else), and only one may wait for review.
+  const exactAmount = dueNow > 0 ? dueNow : total - paid;
+  const waiting = view.payments.some((p) => p.status === "pending");
 
   return (
     <div className="mt-4 rounded-md border border-[#e2136e]/30 bg-[#fdf2f7] p-4 text-sm text-neutral-900">
@@ -74,7 +77,8 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
       {view.payable === "price_pending" ? <p className="mt-2">We first confirm your lens price by phone. After that you can pay the advance here.</p> : null}
       {view.payable === "off" && view.advance_required > 0 ? <p className="mt-2">We will call you about the payment.</p> : null}
       {view.payable === "not_due" && paid > 0 ? <p className="mt-2 font-bold text-green-800">Payment received. Thank you! {lensOrder ? "We start making your lenses now." : "We will confirm and ship your order soon."}{total > paid ? ` Please pay ${formatPrice(total - paid)} on delivery.` : ""}</p> : null}
-      {view.payable === "yes" && view.method ? (
+      {view.payable === "yes" && waiting ? <p className="mt-2 font-bold">We are checking your payment. We will confirm it here and by phone.</p> : null}
+      {view.payable === "yes" && view.method && !waiting ? (
         <>
           <ol className="mt-3 list-decimal space-y-1 pl-5">
             <li>Open bKash and choose <strong>Send Money</strong>.</li>
@@ -84,12 +88,12 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
             </li>
             {dueNow > 0 ? (
               <li>
-                Amount: <strong>{formatPrice(dueNow)}</strong>
+                Amount: exactly <strong>{formatPrice(dueNow)}</strong> in one transfer
                 {paid > 0 ? <> (already received {formatPrice(paid)})</> : null}
-                {onDelivery > 0 ? <>. The rest, {formatPrice(onDelivery)}, can be paid on delivery or here</> : null}.
+                {onDelivery > 0 ? <>. The rest, {formatPrice(onDelivery)}, is paid on delivery</> : null}.
               </li>
             ) : (
-              <li>Optional: pay the remaining <strong>{formatPrice(total - paid)}</strong> now instead of cash on delivery.</li>
+              <li>Optional: pay the remaining <strong>{formatPrice(total - paid)}</strong> now in one transfer instead of cash on delivery.</li>
             )}
             <li>Reference: <strong>{orderNumber}</strong></li>
             <li>Type the <strong>TrxID</strong> from your bKash SMS below.</li>
@@ -98,10 +102,10 @@ export function BkashPaymentBox({ orderId, token, orderNumber, total, lensOrder 
           <form onSubmit={send} className="mt-3 grid gap-3 sm:grid-cols-3">
             <label className="grid gap-1 font-bold">TrxID<input name="trx_id" required minLength={8} maxLength={12} pattern="[A-Za-z0-9]{8,12}" placeholder="9ABC12XY34" className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-mono font-normal uppercase" /></label>
             <label className="grid gap-1 font-bold">Your bKash number<input name="sender" required inputMode="tel" placeholder="01XXXXXXXXX" className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-normal" /></label>
-            <label className="grid gap-1 font-bold">Amount sent (৳)<input name="amount" required type="number" min={1} max={total - paid} step={1} className="rounded-md border border-neutral-300 bg-white px-3 py-2 font-normal" /></label>
+            <label className="grid gap-1 font-bold">Amount sent (৳)<input name="amount" readOnly type="number" value={exactAmount} className="rounded-md border border-neutral-300 bg-neutral-100 px-3 py-2 font-normal" /></label>
             <button type="submit" disabled={busy} className="site-button button-primary sm:col-span-3 disabled:opacity-50">{busy ? "Sending..." : "I have paid — send for checking"}</button>
           </form>
-          <p className="mt-2 text-xs text-neutral-600">Sent in two parts? Report each TrxID separately.</p>
+          <p className="mt-2 text-xs text-neutral-600">Send the whole amount in one bKash transfer; part payments can&apos;t be accepted.</p>
         </>
       ) : null}
       {error ? <p role="alert" className="mt-2 text-red-700">{error}</p> : null}

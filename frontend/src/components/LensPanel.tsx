@@ -240,7 +240,7 @@ export function LensPanel({ slug, productName, framePrice, onAdd, onClose }: Len
               {choice.kind === "package" && !lensPriceKnown(choice) ? (
                 <p role="status" className="info-note">{sphRight === "unsure" || sphLeft === "unsure" ? "We'll read the power from your prescription" : "Your power is above the fixed-price range, so the lens costs extra"}. We&apos;ll call you with the final price before you pay anything.</p>
               ) : null}
-              <p className="info-note">Lens orders need an advance payment (no cash on delivery). Lenses are made for you and can&apos;t be returned; the frame can still be exchanged.</p>
+              <p className="info-note">Lens orders are paid in full by bKash before we make the lenses (no cash on delivery). Lenses are made for you and can&apos;t be returned; the frame can still be exchanged.</p>
             </>
           ) : null}
 

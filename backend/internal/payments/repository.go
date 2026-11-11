@@ -99,9 +99,19 @@ func (s PostgresStore) Submit(ctx context.Context, orderID int, sub Submission) 
 		if err := checkPayable(state); err != nil {
 			return err
 		}
-		// More than is still owed is a typo or a mistake; the customer would need a refund.
-		if sub.Amount > state.Total-state.Paid {
+		// One transfer carries the whole amount due; anything else is a part payment, a typo or an overpayment.
+		if sub.Amount != amountDue(state) {
 			return ErrInvalidPayment
+		}
+		// While one transfer waits for review a second one could pay twice; a repeat of the same one is fine.
+		var waiting bool
+		if err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (SELECT 1 FROM payments WHERE order_id = $1 AND status = 'pending' AND NOT (method = $2 AND trx_id = $3))`,
+			orderID, sub.Method, sub.TrxID).Scan(&waiting); err != nil {
+			return err
+		}
+		if waiting {
+			return ErrPaymentPending
 		}
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO payments (order_id, method, trx_id, sender_number, amount)
@@ -238,44 +248,4 @@ func (s PostgresStore) Reject(ctx context.Context, paymentID int, adminID int64,
 			paymentID, adminID, reason)
 		return err
 	})
-}
-
-// Policies reads both advance rules, frame first.
-func (s PostgresStore) Policies(ctx context.Context) ([]Policy, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT kind, mode, value FROM advance_policies ORDER BY kind`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var list []Policy
-	for rows.Next() {
-		var p Policy
-		if err := rows.Scan(&p.Kind, &p.Mode, &p.Value); err != nil {
-			return nil, err
-		}
-		list = append(list, p)
-	}
-	return list, rows.Err()
-}
-
-// Policy reads one advance rule.
-func (s PostgresStore) Policy(ctx context.Context, kind string) (Policy, error) {
-	p := Policy{Kind: kind}
-	err := s.DB.QueryRowContext(ctx, `SELECT mode, value FROM advance_policies WHERE kind = $1`, kind).Scan(&p.Mode, &p.Value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Policy{}, ErrNotFound
-	}
-	return p, err
-}
-
-// SavePolicy updates one existing rule; it never touches orders, which keep their own copy.
-func (s PostgresStore) SavePolicy(ctx context.Context, p Policy) error {
-	result, err := s.DB.ExecContext(ctx, `UPDATE advance_policies SET mode = $2, value = $3, updated_at = NOW() WHERE kind = $1`, p.Kind, p.Mode, p.Value)
-	if err != nil {
-		return err
-	}
-	if n, err := result.RowsAffected(); err != nil || n != 1 {
-		return errors.Join(err, ErrNotFound)
-	}
-	return nil
 }

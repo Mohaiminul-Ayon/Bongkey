@@ -2,20 +2,15 @@ package orders
 
 import "context"
 
-// Advance modes: how much of an order is paid by bKash before it is confirmed. The same words are used
-// for the owner's settings and for the copy saved on each order.
+// Advance modes: how much of an order is paid by bKash before it is confirmed, saved on each order.
+// New orders use only none, delivery_fee and full; percent and fixed stay for orders saved under the
+// owner's old adjustable rules, so their advance can still be recomputed after a lens price change.
 const (
 	AdvanceNone        = "none"
 	AdvanceDeliveryFee = "delivery_fee"
 	AdvancePercent     = "percent"
 	AdvanceFixed       = "fixed"
 	AdvanceFull        = "full"
-)
-
-// Advance rule kinds: frame-only orders, and orders with at least one lens line (mixed carts included).
-const (
-	PolicyFrame = "frame"
-	PolicyLens  = "lens"
 )
 
 // PaymentTerms is the payment agreement saved on a new order.
@@ -56,11 +51,12 @@ func (t PaymentTerms) withAmount(total, deliveryFee int) PaymentTerms {
 	return t
 }
 
-// paymentFor turns the customer's choice and the owner's current rules into the order's payment terms.
-//   - Lens orders (and mixed carts) never use cash on delivery: they follow the lens rule, even while bKash
-//     is off, because the advance can still be collected by phone.
+// paymentFor turns the customer's choice into the order's payment terms under the owner's fixed rule:
+//   - An order with any lens (mixed carts included) pays the full total first, never part of it and never
+//     cash on delivery, because lenses are made to order. This holds even while bKash is off, because the
+//     payment can still be arranged by phone.
 //   - A frame order choosing bKash pays the full total, and only while bKash is turned on.
-//   - A cash-on-delivery frame order follows the frame rule only while bKash is on; without a way to pay
+//   - A cash-on-delivery frame order pays the delivery charge first while bKash is on; without a way to pay
 //     online nothing is required in advance.
 func (s CheckoutService) paymentFor(ctx context.Context, choice string, hasLens bool) (PaymentTerms, error) {
 	switch {
@@ -68,11 +64,8 @@ func (s CheckoutService) paymentFor(ctx context.Context, choice string, hasLens 
 		return PaymentTerms{}, ErrInvalidCheckout
 	case hasLens && choice == PayCashOnDelivery:
 		return PaymentTerms{}, ErrInvalidCheckout
-	case hasLens && s.PaymentOptions == nil:
-		return PaymentTerms{Method: "advance", AdvanceMode: AdvanceFull}, nil
 	case hasLens:
-		mode, value, err := s.PaymentOptions.AdvancePolicy(ctx, PolicyLens)
-		return PaymentTerms{Method: "advance", AdvanceMode: mode, AdvanceValue: value}, err
+		return PaymentTerms{Method: "advance", AdvanceMode: AdvanceFull}, nil
 	case s.PaymentOptions == nil:
 		if choice == PayBkash {
 			return PaymentTerms{}, ErrPaymentUnavailable
@@ -91,6 +84,5 @@ func (s CheckoutService) paymentFor(ctx context.Context, choice string, hasLens 
 	case !enabled:
 		return PaymentTerms{Method: "cash_on_delivery", AdvanceMode: AdvanceNone}, nil
 	}
-	mode, value, err := s.PaymentOptions.AdvancePolicy(ctx, PolicyFrame)
-	return PaymentTerms{Method: "cash_on_delivery", AdvanceMode: mode, AdvanceValue: value}, err
+	return PaymentTerms{Method: "cash_on_delivery", AdvanceMode: AdvanceDeliveryFee}, nil
 }

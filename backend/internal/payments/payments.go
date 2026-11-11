@@ -41,6 +41,8 @@ var (
 	ErrMethodOff = errors.New("payment method is off")
 	// ErrTooManyPayments stops a guest from filling the review queue.
 	ErrTooManyPayments = errors.New("too many payments for this order")
+	// ErrPaymentPending means an earlier transfer on the order is still waiting for the owner's check.
+	ErrPaymentPending = errors.New("a payment is waiting for review")
 	// ErrOverpaid means approving would record more than the order total; the owner rejects and refunds it.
 	ErrOverpaid = errors.New("payment exceeds the order total")
 	// ErrAlreadyReviewed means the payment was approved or rejected before.
@@ -98,9 +100,8 @@ type OrderState struct {
 }
 
 // checkPayable is the one rule for "may the customer send money now", used both for the customer's view
-// and, under the order lock, before a submission is saved. Owner decision (#21): any unpaid balance may be
-// sent by bKash until the order is delivered, so the courier collects less cash; the required advance
-// (if any) is simply the first part of it.
+// and, under the order lock, before a submission is saved. Owner decision (#21): an unpaid balance may be
+// sent by bKash until the order is delivered, so the courier collects less cash; amountDue says how much.
 func checkPayable(state OrderState) error {
 	if state.OrderStatus == "cancelled" || state.OrderStatus == "delivered" || state.Paid >= state.Total {
 		return ErrNotPayable
@@ -125,41 +126,20 @@ func checkApprovable(state OrderState, amount int) error {
 	return nil
 }
 
+// amountDue is the exact amount one bKash transfer must carry. Owner rule (2026-11-11): no part payments,
+// so while the saved advance is not covered the transfer is all of what is left of it; after that, the
+// optional early payment is the whole remaining balance.
+func amountDue(state OrderState) int {
+	if state.Paid < state.Required {
+		return state.Required - state.Paid
+	}
+	return state.Total - state.Paid
+}
+
 // settles reports whether approving amount covers the advance saved on the order. Until it does the order
 // stays due, so a payment smaller than the agreement cannot let the order be confirmed and shipped.
 func settles(state OrderState, amount int) bool {
 	return state.Paid+amount >= state.Required
-}
-
-// Policy is the owner's advance rule for one kind of order; Value is a percent (1-100) or taka amount.
-type Policy struct {
-	Kind  string `json:"kind"`
-	Mode  string `json:"mode"`
-	Value int    `json:"value"`
-}
-
-// validPolicy mirrors the database checks so the owner gets a clear 400 instead of a constraint error.
-// Lens orders always pay something first; a frame order's "full" payment is the customer's own bKash choice.
-func validPolicy(p Policy) bool {
-	switch p.Kind {
-	case orders.PolicyLens:
-		if p.Mode != orders.AdvancePercent && p.Mode != orders.AdvanceFixed && p.Mode != orders.AdvanceFull {
-			return false
-		}
-	case orders.PolicyFrame:
-		if p.Mode != orders.AdvanceNone && p.Mode != orders.AdvanceDeliveryFee && p.Mode != orders.AdvancePercent && p.Mode != orders.AdvanceFixed {
-			return false
-		}
-	default:
-		return false
-	}
-	switch p.Mode {
-	case orders.AdvancePercent:
-		return p.Value >= 1 && p.Value <= 100
-	case orders.AdvanceFixed:
-		return p.Value >= 1 && p.Value <= maxAmount
-	}
-	return p.Value == 0
 }
 
 // Store persists methods and payments; each write that touches an order locks it and rechecks checkPayable.
@@ -172,9 +152,6 @@ type Store interface {
 	List(ctx context.Context, status string) ([]Payment, error)
 	Approve(ctx context.Context, paymentID int, adminID int64) error
 	Reject(ctx context.Context, paymentID int, adminID int64, reason string) error
-	Policies(ctx context.Context) ([]Policy, error)
-	Policy(ctx context.Context, kind string) (Policy, error)
-	SavePolicy(ctx context.Context, p Policy) error
 }
 
 // Service applies the payment rules; it never trusts a submission as money received.
@@ -236,7 +213,8 @@ func (s Service) ForGuest(ctx context.Context, orderID int) (GuestView, error) {
 	return view, nil
 }
 
-// Submit records a customer's transaction as "pending" after checking its shape; the store rechecks the order under lock.
+// Submit records a customer's transaction as "pending" after checking its shape; the store rechecks the order under lock,
+// including that the amount is exactly what is due and that no other transfer is still waiting for review.
 // Repeating the same transaction on the same order returns the first record instead of a second payment.
 func (s Service) Submit(ctx context.Context, orderID int, sub Submission) (Payment, error) {
 	sub.Method = strings.TrimSpace(sub.Method)
@@ -277,25 +255,6 @@ func (s Service) Method(ctx context.Context, code string) (Method, error) {
 		return Method{}, ErrNotFound
 	}
 	return s.Store.Method(ctx, code)
-}
-
-// Policies returns both advance rules for the owner and the checkout page.
-func (s Service) Policies(ctx context.Context) ([]Policy, error) {
-	return s.Store.Policies(ctx)
-}
-
-// AdvancePolicy gives checkout the current rule for one kind of order.
-func (s Service) AdvancePolicy(ctx context.Context, kind string) (string, int, error) {
-	p, err := s.Store.Policy(ctx, kind)
-	return p.Mode, p.Value, err
-}
-
-// SavePolicy changes one rule for future orders; existing orders keep the copy saved at checkout.
-func (s Service) SavePolicy(ctx context.Context, p Policy) error {
-	if !validPolicy(p) {
-		return ErrInvalidPayment
-	}
-	return s.Store.SavePolicy(ctx, p)
 }
 
 // Enabled reports whether customers can choose a method at checkout.

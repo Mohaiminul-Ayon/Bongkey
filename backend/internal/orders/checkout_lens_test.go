@@ -169,34 +169,18 @@ func TestFrameOnlyRetryFingerprintIsUnchanged(t *testing.T) {
 	}
 }
 
-// paymentOptionsStub reports bKash as on or off and serves fixed advance rules for checkout tests.
-type paymentOptionsStub struct {
-	on                    bool
-	frameMode, lensMode   string
-	frameValue, lensValue int
-}
+// paymentOptionsStub reports bKash as on or off for checkout tests.
+type paymentOptionsStub struct{ on bool }
 
 // Enabled returns the stub's switch for every method.
 func (p paymentOptionsStub) Enabled(context.Context, string) (bool, error) { return p.on, nil }
 
-// AdvancePolicy returns the stub's rule for frame or lens orders.
-func (p paymentOptionsStub) AdvancePolicy(_ context.Context, kind string) (string, int, error) {
-	if kind == PolicyLens {
-		return p.lensMode, p.lensValue, nil
-	}
-	return p.frameMode, p.frameValue, nil
-}
-
-// TestCheckoutPaymentChoice saves each order's payment terms from the customer's choice and the owner's rules:
-// frame orders choose cash on delivery (delivery fee first while bKash is on) or full bKash; lens orders never pay on delivery.
+// TestCheckoutPaymentChoice saves each order's payment terms from the customer's choice and the fixed rule:
+// frame orders choose cash on delivery (delivery fee first while bKash is on) or full bKash; any lens means the full total first.
 func TestCheckoutPaymentChoice(t *testing.T) {
 	frame := CheckoutItem{ProductID: 1, Quantity: 1}
 	lensLine := CheckoutItem{ProductID: 1, Quantity: 1, LensKind: LensKindPackage, LensPackageID: 7, LensPower: LensNoPower}
-	owner := paymentOptionsStub{on: true, frameMode: AdvanceDeliveryFee, lensMode: AdvanceFull}
-	off, noFrameRule, lensPercent := owner, owner, owner
-	off.on = false
-	noFrameRule.frameMode = AdvanceNone
-	lensPercent.lensMode, lensPercent.lensValue = AdvancePercent, 30
+	owner, off := paymentOptionsStub{on: true}, paymentOptionsStub{}
 	// Frame order total 1000 + 80 delivery = 1080; lens order 1000 + 2500 + 80 = 3580.
 	for name, tc := range map[string]struct {
 		item          CheckoutItem
@@ -209,13 +193,12 @@ func TestCheckoutPaymentChoice(t *testing.T) {
 		"frame, no choice: delivery fee first":  {frame, "", owner, "cash_on_delivery", "advance_due", 80, nil},
 		"frame, cash: delivery fee first":       {frame, PayCashOnDelivery, owner, "cash_on_delivery", "advance_due", 80, nil},
 		"frame, cash, bKash off: nothing first": {frame, PayCashOnDelivery, off, "cash_on_delivery", "unpaid", 0, nil},
-		"frame, cash, rule none":                {frame, PayCashOnDelivery, noFrameRule, "cash_on_delivery", "unpaid", 0, nil},
 		"frame, bKash: full total":              {frame, PayBkash, owner, "advance", "advance_due", 1080, nil},
 		"frame, bKash off":                      {frame, PayBkash, off, "", "", 0, ErrPaymentUnavailable},
 		"frame, unknown method":                 {frame, "card", owner, "", "", 0, ErrInvalidCheckout},
 		"lens, cash refused":                    {lensLine, PayCashOnDelivery, owner, "", "", 0, ErrInvalidCheckout},
 		"lens, bKash off still full":            {lensLine, PayBkash, off, "advance", "advance_due", 3580, nil},
-		"lens, 30 percent rounds up":            {lensLine, "", lensPercent, "advance", "advance_due", 1074, nil},
+		"lens, no choice: full total":           {lensLine, "", owner, "advance", "advance_due", 3580, nil},
 		"mixed cart follows lens rule":          {frame, "", owner, "advance", "advance_due", 4580, nil},
 	} {
 		tx := &checkoutTxStub{

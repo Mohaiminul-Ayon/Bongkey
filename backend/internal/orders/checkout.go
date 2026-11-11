@@ -70,11 +70,9 @@ const (
 	PayBkash          = "bkash"
 )
 
-// PaymentOptions tells checkout whether an online payment method is turned on and what the owner's
-// advance rule is for a kind of order (PolicyFrame or PolicyLens).
+// PaymentOptions tells checkout whether an online payment method is turned on.
 type PaymentOptions interface {
 	Enabled(ctx context.Context, code string) (bool, error)
-	AdvancePolicy(ctx context.Context, kind string) (mode string, value int, err error)
 }
 
 // CheckoutItem is one requested product and lens choice.

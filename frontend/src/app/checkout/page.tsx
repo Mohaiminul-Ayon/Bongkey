@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, type AdvancePolicy, type LensPackage, type OrderPayload } from "@/lib/api";
+import { createOrder, fetchLensPackages, fetchPaymentOptions, fetchProduct, fetchProducts, type LensPackage, type OrderPayload } from "@/lib/api";
 import { useCart, type CartItem } from "@/lib/cart";
 import { useCustomer } from "@/lib/customer";
 import { formatPower, lensPayload, lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
@@ -72,13 +72,6 @@ function clearCheckoutAttempt() {
   }
 }
 
-/** advancePreview mirrors the server's AdvanceAmount so the customer sees the amount due now; the server recomputes it. */
-function advancePreview(policy: AdvancePolicy | undefined, total: number, deliveryFee: number) {
-  if (!policy) return 0;
-  const amount = { none: 0, delivery_fee: deliveryFee, percent: Math.ceil((total * policy.value) / 100), fixed: policy.value, full: total }[policy.mode] ?? 0;
-  return Math.max(0, Math.min(amount, total));
-}
-
 /** CheckoutPage submits the cart and keeps guest order access in this browser session. */
 export default function CheckoutPage() {
   const router = useRouter();
@@ -101,18 +94,14 @@ export default function CheckoutPage() {
   // When the form appeared; the server treats a form sent within 3 seconds as a possible bot sign.
   const [formShownAt] = useState(() => Date.now());
   const [bkashOn, setBkashOn] = useState(false);
-  const [policies, setPolicies] = useState<AdvancePolicy[]>([]);
   const [payWith, setPayWith] = useState<"cash_on_delivery" | "bkash">("cash_on_delivery");
   // Prescription files by bag line; files stay in memory and are sent only with the order.
   const [prescriptions, setPrescriptions] = useState<Map<string, File>>(new Map());
   const hasLens = items.some((item) => item.lens);
   const pricePending = items.some((item) => item.lens && !lensPriceKnown(item.lens));
-  // Any lens in the bag puts the whole order under the lens rule; a cash-on-delivery frame order follows the
-  // frame rule only while bKash is on, because the customer needs a way to pay it.
-  const lensRule = policies.find((p) => p.kind === "lens");
-  const frameRule = policies.find((p) => p.kind === "frame");
-  const lensDueNow = total === null || deliveryFee === null ? null : advancePreview(lensRule ?? { kind: "lens", mode: "full", value: 0 }, total, deliveryFee);
-  const codDueNow = total === null || deliveryFee === null || !bkashOn ? 0 : advancePreview(frameRule, total, deliveryFee);
+  // Mirrors the server's fixed rule: any lens in the bag means the full total first. A cash-on-delivery frame
+  // order pays the delivery charge first, only while bKash is on, because the customer needs a way to pay it.
+  const codDueNow = deliveryFee === null || !bkashOn ? 0 : deliveryFee;
 
   /** checkCurrentPrices replaces saved cart prices with the live catalog so the shown total matches what the server charges. */
   async function checkCurrentPrices() {
@@ -129,7 +118,7 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     // If this fails, only cash on delivery is offered; the server refuses bKash while it is off anyway.
-    fetchPaymentOptions().then((options) => { setBkashOn(options.bkash); setPolicies(options.policies ?? []); }).catch(() => setBkashOn(false));
+    fetchPaymentOptions().then((options) => setBkashOn(options.bkash)).catch(() => setBkashOn(false));
   }, []);
 
   useEffect(() => {
@@ -266,9 +255,9 @@ export default function CheckoutPage() {
           <div className="rounded-md border border-[#173c34]/20 bg-[#f0f7f4] p-4">
             {hasLens ? <>
               <p className="text-sm font-black text-[#173c34]">Payment: by bKash before we make your lenses (no cash on delivery)</p>
-              {lensDueNow !== null && total !== null ? (
+              {total !== null ? (
                 <p className="mt-1 text-sm font-bold text-[#173c34]">
-                  {pricePending ? "Estimated: " : ""}Pay {formatPrice(lensDueNow)} by bKash{total > lensDueNow ? `, ${formatPrice(total - lensDueNow)} on delivery` : ""}.
+                  {pricePending ? "Estimated: " : ""}Pay the full {formatPrice(total)} by bKash in one transfer.
                 </p>
               ) : null}
               <p className="mt-1 text-sm leading-6 text-[#173c34]">We check your prescription{pricePending ? " and confirm the final lens price by phone" : ""}. Then you pay by bKash on the order page. Nothing is made before that.</p>
@@ -279,7 +268,7 @@ export default function CheckoutPage() {
                 <label className="flex items-start gap-2 text-sm text-[#173c34]">
                   <input type="radio" name="pay_with" className="mt-1" checked={!bkashOn || payWith === "cash_on_delivery"} onChange={() => setPayWith("cash_on_delivery")} />
                   <span><strong>Cash on delivery</strong> — {codDueNow > 0 && total !== null
-                    ? <>first pay {formatPrice(codDueNow)}{frameRule?.mode === "delivery_fee" ? " (delivery charge)" : ""} by bKash on the next page; we confirm the order after that. Pay {formatPrice(total - codDueNow)} when you receive it.</>
+                    ? <>first pay {formatPrice(codDueNow)} (delivery charge) by bKash on the next page; we confirm the order after that. Pay {formatPrice(total - codDueNow)} when you receive it.</>
                     : "pay when you receive the order."}</span>
                 </label>
                 {bkashOn ? (

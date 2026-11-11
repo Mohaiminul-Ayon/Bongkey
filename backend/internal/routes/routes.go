@@ -181,8 +181,6 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.GET("/orders/:id/payments", paymentHandler.AdminOrderPayments)
 	admin.GET("/payment-methods/:code", paymentHandler.PaymentMethod)
 	admin.PUT("/payment-methods/:code", paymentHandler.SavePaymentMethod)
-	admin.GET("/advance-policies", paymentHandler.AdvancePolicies)
-	admin.PUT("/advance-policies/:kind", paymentHandler.SaveAdvancePolicy)
 
 	return router
 }
