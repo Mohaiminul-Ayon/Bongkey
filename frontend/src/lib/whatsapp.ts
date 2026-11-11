@@ -7,3 +7,8 @@ export const whatsAppNumber = digits.startsWith("0") ? `88${digits}` : digits;
 export function whatsAppLink(text: string) {
   return `https://wa.me/${whatsAppNumber}?text=${encodeURIComponent(text)}`;
 }
+
+/** whatsAppLinkTo opens a chat with a customer's local number (01XXXXXXXXX), for staff replying to a request. */
+export function whatsAppLinkTo(localNumber: string, text: string) {
+  return `https://wa.me/88${localNumber.replace(/\D/g, "")}?text=${encodeURIComponent(text)}`;
+}

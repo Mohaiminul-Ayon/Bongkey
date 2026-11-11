@@ -6,6 +6,7 @@ import (
 
 	"bongkey/backend/internal/audit"
 	"bongkey/backend/internal/auth"
+	"bongkey/backend/internal/callbacks"
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 	"bongkey/backend/internal/customers"
@@ -59,6 +60,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	notifier := notifications.Service{Store: notifications.PostgresStore{DB: database.DB}, Orders: orderAccess.Service, OwnerEmail: cfg.OwnerNotifyEmail, SiteURL: cfg.SiteURL}
 	// Same shared limiter table as tracking, with its own "order-numbers-ip" key kind.
 	orderAccess.Numbers = orders.OrderNumberService{Orders: orders.PostgresReader{DB: database.DB}, Sender: notifier, Limiter: auth.PostgresLoginLimiter{DB: database.DB}, Secret: cfg.JWTSecret}
+	callbackHandler := handlers.CallbackHandler{Service: callbacks.Service{Store: callbacks.PostgresStore{DB: database.DB}, Limiter: auth.PostgresLoginLimiter{DB: database.DB}, Notifier: notifier, Secret: cfg.JWTSecret}}
 	paymentService := payments.Service{Store: payments.PostgresStore{DB: database.DB}, Notifier: notifier}
 	paymentHandler := handlers.PaymentHandler{Service: paymentService, Orders: orderAccess.Service}
 	checkout := handlers.CheckoutHandler{Service: orders.CheckoutService{
@@ -117,6 +119,7 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	router.POST("/api/orders", middleware.OptionalCustomer(customerService), checkout.CreateOrder)
 	router.POST("/api/track", orderAccess.TrackOrder)
 	router.POST("/api/track/order-numbers", orderAccess.SendOrderNumbers)
+	router.POST("/api/callback-requests", callbackHandler.Create)
 	router.GET("/api/orders/:id", orderAccess.GetOrder)
 	router.GET("/api/orders/:id/invoice.pdf", orderAccess.GetInvoice)
 	router.GET("/api/orders/:id/slip.pdf", orderAccess.GetSlip)
@@ -180,6 +183,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.POST("/payments/:id/reject", paymentHandler.RejectPayment)
 	admin.GET("/orders/:id/payments", paymentHandler.AdminOrderPayments)
 	admin.GET("/payment-methods/:code", paymentHandler.PaymentMethod)
+	admin.GET("/callback-requests", callbackHandler.AdminList)
+	admin.POST("/callback-requests/:id/done", callbackHandler.MarkDone)
 	admin.PUT("/payment-methods/:code", paymentHandler.SavePaymentMethod)
 
 	return router

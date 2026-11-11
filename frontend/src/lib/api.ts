@@ -316,6 +316,24 @@ export async function fetchCategories() {
 /** fetchDeliverySettings keeps the cart estimate aligned with the server setting. */
 export type AdvanceMode = "none" | "delivery_fee" | "percent" | "fixed" | "full";
 
+/** CallbackRequest is a shopper's request to be called about a custom lens, as the owner sees it. */
+export type CallbackRequest = { id: number; name: string; phone: string; product_slug: string; message: string; status: "open" | "done"; created_at: string; handled_at: string | null };
+
+/** requestCallback asks staff to call the shopper about a custom lens; no order is created. */
+export async function requestCallback(input: { name: string; phone: string; product_slug: string; message: string }) {
+  return request<{ id: number }>("/api/callback-requests", { method: "POST", body: JSON.stringify(input) });
+}
+
+/** fetchCallbackRequests lists call-back requests for the owner; status "" means all. */
+export async function fetchCallbackRequests(status: "" | "open" | "done") {
+  return adminRequest<CallbackRequest[]>(`/api/admin/callback-requests${status ? `?status=${status}` : ""}`);
+}
+
+/** markCallbackDone records that staff called the shopper. */
+export async function markCallbackDone(id: number) {
+  return adminRequest(`/api/admin/callback-requests/${id}/done`, { method: "POST" });
+}
+
 /** fetchPaymentOptions tells checkout whether bKash can be offered. */
 export async function fetchPaymentOptions() {
   return request<{ bkash: boolean }>("/api/payment-options", { cache: "no-store" });

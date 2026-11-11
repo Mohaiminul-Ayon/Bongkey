@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"bongkey/backend/internal/callbacks"
 	"bongkey/backend/internal/orders"
 )
 
@@ -197,6 +198,22 @@ func (s Service) PaymentReviewed(ctx context.Context, paymentID int) {
 		text = fmt.Sprintf("Hello,\n\nWe could not accept your bKash payment of %s for order %s (TrxID %s).\nReason: %s\n\nPlease check the transaction and send it again from the Track page at %s/track, or message us on WhatsApp with your order number.\n\nBongkey", taka(payment.Amount), order.OrderNumber, payment.TrxID, payment.RejectReason, s.SiteURL)
 	}
 	s.enqueue(ctx, Outgoing{Key: event("payment_reviewed", paymentID), To: order.CustomerEmail, Subject: subject, Text: text})
+}
+
+// CallbackRequested alerts the owner at once, because the shopper is waiting for a call about a custom lens.
+// The phone and message go only to the owner's own inbox, never to a log.
+func (s Service) CallbackRequested(ctx context.Context, r callbacks.Request) {
+	if s.OwnerEmail == "" {
+		return
+	}
+	ctx, cancel := detached(ctx)
+	defer cancel()
+	frame := "not given"
+	if r.ProductSlug != "" {
+		frame = s.SiteURL + "/products/" + r.ProductSlug
+	}
+	text := fmt.Sprintf("A customer asked to be called about a custom lens.\n\nName: %s\nPhone: %s\nFrame: %s\n\nTheir lens needs:\n%s\n\nMark it done after the call at %s/admin/callbacks\n", r.Name, r.Phone, frame, r.Message, s.SiteURL)
+	s.enqueue(ctx, Outgoing{Key: "owner_callback:" + strconv.FormatInt(r.ID, 10), To: s.OwnerEmail, Subject: "Call back " + r.Name + " " + r.Phone + " about a custom lens", Text: text})
 }
 
 // orderNumbersWindow lets one email receive at most one reminder per window (three an hour), so repeated

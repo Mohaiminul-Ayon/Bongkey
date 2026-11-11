@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"bongkey/backend/internal/callbacks"
 	"bongkey/backend/internal/mail"
 	"bongkey/backend/internal/orders"
 )
@@ -147,6 +148,30 @@ func TestOrderNumbersEmail(t *testing.T) {
 		}
 		if out.To != "rahim@example.com" {
 			t.Fatalf("to = %q", out.To)
+		}
+	}
+}
+
+// TestCallbackEmail alerts the owner once per request with the phone, the frame link and the lens needs,
+// and queues nothing when no owner email is set.
+func TestCallbackEmail(t *testing.T) {
+	store := newMemoryStore()
+	service := Service{Store: store, SiteURL: "https://shop.example"}
+	r := callbacks.Request{ID: 7, Name: "Rahim", Phone: "01712345678", ProductSlug: "eid-gold", Message: "-8.50 both eyes"}
+	service.CallbackRequested(context.Background(), r)
+	if len(store.rows) != 0 {
+		t.Fatalf("queued without an owner email: %d", len(store.rows))
+	}
+	service.OwnerEmail = "owner@example.com"
+	service.CallbackRequested(context.Background(), r)
+	service.CallbackRequested(context.Background(), r)
+	out, ok := store.rows["owner_callback:7"]
+	if !ok || len(store.rows) != 1 || out.To != "owner@example.com" {
+		t.Fatalf("queued = %+v", store.rows)
+	}
+	for _, want := range []string{"01712345678", "https://shop.example/products/eid-gold", "-8.50 both eyes", "https://shop.example/admin/callbacks"} {
+		if !strings.Contains(out.Text, want) {
+			t.Fatalf("email lacks %q:\n%s", want, out.Text)
 		}
 	}
 }
