@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ProductCard } from "@/components/ProductCard";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchProducts, type CatalogFilter } from "@/lib/api";
 import { formatPrice, type Product } from "@/lib/products";
 
@@ -13,8 +14,9 @@ const frameTypes = [
   { key: "sunglasses", label: "Sunglasses", title: "Sunglasses" },
 ];
 
+// The menu needs a non-empty value for every option, so "newest" stands for "no sort in the URL".
 const sortOptions = [
-  { value: "", label: "Newest" },
+  { value: "newest", label: "Newest" },
   { value: "price_asc", label: "Price: low to high" },
   { value: "price_desc", label: "Price: high to low" },
 ];
@@ -139,11 +141,17 @@ function Catalog() {
           <button className="filter-chip" type="submit">Apply</button>
           {filtered ? <button className="price-reset" type="button" onClick={resetFilters}>Reset</button> : null}
         </form>
-        <label className="sort-select">Sort by
-          <select value={sort ?? ""} onChange={(event) => go({ sort: event.target.value || undefined })}>
-            {sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>
+        <div className="sort-select">
+          <span aria-hidden="true">Sort by</span>
+          <Select value={sort ?? "newest"} onValueChange={(value) => go({ sort: value === "newest" ? undefined : value })}>
+            <SelectTrigger aria-label="Sort by" className="w-[200px] rounded-[2px] bg-[var(--surface)] text-sm font-normal text-foreground normal-case tracking-normal shadow-none data-[size=default]:h-[41px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="start" className="rounded-[2px]">
+              {sortOptions.map((option) => <SelectItem key={option.value} value={option.value} className="rounded-[2px] py-2">{option.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       {priceError ? <p role="alert" className="price-error">{priceError}</p> : null}
 

@@ -54,8 +54,8 @@ func TestServiceSaveRejectsInvalidPackages(t *testing.T) {
 // TestServiceSaveNormalizesInput trims text and drops repeated categories.
 func TestServiceSaveNormalizesInput(t *testing.T) {
 	store := &packageStoreStub{}
-	err := (Service{Repository: store}).Save(context.Background(), 0, Package{Name: "  Photochromic ", Price: 3500, MaxPower: 600, CategoryIDs: []int64{2, 1, 2}})
-	if err != nil || store.saved.Name != "Photochromic" || len(store.saved.CategoryIDs) != 2 {
+	err := (Service{Repository: store}).Save(context.Background(), 0, Package{Name: "  Photochromic ", Description: " Darkens outdoors \r\n\n UV protection ", Price: 3500, MaxPower: 600, CategoryIDs: []int64{2, 1, 2}})
+	if err != nil || store.saved.Name != "Photochromic" || store.saved.Description != "Darkens outdoors\nUV protection" || len(store.saved.CategoryIDs) != 2 {
 		t.Fatalf("saved=%+v err=%v", store.saved, err)
 	}
 }

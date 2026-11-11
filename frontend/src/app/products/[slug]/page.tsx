@@ -3,13 +3,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
-import { LensPicker } from "@/components/LensPicker";
+import { LensPanel } from "@/components/LensPanel";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductVisual } from "@/components/ProductVisual";
 import { TryOnModal } from "@/components/TryOnModal";
 import { fetchProduct, fetchProducts } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { lensPrice, lensPriceKnown, type CartLens } from "@/lib/lens";
 import { discountPercent, formatPrice, type Product } from "@/lib/products";
 
 /** ProductDetailsPage renders only products returned by the live catalog. */
@@ -20,7 +19,7 @@ export default function ProductDetailsPage() {
   const [error, setError] = useState("");
   const [showTryOn, setShowTryOn] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
-  const [lens, setLens] = useState<{ choice?: CartLens; ready: boolean }>({ ready: true });
+  const [showLenses, setShowLenses] = useState(false);
   const [added, setAdded] = useState("");
   const { addItem } = useCart();
 
@@ -57,6 +56,9 @@ export default function ProductDetailsPage() {
   return (
     <section className="product-page">
       {showTryOn ? <TryOnModal product={variant} onClose={() => setShowTryOn(false)} /> : null}
+      {/* Rendered outside the sticky info column, which is its own layer and would sit under the site header. */}
+      {showLenses ? <LensPanel slug={product.slug} productName={product.name} framePrice={variant.price}
+        onAdd={(lens) => { addItem(variant, lens); setAdded(lens ? "Added to your bag with lenses." : "Added to your bag."); }} onClose={() => setShowLenses(false)} /> : null}
       <div className="product-layout">
         <div className="product-gallery"><ProductVisual product={variant} /></div>
 
@@ -67,7 +69,7 @@ export default function ProductDetailsPage() {
           <div className={`product-price${discountPercent(variant.price, variant.oldPrice) ? " on-sale" : ""}`}>
             <strong>{formatPrice(variant.price)}</strong>
             {discountPercent(variant.price, variant.oldPrice) ? <><del>{formatPrice(variant.oldPrice ?? 0)}</del><span className="sale-badge">-{discountPercent(variant.price, variant.oldPrice)}%</span></> : null}
-            <span className="pill">{lens.choice ? "Advance payment" : "Cash on delivery"}</span>
+            <span className="pill">Frame only: cash on delivery</span>
           </div>
 
           {(product.variants?.length ?? 0) > 1 ? <div className="product-block grid gap-2"><label htmlFor="variant-select" className="text-[15px] font-semibold">Color and size</label>
@@ -77,19 +79,17 @@ export default function ProductDetailsPage() {
             <span className="text-xs text-neutral-600">SKU: {variant.sku} · {variant.stockStatus}</span>
           </div> : null}
 
-          <LensPicker slug={product.slug} productName={product.name} onChange={(choice, ready) => setLens({ choice, ready })} />
-          {lens.choice ? (
-            <p className="product-block text-sm">
-              Frame {formatPrice(variant.price)} + lens {lens.choice.kind === "custom" ? "price confirmed by call" : formatPrice(lensPrice(lens.choice))} = <strong>{lens.choice.kind === "custom" ? `${formatPrice(variant.price)} + lens` : formatPrice(variant.price + lensPrice(lens.choice))}</strong>
-              {lens.choice.kind === "package" && lens.ready && !lensPriceKnown(lens.choice) ? " (lens price confirmed after we check your prescription)" : ""}
-            </p>
-          ) : null}
-
           <div className="product-actions">
+            {/* Eyeglasses have one clear action; "Frame only" is the last choice inside the panel. Sunglasses are
+                mostly bought as they are, so they keep a direct Add to bag and offer power lenses second. */}
+            {(variant.stockQuantity ?? 0) < 1 ? <Button disabled>Out of stock</Button>
+              : product.shape === "sunglass" ? <>
+                <Button onClick={() => { addItem(variant); setAdded("Added to your bag."); }}>Add to bag</Button>
+                <Button variant="secondary" onClick={() => { setAdded(""); setShowLenses(true); }}>Add power lenses</Button>
+              </>
+              : <Button onClick={() => { setAdded(""); setShowLenses(true); }}>Select lenses</Button>}
             <Button variant="secondary" disabled={!variant.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try on</Button>
-            <Button disabled={(variant.stockQuantity ?? 0) < 1 || !lens.ready} onClick={() => { addItem(variant, lens.choice); setAdded(lens.choice ? "Added to your bag with lenses." : "Added to your bag."); }}>{(variant.stockQuantity ?? 0) < 1 ? "Out of stock" : "Add to bag"}</Button>
           </div>
-          {!lens.ready ? <p className="info-note">Finish choosing your lens (and both eye powers, or "Not sure") to add this to your bag.</p> : null}
           {added ? <p role="status" className="info-note">{added}</p> : null}
           {!variant.tryOnImageUrl ? <p className="info-note">Try-on preview will be available when a frame mockup is added.</p> : null}
           <p className="info-note">Easy exchange and warranty support are available after order confirmation.</p>

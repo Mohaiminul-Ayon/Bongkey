@@ -91,6 +91,8 @@ html[data-theme="dark"] {
   input, select, textarea { background: var(--surface); color: var(--foreground); }
   input::placeholder, textarea::placeholder { color: var(--muted); }
   :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+  /* Form fields draw the ring on their own border, so it never looks like a second box around the field. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -1px; }
   ::selection { background: var(--foreground); color: var(--inverse); }
 }
 
@@ -228,8 +230,7 @@ html[data-theme="dark"] {
 .catalog-filters { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; margin: 0 0 36px; }
 .price-filter { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
 .price-filter label, .sort-select { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; }
-.price-filter input, .sort-select select { width: 140px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--foreground); font-size: 14px; letter-spacing: 0; text-transform: none; }
-.sort-select select { width: 200px; }
+.price-filter input { width: 140px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); color: var(--foreground); font-size: 14px; letter-spacing: 0; text-transform: none; }
 .price-filter .filter-chip { min-height: 41px; background: transparent; color: var(--foreground); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
 .price-reset { padding: 9px 4px; border: 0; background: transparent; color: var(--foreground); font-size: 14px; text-decoration: underline; text-underline-offset: 4px; }
 .price-error { margin: -16px 0 24px; color: #ae3333; font-size: 14px; }
@@ -247,13 +248,15 @@ html[data-theme="dark"] {
 .pill { display: inline-flex; padding: 4px 10px; border-radius: 2px; background: var(--surface-raised); font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .product-block { margin-top: 28px; }
 .product-block h2 { margin: 0 0 12px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
-/* Thin borders; only the chosen lens option gets the strong outline. */
-.option-card { padding: 16px; border: 1px solid var(--border); border-radius: 2px; transition: border-color .2s; }
-.option-card:hover { border-color: var(--muted); }
-.option-card:has(input:checked) { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
-.option-card span { display: block; margin-top: 4px; color: var(--muted); font-size: 14px; }
 .product-select { width: 100%; padding: 13px 14px; border: 1px solid var(--border); border-radius: 2px; background: var(--surface); }
-.product-actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; margin-top: 28px; }
+/* The main action spans the row; a lone second button (Try on) does too. */
+.product-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 28px; }
+.product-actions > :first-child, .product-actions > :nth-child(2):last-child { grid-column: 1 / -1; }
+/* The lens panel rises as a sheet on phones and slides in from the right on wider screens. */
+@keyframes lens-sheet-in { from { opacity: 0; transform: translateY(24px); } }
+@keyframes lens-side-in { from { opacity: 0; transform: translateX(32px); } }
+.lens-panel { animation: lens-sheet-in .3s cubic-bezier(.2, .6, .2, 1); }
+@media (min-width: 640px) { .lens-panel { animation-name: lens-side-in; } }
 .spec-list { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid var(--border); }
 .spec-list div { padding: 12px 0; border-bottom: 1px solid var(--border); }
 .spec-list dt { color: var(--muted); font-size: 13px; }
@@ -371,5 +374,30 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
   .footer-inner { flex-direction: column; padding: 40px 16px; }
   .footer-links { flex-wrap: wrap; }
   .footer-bottom { margin: 0 16px; }
+}
+/* Motion: short, subtle and opacity/transform only, so budget phones stay smooth. Everything sits behind
+   no-preference, so visitors who ask for reduced motion see the page still. */
+@keyframes bk-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes bk-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bk-hero-zoom { from { transform: scale(1.08); } to { transform: scale(1); } }
+@keyframes bk-pop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: no-preference) {
+  .home-hero img { animation: bk-hero-zoom 12s cubic-bezier(.2, .6, .2, 1) both; }
+  .home-hero-copy > * { animation: bk-rise .7s cubic-bezier(.2, .6, .2, 1) both; }
+  .home-hero-copy > :nth-child(2) { animation-delay: .1s; }
+  .home-hero-copy > :nth-child(3) { animation-delay: .2s; }
+  .home-hero-copy > :nth-child(4) { animation-delay: .3s; }
+  .shelf-grid { animation: bk-fade .4s ease-out; }
+  .wish-button[aria-pressed="true"] span { display: inline-block; animation: bk-pop .35s ease-out; }
+  .added-note { display: inline-block; animation: bk-rise .3s ease-out both; }
+  .product-visual img { transition: transform .8s cubic-bezier(.2, .6, .2, 1); }
+  /* Scroll reveal with the browser's own scroll timeline (Chrome/Edge/Android); other browsers simply show the content. */
+  @supports (animation-timeline: view()) {
+    .product-grid > *, .home-story, .home-steps li, .shelf-head, .related-section > h2 {
+      animation: bk-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 35%;
+    }
+  }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }

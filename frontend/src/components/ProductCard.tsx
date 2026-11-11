@@ -73,7 +73,7 @@ export function ProductCard({ product }: ProductCardProps) {
             setAdded(true);
           }}
         >
-          {!sellable ? "Out of stock" : atLimit ? "All in your bag" : added ? "Added ✓" : "Add to bag"}
+          {!sellable ? "Out of stock" : atLimit ? "All in your bag" : added ? <span className="added-note">Added ✓</span> : "Add to bag"}
         </button>
       )}
     </article>

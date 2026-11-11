@@ -21,8 +21,9 @@ var (
 
 // Package is one lens type with a fixed price, linked to the frame categories it fits.
 type Package struct {
-	ID          int     `json:"id"`
-	Name        string  `json:"name"`
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	// Description holds the feature lines shown on the shop's lens card, one per line.
 	Description string  `json:"description"`
 	Price       int     `json:"price"`
 	SortOrder   int     `json:"sort_order"`
@@ -52,10 +53,21 @@ func (s Service) ForProduct(ctx context.Context, slug string) ([]Package, error)
 	return s.Repository.ListForProduct(ctx, slug)
 }
 
+// featureLines trims each feature line and drops blank ones, so the shop never shows empty bullets.
+func featureLines(text string) string {
+	lines := make([]string, 0)
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // Save validates a package; id 0 creates a new one.
 func (s Service) Save(ctx context.Context, id int, pkg Package) error {
 	pkg.Name = strings.TrimSpace(pkg.Name)
-	pkg.Description = strings.TrimSpace(pkg.Description)
+	pkg.Description = featureLines(pkg.Description)
 	if pkg.Name == "" || utf8.RuneCountInString(pkg.Name) > 80 || utf8.RuneCountInString(pkg.Description) > 300 ||
 		pkg.Price <= 0 || pkg.Price > 200000 || pkg.SortOrder < 0 || pkg.SortOrder > 999 || len(pkg.CategoryIDs) > 50 ||
 		pkg.MaxPower < 25 || pkg.MaxPower > 2000 || pkg.MaxPower%25 != 0 {
