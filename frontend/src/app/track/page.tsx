@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { OrderTimeline } from "@/components/OrderTimeline";
-import { fetchPaymentOptions, sendOrderNumbers, trackOrder, type TrackedOrder } from "@/lib/api";
+import { ReturnRequestForm } from "@/components/ReturnRequestForm";
+import { fetchPaymentOptions, requestReturnFromTrack, sendOrderNumbers, trackOrder, type TrackedOrder } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -44,6 +45,7 @@ function EmailOrderNumbersForm() {
 /** TrackOrderPage finds an order by its number and the phone used at checkout, then shows its progress. */
 export default function TrackOrderPage() {
   const [order, setOrder] = useState<TrackedOrder | null>(null);
+  const [lookup, setLookup] = useState({ orderNumber: "", phone: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [bkashOn, setBkashOn] = useState(false);
@@ -59,7 +61,10 @@ export default function TrackOrderPage() {
     setBusy(true);
     setError("");
     try {
-      setOrder(await trackOrder(String(form.get("order_number") ?? ""), String(form.get("phone") ?? "")));
+      const found = await trackOrder(String(form.get("order_number") ?? ""), String(form.get("phone") ?? ""));
+      // The return form proves access the same way, so it keeps what the customer typed.
+      setLookup({ orderNumber: String(form.get("order_number") ?? ""), phone: String(form.get("phone") ?? "") });
+      setOrder(found);
     } catch (err) {
       setOrder(null);
       setError(err instanceof Error ? err.message : "Could not find the order.");
@@ -108,6 +113,8 @@ export default function TrackOrderPage() {
             <div className="rounded-xl bg-white p-6 shadow-sm">
               <h2 className="text-xl font-black">Order {order.order_number}</h2>
               <div className="mt-4"><OrderTimeline status={order.order_status} tracking={order.tracking} /></div>
+              <div className="mt-4"><ReturnRequestForm orderNumber={order.order_number} status={order.order_status} deliveredAt={order.tracking.delivered_at}
+                send={(form) => { form.set("order_number", lookup.orderNumber); form.set("phone", lookup.phone); return requestReturnFromTrack(form); }} /></div>
             </div>
             <div className="rounded-xl bg-white p-6 shadow-sm">
               <h2 className="text-xl font-black">Products</h2>

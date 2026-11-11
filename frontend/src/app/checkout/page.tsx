@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
@@ -276,6 +277,7 @@ export default function CheckoutPage() {
               </fieldset>
             )}
           </div>
+          <p className="text-xs text-neutral-600">By placing this order you accept our <Link href="/return-policy" className="font-bold underline">return &amp; exchange policy</Link>.</p>
           {!placedOrderNumber ? <Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : "Place order"}</Button> : null}
         </form>
 
