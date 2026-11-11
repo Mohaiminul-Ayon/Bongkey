@@ -47,11 +47,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	// Prescriptions live outside /uploads so the public static route can never serve them.
 	prescriptions := lens.PrescriptionStore{Dir: cfg.PrescriptionDir}
 	lensReview := handlers.LensReviewHandler{Service: orders.LensReviewService{Store: orders.PostgresLensReviewStore{DB: database.DB}, Files: prescriptions}, Files: prescriptions}
-	siteURL := ""
-	if len(cfg.FrontendOrigins) > 0 {
-		siteURL = strings.TrimRight(cfg.FrontendOrigins[0], "/")
-	}
-	orderAccess := handlers.OrderAccessHandler{SiteURL: siteURL, Service: orders.AccessService{
+	// The slip prints the same public address as the emails (PUBLIC_SITE_URL, else the first allowed origin).
+	orderAccess := handlers.OrderAccessHandler{SiteURL: cfg.SiteURL, Service: orders.AccessService{
 		Reader:           orders.PostgresReader{DB: database.DB},
 		EmailProofSecret: cfg.JWTSecret,
 		// shortcut: shares the login limiter's table (keys are HMACs with their own "order-track-ip" kind, so budgets never mix); give tracking its own table if limits need tuning separately.
