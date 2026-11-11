@@ -91,6 +91,8 @@ html[data-theme="dark"] {
   input, select, textarea { background: var(--surface); color: var(--foreground); }
   input::placeholder, textarea::placeholder { color: var(--muted); }
   :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+  /* Form fields draw the ring on their own border, so it never looks like a second box around the field. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -1px; }
   ::selection { background: var(--foreground); color: var(--inverse); }
 }
 
@@ -370,5 +372,30 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
   .footer-inner { flex-direction: column; padding: 40px 16px; }
   .footer-links { flex-wrap: wrap; }
   .footer-bottom { margin: 0 16px; }
+}
+/* Motion: short, subtle and opacity/transform only, so budget phones stay smooth. Everything sits behind
+   no-preference, so visitors who ask for reduced motion see the page still. */
+@keyframes bk-rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+@keyframes bk-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes bk-hero-zoom { from { transform: scale(1.08); } to { transform: scale(1); } }
+@keyframes bk-pop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: no-preference) {
+  .home-hero img { animation: bk-hero-zoom 12s cubic-bezier(.2, .6, .2, 1) both; }
+  .home-hero-copy > * { animation: bk-rise .7s cubic-bezier(.2, .6, .2, 1) both; }
+  .home-hero-copy > :nth-child(2) { animation-delay: .1s; }
+  .home-hero-copy > :nth-child(3) { animation-delay: .2s; }
+  .home-hero-copy > :nth-child(4) { animation-delay: .3s; }
+  .shelf-grid { animation: bk-fade .4s ease-out; }
+  .wish-button[aria-pressed="true"] span { display: inline-block; animation: bk-pop .35s ease-out; }
+  .added-note { display: inline-block; animation: bk-rise .3s ease-out both; }
+  .product-visual img { transition: transform .8s cubic-bezier(.2, .6, .2, 1); }
+  /* Scroll reveal with the browser's own scroll timeline (Chrome/Edge/Android); other browsers simply show the content. */
+  @supports (animation-timeline: view()) {
+    .product-grid > *, .home-story, .home-steps li, .shelf-head, .related-section > h2 {
+      animation: bk-rise linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 35%;
+    }
+  }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
