@@ -61,8 +61,8 @@ export default function ProductDetailsPage() {
         <div className="product-gallery"><ProductVisual product={variant} /></div>
 
         <div className="product-info">
-          <p className="eyebrow">{product.category}</p>
-          <h1>{product.name}</h1>
+          <p className="kicker">{product.category}</p>
+          <h1 className="display">{product.name}</h1>
           <p className="product-tags">{product.gender} · {product.frameType} · {product.brandTier}</p>
           <div className={`product-price${discountPercent(variant.price, variant.oldPrice) ? " on-sale" : ""}`}>
             <strong>{formatPrice(variant.price)}</strong>
@@ -104,7 +104,8 @@ export default function ProductDetailsPage() {
       </div>
 
       {related.length > 0 ? <div className="related-section">
-        <h2>You may also like</h2>
+        <p className="kicker">More to explore</p>
+        <h2 className="display">You may also <em>like</em></h2>
         <div className="product-grid">
           {related.map((item) => <ProductCard key={item.slug} product={item} />)}
         </div>
