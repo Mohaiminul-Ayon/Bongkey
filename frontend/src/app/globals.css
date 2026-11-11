@@ -91,6 +91,8 @@ html[data-theme="dark"] {
   input, select, textarea { background: var(--surface); color: var(--foreground); }
   input::placeholder, textarea::placeholder { color: var(--muted); }
   :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
+  /* Form fields draw the ring on their own border, so it never looks like a second box around the field. */
+  input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -1px; }
   ::selection { background: var(--foreground); color: var(--inverse); }
 }
 
