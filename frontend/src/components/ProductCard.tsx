@@ -9,13 +9,12 @@ import { useWishlist } from "@/lib/wishlist";
 
 type ProductCardProps = { product: Product };
 
-/** ProductCard leads with the photo and opens the product; a single-option frame can go straight to the bag. */
+/** ProductCard leads with the photo and opens the product; Add to bag puts the frame straight in the bag.
+ * Each colour is uploaded as its own product (owner decision 2026-11-12), so the card never asks to choose options. */
 export function ProductCard({ product }: ProductCardProps) {
   const { items, addItem, openBag } = useCart();
   const wishlist = useWishlist();
   const [added, setAdded] = useState(false);
-  const soldOut = product.stockQuantity === 0;
-  const manyOptions = (product.variants?.length ?? 0) > 1 || (product.optionCount ?? 0) > 0;
   // The same default the product page uses: this frame if in stock, else its first in-stock option.
   const sellable = (product.stockQuantity ?? 0) > 0 ? product : product.variants?.find((option) => (option.stockQuantity ?? 0) > 0);
   // Every bag line of this frame (with or without lenses) uses the same stock.
@@ -42,7 +41,7 @@ export function ProductCard({ product }: ProductCardProps) {
         <span aria-hidden="true">{saved ? "♥" : "♡"}</span>
       </button>
       <Link className="product-card-link" href={`/products/${product.slug}`}>
-        <ProductVisual compact product={product} badge={soldOut ? "Other options" : undefined} />
+        <ProductVisual compact product={product} badge={sellable ? undefined : "Sold out"} />
         <div className="product-card-body">
           <div className="product-card-row">
             <h3 className="product-card-name">{product.name}</h3>
@@ -59,24 +58,20 @@ export function ProductCard({ product }: ProductCardProps) {
           <p className="product-card-detail">{product.material} · {product.color}</p>
         </div>
       </Link>
-      {manyOptions ? (
-        <Link className="site-button button-secondary card-add" href={`/products/${product.slug}`}>Choose options</Link>
-      ) : (
-        <button
-          type="button"
-          className="site-button button-secondary card-add"
-          disabled={!sellable || atLimit}
-          aria-label={`Add ${product.name} to bag`}
-          onClick={() => {
-            if (!sellable) return;
-            addItem(sellable);
-            setAdded(true);
-            openBag();
-          }}
-        >
-          {!sellable ? "Out of stock" : atLimit ? "All in your bag" : added ? <span className="added-note">Added ✓</span> : "Add to bag"}
-        </button>
-      )}
+      <button
+        type="button"
+        className="site-button button-secondary card-add"
+        disabled={!sellable || atLimit}
+        aria-label={`Add ${product.name} to bag`}
+        onClick={() => {
+          if (!sellable) return;
+          addItem(sellable);
+          setAdded(true);
+          openBag();
+        }}
+      >
+        {!sellable ? "Out of stock" : atLimit ? "All in your bag" : added ? <span className="added-note">Added ✓</span> : "Add to bag"}
+      </button>
     </article>
   );
 }

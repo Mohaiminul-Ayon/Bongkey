@@ -3,8 +3,6 @@ export type Product = {
   parentProductId?: number;
   sku?: string;
   variants?: Product[];
-  /** optionCount is the number of extra colour/size options; list rows carry it instead of the variants. */
-  optionCount?: number;
   categoryId?: number;
   slug: string;
   name: string;

@@ -721,7 +721,6 @@ export function toProduct(product: ApiProduct): Product {
     parentProductId: product.parent_product_id,
     sku: product.sku,
     variants: product.variants?.map(toProduct),
-    optionCount: product.option_count,
     categoryId: product.category_id,
     slug: product.slug,
     name: product.name,
