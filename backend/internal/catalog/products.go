@@ -21,7 +21,11 @@ var (
 	ErrDuplicateVariant     = errors.New("duplicate variant")
 	ErrHasVariants          = errors.New("product has variants")
 	ErrInvalidFilter        = errors.New("invalid product filter")
+	ErrInvalidGallery       = errors.New("invalid product gallery")
 )
+
+// MaxGalleryPhotos is how many extra photos one product or variant may show (the database checks it too).
+const MaxGalleryPhotos = 6
 
 // ProductInput is the set of product fields the owner may edit.
 type ProductInput struct {
@@ -34,6 +38,7 @@ type ProductInput struct {
 	Material, Color, Size                      string
 	LensWidth, BridgeWidth, TempleLength       string
 	ImageURL, TryOnImageURL                    string
+	GalleryURLs                                []string
 	IsFeatured, IsActive                       bool
 }
 
@@ -140,6 +145,11 @@ func (s ProductService) Save(ctx context.Context, id int, input ProductInput) (m
 	if id != 0 && (input.ExpectedStockQuantity == nil || *input.ExpectedStockQuantity < 0) {
 		return models.Product{}, ErrExpectedStockMissing
 	}
+	gallery, err := cleanGallery(input.GalleryURLs)
+	if err != nil {
+		return models.Product{}, err
+	}
+	input.GalleryURLs = gallery
 	if input.Slug == "" {
 		input.Slug = Slugify(input.Name)
 	}
@@ -153,6 +163,23 @@ func (s ProductService) Save(ctx context.Context, id int, input ProductInput) (m
 		input.Gender = "unisex"
 	}
 	return s.Repository.Save(ctx, id, input)
+}
+
+// cleanGallery allows up to MaxGalleryPhotos photos uploaded through the admin product-image upload, so a gallery
+// can only point at our own files, never at an outside address.
+func cleanGallery(urls []string) ([]string, error) {
+	if len(urls) > MaxGalleryPhotos {
+		return nil, ErrInvalidGallery
+	}
+	clean := make([]string, 0, len(urls))
+	for _, url := range urls {
+		url = strings.TrimSpace(url)
+		if len(url) > 300 || !strings.HasPrefix(url, "/uploads/products/") || strings.Contains(url, "..") {
+			return nil, ErrInvalidGallery
+		}
+		clean = append(clean, url)
+	}
+	return clean, nil
 }
 
 // validSKU keeps owner-defined identifiers safe for a predictable URL suffix.

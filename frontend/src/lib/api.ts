@@ -32,6 +32,7 @@ export type ApiProduct = {
   stock_quantity: number;
   image_url: string;
   try_on_image_url: string;
+  gallery_urls?: string[];
   low_stock_threshold?: number;
   is_featured: boolean;
   is_active: boolean;
@@ -744,6 +745,7 @@ export function toProduct(product: ApiProduct): Product {
     description: product.description,
     imageUrl: product.image_url,
     tryOnImageUrl: product.try_on_image_url,
+    galleryUrls: product.gallery_urls ?? [],
     lowStockThreshold: product.low_stock_threshold ?? 0,
     isFeatured: product.is_featured,
     isActive: product.is_active,

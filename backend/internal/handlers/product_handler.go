@@ -11,29 +11,30 @@ import (
 )
 
 type productRequest struct {
-	CategoryID            int    `json:"category_id"`
-	Name                  string `json:"name"`
-	SKU                   string `json:"sku"`
-	Slug                  string `json:"slug"`
-	Description           string `json:"description"`
-	Price                 int    `json:"price"`
-	OldPrice              int    `json:"old_price"`
-	BrandTier             string `json:"brand_tier"`
-	FrameType             string `json:"frame_type"`
-	Gender                string `json:"gender"`
-	Material              string `json:"material"`
-	Color                 string `json:"color"`
-	Size                  string `json:"size"`
-	LensWidth             string `json:"lens_width"`
-	BridgeWidth           string `json:"bridge_width"`
-	TempleLength          string `json:"temple_length"`
-	StockQuantity         int    `json:"stock_quantity"`
-	ExpectedStockQuantity *int   `json:"expected_stock_quantity"`
-	LowStockThreshold     int    `json:"low_stock_threshold"`
-	ImageURL              string `json:"image_url"`
-	TryOnImageURL         string `json:"try_on_image_url"`
-	IsFeatured            bool   `json:"is_featured"`
-	IsActive              bool   `json:"is_active"`
+	CategoryID            int      `json:"category_id"`
+	Name                  string   `json:"name"`
+	SKU                   string   `json:"sku"`
+	Slug                  string   `json:"slug"`
+	Description           string   `json:"description"`
+	Price                 int      `json:"price"`
+	OldPrice              int      `json:"old_price"`
+	BrandTier             string   `json:"brand_tier"`
+	FrameType             string   `json:"frame_type"`
+	Gender                string   `json:"gender"`
+	Material              string   `json:"material"`
+	Color                 string   `json:"color"`
+	Size                  string   `json:"size"`
+	LensWidth             string   `json:"lens_width"`
+	BridgeWidth           string   `json:"bridge_width"`
+	TempleLength          string   `json:"temple_length"`
+	StockQuantity         int      `json:"stock_quantity"`
+	ExpectedStockQuantity *int     `json:"expected_stock_quantity"`
+	LowStockThreshold     int      `json:"low_stock_threshold"`
+	ImageURL              string   `json:"image_url"`
+	TryOnImageURL         string   `json:"try_on_image_url"`
+	GalleryURLs           []string `json:"gallery_urls"`
+	IsFeatured            bool     `json:"is_featured"`
+	IsActive              bool     `json:"is_active"`
 }
 
 // ProductHandler maps product HTTP requests to catalog decisions.
@@ -167,7 +168,7 @@ func (h ProductHandler) saveProduct(c *gin.Context, id int) {
 		BrandTier: req.BrandTier, FrameType: req.FrameType, Gender: req.Gender,
 		Material: req.Material, Color: req.Color, Size: req.Size,
 		LensWidth: req.LensWidth, BridgeWidth: req.BridgeWidth, TempleLength: req.TempleLength,
-		ImageURL: req.ImageURL, TryOnImageURL: req.TryOnImageURL,
+		ImageURL: req.ImageURL, TryOnImageURL: req.TryOnImageURL, GalleryURLs: req.GalleryURLs,
 		IsFeatured: req.IsFeatured, IsActive: req.IsActive,
 	})
 	if err != nil {
@@ -246,6 +247,8 @@ func productError(c *gin.Context, err error, fallback string) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid SKU, color, size, price and stock are required"})
 	case errors.Is(err, catalog.ErrDuplicateVariant):
 		c.JSON(http.StatusConflict, gin.H{"error": "SKU or color/size is already in use"})
+	case errors.Is(err, catalog.ErrInvalidGallery):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "add up to 6 extra photos, uploaded here"})
 	case errors.Is(err, catalog.ErrHasVariants):
 		c.JSON(http.StatusConflict, gin.H{"error": "remove variants before deleting this product"})
 	default:

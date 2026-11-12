@@ -167,6 +167,26 @@ Invalid/unauthorized owner identity aborts in middleware with 401. Unknown statu
 
 **Evidence:** Full Go tests/vet/race, route denial test and frontend production build passed. Isolated local PostgreSQL QA passed migration, unique SKU/color-size, public variant response, independent stock reservation, depletion and hidden-parent rejection. S1a added [`TestVariantStockCheckoutAndCancelPostgres`](../backend/internal/orders/variant_stock_integration_test.go): with root stock 5 and variant B stock 2, ordering 3 of B is rejected with no stock change; ordering 2 of B charges B's own price and leaves root at 5, B at 0; cancelling restores B to 2. It passed with `RUN_LOCAL_DB_QA=1`, including under `-race`; `tsc --noEmit` and `npm run build` passed. QA rows were removed. The owner still needs to confirm the admin create → storefront select → cart → checkout → cancel flow in a browser.
 
+## GALLERY-01 — More photos per frame and colour
+
+**Status:** Built 2026-11-12 on `feat/product-photo-gallery`. The admin editor has not been tried while signed in.
+
+**Owner decisions (2026-11-12):** up to 6 extra photos after the cover photo; each colour has its own list (picking a colour shows that colour's photos); the product page shows a big photo with thumbnails and swipe; admin can move photos left/right and remove them. Shop cards keep only the cover.
+
+**Request:** `PUT /api/admin/products/42` with the usual product JSON plus `"gallery_urls": ["/uploads/products/side-ab12.jpg", "/uploads/products/top-cd34.jpg"]`.
+
+1. In [ProductForm](../frontend/src/components/ProductForm.tsx), **Upload more photos** (`uploadGallery`, line 60) sends each chosen file one by one to `POST /api/admin/uploads/product-image` (the existing upload; `AdminAuth` first) and adds the returned path. [GalleryEditor](../frontend/src/components/ProductForm.tsx:186) moves and removes them. Nothing is stored on the product until **Save Product** (`submit`, line 83) sends `gallery_urls` with the rest of the form.
+2. [routes.go:164](../backend/internal/routes/routes.go:164) → `AdminAuth` → `UpdateProduct` → [saveProduct](../backend/internal/handlers/product_handler.go:157) (64 KB body limit) passes `GalleryURLs` into `catalog.ProductInput`.
+3. [ProductService.Save](../backend/internal/catalog/products.go:126) runs the usual checks, then [cleanGallery](../backend/internal/catalog/products.go:170): at most 6, each trimmed and starting with `/uploads/products/` (our own uploads only, no `..`, no outside address).
+4. [PostgresProductRepository.update](../backend/internal/catalog/product_repository.go:145) writes `gallery_urls` in the same transaction and stale-stock check as every product edit. Migration `026_product_gallery.sql` adds the `TEXT[]` column and a database check of 6.
+5. Shoppers: `GET /api/products/:slug` returns `gallery_urls` for the product and each variant ([scanProduct](../backend/internal/catalog/product_repository.go:205) turns a missing list into `[]`). [ProductGallery](../frontend/src/components/ProductGallery.tsx) shows the cover plus that colour's photos; the product page keys it by variant, so a colour change starts again at photo 1. With only a cover it falls back to the old single photo.
+
+**Failure paths:** 7 photos, an outside address or a path with `..` → `ErrInvalidGallery` → 400 "add up to 6 extra photos, uploaded here", nothing saved. A bad file at upload → the existing upload errors (type/size); photos uploaded before it stay in the list. Not signed in → 401 from `AdminAuth`.
+
+**Limits:** removing a photo from the list does not delete the file from `backend/uploads/products` (same as the cover photo today). A new colour starts with no extra photos (the cover is copied, the gallery is not, since it would show the wrong colour). The older unused `product_images` table in the base schema is left alone.
+
+**Evidence:** `TestProductServiceRejectsInvalidEdits` (7 photos, outside address, `..`, empty entry refused; 6 accepted), local PostgreSQL `TestVariantStockPostgres` (each colour's own list in order, database refuses 7), a temporary product saved through `ProductService.Save` with 3 photos and read back over `GET /api/products/qa-gallery-frame`, and the browser at phone width: 4 thumbnails, tapping photo 3 shows photo 3, swiping moves forward/back and wraps. The temporary product was deleted.
+
 ## PDF-01 — Private invoice download
 
 **Status:** Review/QA (2026-10-26). Backend tests, local PostgreSQL snapshot/access test, PDF render inspection, Go vet and frontend build passed; owner browser walkthrough remains.

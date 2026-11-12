@@ -22,6 +22,11 @@ func TestProductServiceRejectsInvalidEdits(t *testing.T) {
 		{"negative threshold", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, LowStockThreshold: -1}, ErrInvalidThreshold},
 		{"huge threshold", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, LowStockThreshold: 100001}, ErrInvalidThreshold},
 		{"stale edit guard missing", 7, ProductInput{CategoryID: 1, Name: "Frame", Price: 100}, ErrExpectedStockMissing},
+		{"seven gallery photos", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, GalleryURLs: []string{"/uploads/products/1.jpg", "/uploads/products/2.jpg", "/uploads/products/3.jpg", "/uploads/products/4.jpg", "/uploads/products/5.jpg", "/uploads/products/6.jpg", "/uploads/products/7.jpg"}}, ErrInvalidGallery},
+		{"outside gallery address", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, GalleryURLs: []string{"https://example.com/a.jpg"}}, ErrInvalidGallery},
+		{"gallery path escape", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, GalleryURLs: []string{"/uploads/products/../try-on/a.png"}}, ErrInvalidGallery},
+		{"empty gallery entry", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, GalleryURLs: []string{" "}}, ErrInvalidGallery},
+		{"six uploaded photos reach storage", 0, ProductInput{CategoryID: 1, Name: "Frame", Price: 100, GalleryURLs: []string{"/uploads/products/1.jpg", "/uploads/products/2.jpg", "/uploads/products/3.jpg", "/uploads/products/4.jpg", "/uploads/products/5.jpg", "/uploads/products/6.jpg"}}, ErrUnavailable},
 		{"valid edit reaches storage", 7, base, ErrUnavailable},
 	} {
 		t.Run(test.name, func(t *testing.T) {

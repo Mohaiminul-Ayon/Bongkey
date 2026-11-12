@@ -43,12 +43,14 @@ func TestVariantStockPostgres(t *testing.T) {
 	if err := db.PingContext(ctx); err != nil {
 		t.Fatal("local PostgreSQL is not reachable")
 	}
-	migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", "008_product_variants.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"008_product_variants.sql", "026_product_gallery.sql"} {
+		migration, err := os.ReadFile(filepath.Join(cfg.ProjectRoot, "backend", "migrations", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(migration)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	slug := fmt.Sprintf("qa-variant-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -87,6 +89,17 @@ func TestVariantStockPostgres(t *testing.T) {
 	}
 	if publicProduct.OptionCount != 1 || variants[0].OptionCount != 1 {
 		t.Fatalf("option count = %d; want the one active child so list cards send shoppers to choose", publicProduct.OptionCount)
+	}
+	// Each colour keeps its own photo list, and the database refuses a seventh photo.
+	if _, err := db.ExecContext(ctx, `UPDATE products SET gallery_urls = ARRAY['/uploads/products/blue-side.jpg', '/uploads/products/blue-top.jpg'] WHERE id = $1`, variant.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE products SET gallery_urls = array_fill('/uploads/products/x.jpg'::text, ARRAY[7]) WHERE id = $1`, rootID); err == nil {
+		t.Fatal("seven gallery photos were accepted")
+	}
+	withPhotos, err := repo.ListVariants(ctx, rootID, false)
+	if err != nil || len(withPhotos[0].GalleryURLs) != 0 || len(withPhotos[1].GalleryURLs) != 2 || withPhotos[1].GalleryURLs[1] != "/uploads/products/blue-top.jpg" {
+		t.Fatalf("galleries = %v error=%v; want none on the base and two in order on the blue variant", withPhotos, err)
 	}
 	store := orders.PostgresCheckoutStore{DB: db}
 	if err := store.InTransaction(ctx, func(tx orders.CheckoutTx) error {
