@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { ReturnRequestForm } from "@/components/ReturnRequestForm";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { requestReturnFromTrack } from "@/lib/api";
 import { whatsAppLink, whatsAppNumber } from "@/lib/whatsapp";
 
@@ -18,13 +20,15 @@ export default function ReturnRequestPage() {
         <p className="text-[var(--muted)]">Tell us what is wrong and we will call you to sort it out. Please read our <Link className={linkClass} href="/return-policy">return &amp; exchange policy</Link> first.</p>
       </div>
       <ReturnRequestForm send={requestReturnFromTrack}>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-1 font-semibold">Order number
-            <input name="order_number" required maxLength={20} autoComplete="off" placeholder="ORD-000123" className="product-select font-normal" />
-          </label>
-          <label className="grid gap-1 font-semibold">Phone you ordered with
-            <input name="phone" required inputMode="tel" autoComplete="tel" placeholder="01XXXXXXXXX" className="product-select font-normal" />
-          </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="return-order-number">Order number</Label>
+            <Input id="return-order-number" name="order_number" required maxLength={20} autoComplete="off" placeholder="ORD-000123" className="h-10" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="return-phone">Phone you ordered with</Label>
+            <Input id="return-phone" name="phone" required inputMode="tel" autoComplete="tel" placeholder="01XXXXXXXXX" className="h-10" />
+          </div>
         </div>
       </ReturnRequestForm>
       <p className="text-sm text-[var(--muted)]">
