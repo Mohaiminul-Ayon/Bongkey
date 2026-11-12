@@ -11,7 +11,7 @@ type ProductCardProps = { product: Product };
 
 /** ProductCard leads with the photo and opens the product; a single-option frame can go straight to the bag. */
 export function ProductCard({ product }: ProductCardProps) {
-  const { items, addItem } = useCart();
+  const { items, addItem, openBag } = useCart();
   const wishlist = useWishlist();
   const [added, setAdded] = useState(false);
   const soldOut = product.stockQuantity === 0;
@@ -71,6 +71,7 @@ export function ProductCard({ product }: ProductCardProps) {
             if (!sellable) return;
             addItem(sellable);
             setAdded(true);
+            openBag();
           }}
         >
           {!sellable ? "Out of stock" : atLimit ? "All in your bag" : added ? <span className="added-note">Added ✓</span> : "Add to bag"}

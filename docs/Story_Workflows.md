@@ -795,6 +795,18 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - Local PostgreSQL `TestPostgresPasswordAccounts`: one account per email across Google and password, typed name kept, reset ends sessions, unknown email, database phone check.
 - Browser with test email mode: sign-up by code → "Finish your profile" → bad phone message → profile with initials in the header. API: wrong password 401, right password 200.
 
+## CART-01 — Bag panel, bag page and checkout layout
+
+**Status:** Built 2026-11-12 on `feat/cart-checkout-restyle`. Frontend only: no route, request or server rule changed.
+
+**Owner decisions (2026-11-12):** a slide-in bag after "Add to bag"; checkout in numbered sections on one page; on phones a folded order summary at the top and a Place order bar that stays at the bottom; out-of-date payment and exchange wording fixed.
+
+**Flow:** "Add to bag" on the product page, the lens panel or a product card calls `addItem` then `openBag` from [useCart](../frontend/src/lib/cart.tsx). [BagPanel](../frontend/src/components/BagPanel.tsx), rendered once in the root layout, shows the lines ([BagLine](../frontend/src/components/BagLine.tsx), also used by the bag page), the subtotal and "Delivery from ৳80"; Escape, the X or the dark backdrop closes it. The bag page ([cart/page.tsx](../frontend/src/app/cart/page.tsx)) reads `GET /api/payment-options` only to word the payment note the same way as the server's fixed rule (lens orders: full amount by bKash; frames: delivery charge by bKash first while bKash is on, else pay on delivery). Checkout ([checkout/page.tsx](../frontend/src/app/checkout/page.tsx)) keeps the same `submitOrder` → `POST /api/orders` request as before; only the layout moved into `CheckoutSection`s and a shared `OrderSummary`.
+
+**Failure path:** a client check (for example a wrong phone) or a server refusal goes through `showError`, which scrolls the message into view, because on phones the Place order bar is far below the message. Pressing again with the same mistake scrolls again. The "+" button stops at the stock count the bag knows; the server still checks stock at checkout.
+
+**Evidence:** `tsc`; browser at phone width: Add to bag opens the panel with focus on its heading, +/- keep focus, Escape closes it; bag page shows Dhaka/outside delivery rows and the bKash-first note; checkout shows the folded summary, sections 1–3, the sticky "Place order · ৳7,140" after choosing Dhaka, and a wrong phone shows its message in view (twice). At 1280 px the summary with photos sits in the right column. No order was placed. Dark mode not checked.
+
 ## SHOP-01 — Sale prices, card add-to-bag and browser wishlist (#80)
 
 **Status:** Built 2026-11-07 on `feat/storefront-ui`. The shadcn/ui swap waits for the owner's screenshots of layouts that break.

@@ -1,68 +1,66 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { ShoppingBag } from "lucide-react";
+import { BagLine } from "@/components/BagLine";
 import { Button } from "@/components/Button";
 import { CheckoutSteps } from "@/components/CheckoutSteps";
-import { ProductVisual } from "@/components/ProductVisual";
+import { fetchPaymentOptions } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { lensPrice, lensPriceKnown, lensSummary, needsPrescription } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
-/** CartPage lets shoppers adjust bag quantities before checkout. */
+/** paymentNote says how this bag will be paid, matching the server's fixed rules (orders.paymentFor). */
+function paymentNote(hasLens: boolean, bkashOn: boolean) {
+  if (hasLens) return "Lens orders are paid in full by bKash before we make your lenses. We confirm the lens price first.";
+  if (bkashOn) return "Cash on delivery: pay the delivery charge by bKash first, the rest when it arrives. Or pay it all by bKash.";
+  return "Cash on delivery: pay when your order arrives.";
+}
+
+/** CartPage lets shoppers review the bag, change quantities and go to checkout. */
 export default function CartPage() {
-  const { items, subtotal, deliverySettings, updateQuantity, removeItem } = useCart();
+  const { items, ready, count, subtotal, deliverySettings } = useCart();
+  const [bkashOn, setBkashOn] = useState(false);
   const hasLens = items.some((item) => item.lens);
 
+  useEffect(() => {
+    fetchPaymentOptions().then((options) => setBkashOn(options.bkash)).catch(() => setBkashOn(false));
+  }, []);
+
   return (
-    <section className="store-flow mx-auto max-w-7xl px-4 py-8 md:px-6">
-      <div className="mb-8 rounded-xl bg-white p-6 shadow-sm">
-        <CheckoutSteps current={1} />
-        <h1 className="mt-2 text-4xl font-black text-neutral-950">Your bag</h1>
-        <p className="mt-3 text-neutral-600">Review quantity. Delivery and final total depend on your district at checkout.</p>
+    <section className="store-flow mx-auto max-w-6xl px-4 py-8 md:px-6">
+      <CheckoutSteps current={1} />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h1>Your bag{count ? ` (${count})` : ""}</h1>
+        {items.length ? <Link href="/products" className="text-sm underline underline-offset-4">Continue shopping</Link> : null}
       </div>
 
-      {items.length === 0 ? (
-        <div className="rounded-xl bg-white p-8 text-center shadow-sm">
-          <h2 className="text-2xl font-black">Your bag is empty</h2>
-          <Button className="mt-5" href="/products">Shop frames</Button>
+      {!ready ? <p role="status" className="mt-6 text-sm text-[var(--muted)]">Loading your bag...</p> : items.length === 0 ? (
+        <div className="mt-6 grid justify-items-center gap-4 rounded-[var(--radius)] border border-[var(--border)] p-10 text-center">
+          <ShoppingBag aria-hidden="true" className="size-10 text-[var(--muted)]" strokeWidth={1.4} />
+          <h2 className="text-xl font-semibold">Your bag is empty</h2>
+          <p className="text-sm text-[var(--muted)]">Find a frame you like and add it here.</p>
+          <Button href="/products">Shop frames</Button>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_370px]">
-          <div className="grid gap-4">
-            {items.map((item) => (
-              <article key={item.lineId} className="grid gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-sm sm:grid-cols-[150px_1fr]">
-                <ProductVisual compact product={item.product} />
-                <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-                  <div>
-                    <p className="text-xs font-black uppercase tracking-[0.14em] text-[#173c34]">{item.product.category}</p>
-                    <Link href={`/products/${item.product.slug}`} className="mt-1 block text-xl font-black text-neutral-950 hover:text-[#173c34]">{item.product.name}</Link>
-                    <p className="mt-2 text-sm font-semibold text-neutral-500">{item.product.size} · {item.product.color} · {lensSummary(item.lens)}</p>
-                    {item.lens ? <p className="mt-1 text-sm text-neutral-600">Lens: {item.lens.kind === "custom" ? "price confirmed by call (it can change)" : `${formatPrice(lensPrice(item.lens))} per pair${lensPriceKnown(item.lens) ? "" : " (confirmed after prescription check)"}`}</p> : null}
-                    {needsPrescription(item.lens) ? <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm font-semibold text-[#7b531c]">Prescription: you upload the PDF or photo on the next step (Details).</p> : null}
-                    <button className="mt-5 text-sm font-black text-red-600" onClick={() => removeItem(item.lineId)}>Remove</button>
-                  </div>
-                  <div className="flex items-center justify-between gap-4 md:block md:text-right">
-                    <p className="text-lg font-black">{formatPrice(item.product.price + lensPrice(item.lens))}</p>
-                    <div className="mt-0 inline-flex items-center rounded-md border border-neutral-300 bg-white md:mt-4">
-                      <button className="px-3 py-2 font-black" aria-label="One fewer" onClick={() => updateQuantity(item.lineId, item.quantity - 1)}>-</button>
-                      <span className="min-w-10 px-2 text-center font-black">{item.quantity}</span>
-                      <button className="px-3 py-2 font-black" aria-label="One more" onClick={() => updateQuantity(item.lineId, item.quantity + 1)}>+</button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            ))}
+        <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+            {items.map((item) => <BagLine key={item.lineId} item={item} />)}
           </div>
-          <aside className="rounded-xl border border-black/10 bg-white p-5 shadow-sm lg:self-start">
-            <h2 className="text-xl font-black">Order summary</h2>
-            <div className="mt-5 grid gap-3 text-sm">
-              <div className="flex justify-between"><span className="text-neutral-600">Subtotal</span><span className="font-black">{formatPrice(subtotal)}</span></div>
-              <div className="flex justify-between"><span className="text-neutral-600">Delivery charge</span><span className="font-black">{deliverySettings ? `Dhaka ${formatPrice(deliverySettings.delivery_fee)} · Outside ${formatPrice(deliverySettings.outside_dhaka_fee)}` : "Unavailable — reload to retry"}</span></div>
-              <div className="border-t border-black/10 pt-3" />
-              <div className="flex justify-between text-xl"><span className="font-black">Total</span><span className="font-black">Calculated at checkout</span></div>
+          <aside className="grid content-start gap-3 rounded-[var(--radius)] border border-[var(--border)] p-5 lg:sticky lg:top-24">
+            <h2 className="text-lg font-semibold">Order summary</h2>
+            <div className="flex justify-between text-sm"><span className="text-[var(--muted)]">Subtotal</span><span className="font-semibold">{formatPrice(subtotal)}</span></div>
+            {deliverySettings ? <>
+              <div className="flex justify-between text-sm"><span className="text-[var(--muted)]">Delivery in Dhaka</span><span>{formatPrice(deliverySettings.delivery_fee)}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-[var(--muted)]">Delivery outside Dhaka</span><span>{formatPrice(deliverySettings.outside_dhaka_fee)}</span></div>
+            </> : <p className="text-sm text-[var(--muted)]">Delivery charge is shown at checkout.</p>}
+            <div className="flex items-baseline justify-between border-t border-[var(--border)] pt-3">
+              <span className="font-semibold">Total</span>
+              <span className="text-right"><span className="text-lg font-semibold">{formatPrice(subtotal)}</span><span className="block text-xs text-[var(--muted)]">+ delivery, chosen by district at checkout</span></span>
             </div>
-            <Button className="mt-6 w-full" href="/checkout">Go to checkout</Button>
-            <p className="mt-4 rounded-md bg-[#f0f7f4] p-4 text-sm font-semibold leading-6 text-[#173c34]">{hasLens ? "Your bag has lenses: we confirm the lens price, then collect an advance by phone before making them. No cash on delivery for lens orders." : "Pay in cash when your order arrives. Your invoice will be available after confirmation."}</p>
+            <Button className="w-full" href="/checkout">Checkout</Button>
+            <p className="rounded-md bg-[var(--surface-raised)] p-3 text-sm leading-6">{paymentNote(hasLens, bkashOn)}</p>
+            <p className="text-xs text-[var(--muted)]">Frames can be exchanged within 3 days of delivery. <Link href="/return-policy" className="underline underline-offset-4">Return &amp; exchange policy</Link></p>
           </aside>
         </div>
       )}

@@ -34,7 +34,7 @@ export function Header() {
   return (
     <>
       {/* The home page shows the same promises in its strip under the hero, so the bar would only push the photo down. */}
-      {home ? null : <div className="announcement">Cash on delivery across Bangladesh<span className="announcement-extra"> · Easy exchange after confirmation</span></div>}
+      {home ? null : <div className="announcement">Delivery across Bangladesh · Cash on delivery for frames<span className="announcement-extra"> · 3-day frame exchange</span></div>}
       <header className={`site-header${home ? " site-header--home" : ""}`} data-solid={!home || scrolled}>
         <nav aria-label="Main navigation" className="header-inner">
           <Link aria-label="Bongkey home" className="header-logo" href="/"><BrandLogo /></Link>
