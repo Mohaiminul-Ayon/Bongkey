@@ -830,7 +830,7 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 
 **Card add-to-bag:** [ProductCard](../frontend/src/components/ProductCard.tsx).
 - `GET /api/products` now returns `option_count`: active colour/size options under the frame. [productSelectSQL](../backend/internal/catalog/product_repository.go) counts them in a subquery.
-- A frame with options shows **Choose options**, which opens the product page.
+- ~~A frame with options shows **Choose options**~~ — removed 2026-11-12: the owner uploads each colour as its own product, so every card shows **Add to bag** (a frame whose own stock is 0 adds its first in-stock option; with none, "Out of stock" and a "Sold out" badge). Colour options, where they still exist, are picked on the product page.
 - A single-option frame shows **Add to bag**. It picks the same default as the product page and calls the existing `addItem`, so the bag's merge rules still apply.
 - The button turns to **All in your bag** once every bag line of that frame reaches its stock, and to **Out of stock** when there is none. Checkout still checks stock on the server.
 
