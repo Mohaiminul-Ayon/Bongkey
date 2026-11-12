@@ -13,8 +13,8 @@
   --color-card-foreground: var(--foreground);
   --color-popover: var(--surface);
   --color-popover-foreground: var(--foreground);
-  --color-primary: var(--foreground);
-  --color-primary-foreground: var(--inverse);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--surface-raised);
   --color-secondary-foreground: var(--foreground);
   --color-muted: var(--surface-raised);
@@ -42,6 +42,9 @@
   --border: #e6e6e1;
   --muted: #6b6b66;
   --inverse: #ffffff;
+  /* primary fills main buttons; black in light mode, maroon in dark mode. */
+  --primary: #1c1c1a;
+  --primary-foreground: #ffffff;
   --radius: 16px;
   --sale: #b42318;
   --chart-1: #1c1c1a;
@@ -51,22 +54,62 @@
   --chart-5: #b42318;
 }
 
+/* "Onyx & champagne" (owner choice 2026-11-12, after comparing with a maroon version): neutral near-black so frame
+   photos keep their true colours, ivory text instead of pure white (less glare), and one muted champagne-gold
+   accent for main buttons, selections, section labels and text links. One accent keeps the look restrained. */
 html[data-theme="dark"] {
   color-scheme: dark;
-  --background: #121212;
-  --foreground: #f4f4f0;
-  --surface: #1a1a1a;
-  --surface-raised: #242424;
-  --border: #333333;
-  --muted: #a9a9a4;
-  --inverse: #121212;
-  --sale: #ff8a80;
-  --chart-1: #f4f4f0;
+  --background: #0f0e0d;
+  --foreground: #f1ece4;
+  --surface: #181614;
+  --surface-raised: #221f1c;
+  --border: #322d28;
+  --muted: #aba397;
+  --inverse: #0f0e0d;
+  --primary: #c8a882;
+  --primary-foreground: #14110e;
+  --link: #d6bc94;
+  --sale: #f0a090;
+  --note-bg: #221f1c;
+  --warn-bg: #2b2416;
+  --warn-fg: #e6c58c;
+  --danger-bg: #36191a;
+  --danger-fg: #ffb4ab;
+  --ok-bg: #15251d;
+  --ok-fg: #8fd3b0;
+  --chart-1: #f1ece4;
   --chart-2: #6fc2a8;
-  --chart-3: #e3b65c;
+  --chart-3: #c8a882;
   --chart-4: #8a8a84;
-  --chart-5: #ff8a80;
+  --chart-5: #f0a090;
 }
+
+/* Dark mode for older markup that still uses fixed Tailwind colours written for white pages; light mode is untouched.
+   These rules sit outside Tailwind's layers, so they win over the utilities they replace.
+   shortcut: remaps class names instead of editing each component; move a component to the theme variables
+   (var(--surface), var(--muted)...) when it is next changed, then its line here can go. */
+html[data-theme="dark"] :is(.bg-white) { background-color: var(--surface); }
+html[data-theme="dark"] :is(.bg-neutral-50, .bg-neutral-100, .bg-\[\#f0f7f4\]) { background-color: var(--surface-raised); }
+html[data-theme="dark"] :is(.bg-neutral-900, .bg-neutral-950, .bg-\[\#173c34\]) { background-color: var(--primary); }
+html[data-theme="dark"] :is(.text-neutral-300, .text-neutral-400, .text-neutral-500, .text-neutral-600, .text-neutral-700) { color: var(--muted); }
+html[data-theme="dark"] :is(.text-neutral-900, .text-neutral-950, .text-\[\#173c34\]) { color: var(--foreground); }
+html[data-theme="dark"] :is(.border-neutral-200, .border-neutral-300, .border-black\/10, .border-black\/20, .border-\[\#173c34\]\/20) { border-color: var(--border); }
+html[data-theme="dark"] :is(.border-neutral-900, .border-neutral-950, .border-\[\#173c34\]) { border-color: var(--foreground); }
+html[data-theme="dark"] :is(.bg-amber-50) { background-color: var(--warn-bg); }
+html[data-theme="dark"] :is(.text-\[\#7b531c\]) { color: var(--warn-fg); }
+html[data-theme="dark"] :is(.bg-red-50) { background-color: var(--danger-bg); }
+html[data-theme="dark"] :is(.text-red-600, .text-red-700) { color: var(--danger-fg); }
+html[data-theme="dark"] :is(.border-red-300) { border-color: var(--danger-fg); }
+html[data-theme="dark"] :is(.bg-green-50) { background-color: var(--ok-bg); }
+html[data-theme="dark"] :is(.text-green-700, .text-green-800) { color: var(--ok-fg); }
+html[data-theme="dark"] :is(.border-green-600) { border-color: var(--ok-fg); }
+/* bKash keeps its pink, darkened for the dark page. */
+html[data-theme="dark"] :is(.bg-\[\#fdf2f7\]) { background-color: #2e1520; }
+html[data-theme="dark"] :is(.text-\[\#b0105a\]) { color: #f4a3c4; }
+/* Small accents in champagne: section labels and underlined text links. */
+html[data-theme="dark"] .kicker { color: var(--link); }
+html[data-theme="dark"] .home-hero .kicker { color: rgba(255,255,255,.8); }
+html[data-theme="dark"] main a.underline { color: var(--link); }
 
 /* Element defaults live in the base layer so Tailwind utilities (e.g. text-white on a link) can override them. */
 @layer base {
@@ -93,7 +136,7 @@ html[data-theme="dark"] {
   :focus-visible { outline: 2px solid var(--foreground); outline-offset: 3px; }
   /* Form fields draw the ring on their own border, so it never looks like a second box around the field. */
   input:focus-visible, select:focus-visible, textarea:focus-visible { outline-offset: -1px; }
-  ::selection { background: var(--foreground); color: var(--inverse); }
+  ::selection { background: var(--primary); color: var(--primary-foreground); }
 }
 
 /* Header */
@@ -133,7 +176,7 @@ html[data-theme="dark"] {
 .site-button { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 10px; padding: 12px 22px; border: 1px solid var(--foreground); border-radius: 999px; font-size: 14px; font-weight: 600; transition: opacity .2s, background .2s; }
 .site-button:hover { opacity: .82; }
 .site-button:disabled { opacity: .4; }
-.button-primary { background: var(--foreground); color: var(--inverse); }
+.button-primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
 .button-secondary { background: transparent; color: var(--foreground); border-color: var(--border); }
 .button-secondary:hover { border-color: var(--foreground); opacity: 1; }
 .button-ghost { border-color: transparent; background: transparent; color: var(--foreground); padding-inline: 4px; text-decoration: underline; text-underline-offset: 5px; }

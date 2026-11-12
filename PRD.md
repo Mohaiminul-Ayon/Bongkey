@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.53
+Version: 2.54
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -736,6 +736,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-12 | 2.54 | THEME-01: "Onyx & champagne" dark mode (neutral near-black, ivory text, champagne-gold buttons and accents); older fixed colours readable in dark mode; first visit follows the device's light/dark setting. Light mode unchanged. Also fixes two Place order buttons showing on phones. |
 | 2026-11-12 | 2.53 | RETURN-01 form UI: shadcn card with reason cards (icon + time-limit badge), a message counter, and tap-or-drag photos with previews and remove. No flow change. |
 | 2026-11-12 | 2.52 | CART-01: slide-in bag after "Add to bag", restyled bag page, checkout in numbered sections with a folded summary and a sticky Place order bar on phones; payment and exchange wording updated to the current rules. (2.51 is GALLERY-01 on its own branch.) |
 | 2026-11-12 | 2.51 | GALLERY-01: up to 6 extra photos per frame colour, uploaded and ordered in the admin product form, shown on the product page as a big photo with thumbnails and swipe. Migration 026. |

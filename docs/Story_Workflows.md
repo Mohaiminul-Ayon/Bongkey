@@ -796,6 +796,18 @@ Orders that were already shipped before the migration get `shipped_at` from thei
 - Local PostgreSQL `TestPostgresPasswordAccounts`: one account per email across Google and password, typed name kept, reset ends sessions, unknown email, database phone check.
 - Browser with test email mode: sign-up by code → "Finish your profile" → bad phone message → profile with initials in the header. API: wrong password 401, right password 200.
 
+## THEME-01 — "Onyx & champagne" dark mode
+
+**Status:** Built 2026-11-12 on `feat/dark-wine-theme`. Frontend styling only.
+
+**Owner decisions (2026-11-12):** dark mode only (light mode keeps its black-and-white look); a visitor who never pressed the sun/moon button follows the phone or computer setting. A maroon "Wine night" version was tried first; after the owner asked which feels most premium for an eyewear shop, we switched to one restrained metallic accent on near-black (the most common luxury pairing in design guides): neutral near-black `#0f0e0d` (no red tint, so frame photos keep true colours), ivory text `#f1ece4` (pure white glares on black), champagne `#c8a882` buttons with near-black text (about 8.7:1), and `#d6bc94` for small labels and text links.
+
+**How it works:** [globals.css](../frontend/src/app/globals.css) adds `--primary`/`--primary-foreground` (light: the old black/white, so light mode is unchanged) and the dark palette under `html[data-theme="dark"]`; `.button-primary`, shadcn's `primary` and text selection use them. Older markup with fixed Tailwind colours (`bg-white`, `text-neutral-600`, `bg-red-50`, the green and amber note colours, the bKash pink) is remapped for dark mode only by a short block of rules (marked `shortcut:`; move a component to the theme variables when it is next edited). The script at the top of [layout.tsx](../frontend/src/app/layout.tsx) runs before paint: a saved `bongkey-theme` wins, otherwise `prefers-color-scheme` decides.
+
+**Fix found here:** on phones checkout showed two Place order buttons, because `.site-button`'s `display` (outside Tailwind's layers) beat the `hidden` class; the wide-screen button now sits in a `hidden lg:block` wrapper. Checked: one button at 375 px (the sticky bar) and one at 1280 px (in the form).
+
+**Evidence:** `tsc`; browser: with no saved choice the page followed a dark and then a light device setting; light mode's main button stayed `rgb(28, 28, 26)` on white; dark mode checked on the product page, shop grid, bag panel, checkout (phone), return request form (phone) and Track page. Not checked: admin pages, the order page's bKash box and the home page sections below the hero in dark mode.
+
 ## CART-01 — Bag panel, bag page and checkout layout
 
 **Status:** Built 2026-11-12 on `feat/cart-checkout-restyle`. Frontend only: no route, request or server rule changed.

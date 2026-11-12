@@ -25,7 +25,8 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${fraunces.variable}`} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: "try{document.documentElement.dataset.theme=localStorage.getItem('bongkey-theme')==='dark'?'dark':'light'}catch{document.documentElement.dataset.theme='light'}" }} />
+        {/* Runs before paint: the visitor's saved choice wins; with none, follow the phone or computer setting. */}
+        <script dangerouslySetInnerHTML={{ __html: "(function(){var t;try{t=localStorage.getItem('bongkey-theme')}catch(e){}if(t!=='dark'&&t!=='light'){t=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t})()" }} />
       </head>
       <body>
         <CartProvider>

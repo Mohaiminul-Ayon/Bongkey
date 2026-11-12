@@ -315,7 +315,8 @@ export default function CheckoutPage() {
           </CheckoutSection>
 
           <p className="text-xs text-neutral-600">By placing this order you accept our <Link href="/return-policy" className="font-bold underline">return &amp; exchange policy</Link>. We may call to confirm your order before dispatch.</p>
-          {!placedOrderNumber ? <Button className="hidden w-full lg:flex" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : deliveryFee === null ? "Select district to continue" : `Place order · ${totalLabel}`}</Button> : null}
+          {/* Wide screens only; the wrapper hides it, because .site-button's display would override a hidden class. */}
+          {!placedOrderNumber ? <div className="hidden lg:block"><Button className="w-full" type="submit" disabled={loading || deliveryFee === null || priceCheck !== "ready"}>{loading ? "Placing order..." : deliveryFee === null ? "Select district to continue" : `Place order · ${totalLabel}`}</Button></div> : null}
         </form>
 
         <aside className="hidden content-start gap-4 rounded-[var(--radius)] border border-[var(--border)] p-5 lg:sticky lg:top-24 lg:grid">
