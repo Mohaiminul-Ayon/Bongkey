@@ -3,35 +3,25 @@
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
 import Link from "next/link";
-import { adminRequest, fetchCategories, fetchDeliverySettings, fetchLowStock, updateDeliverySettings, type ApiProduct, type LowStockItem } from "@/lib/api";
+import { adminRequest, fetchAdminTodo, fetchCategories, fetchDeliverySettings, fetchLowStock, updateDeliverySettings, type AdminTodo, type ApiProduct, type LowStockItem } from "@/lib/api";
 import { useEffect, useState } from "react";
 
-// recentOrderPage matches the backend's first admin order page, so pending counts cover the latest 50 orders.
-const recentOrderPage = 50;
+type Counts = { products: number; categories: number };
 
-type Counts = { pending: number; recentOrders: number; products: number; categories: number };
-
-// AdminDashboardPage loads and saves both district-derived delivery charges for new orders.
+// AdminDashboardPage shows the waiting work and catalog counts, and saves both district-derived delivery charges.
 export default function AdminDashboardPage() {
   const [deliveryFee, setDeliveryFee] = useState("");
   const [outsideDhakaFee, setOutsideDhakaFee] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [todo, setTodo] = useState<AdminTodo | null>(null);
   const [lowStock, setLowStock] = useState<LowStockItem[] | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      adminRequest<{ order_status: string }[]>("/api/admin/orders"),
-      adminRequest<ApiProduct[]>("/api/admin/products"),
-      fetchCategories(),
-    ])
-      .then(([orders, products, categories]) => setCounts({
-        pending: orders.filter((order) => order.order_status === "pending").length,
-        recentOrders: orders.length,
-        products: products.length,
-        categories: categories.length,
-      }))
+    fetchAdminTodo().then(setTodo).catch(() => setTodo(null));
+    Promise.all([adminRequest<ApiProduct[]>("/api/admin/products"), fetchCategories()])
+      .then(([products, categories]) => setCounts({ products: products.length, categories: categories.length }))
       .catch(() => setCounts(null));
     // Each frame or option has its own alert level, set on its edit page.
     fetchLowStock().then(setLowStock).catch(() => setLowStock(null));
@@ -70,8 +60,15 @@ export default function AdminDashboardPage() {
         <AdminNav />
         <div className="rounded-xl bg-white p-6 shadow-sm">
           <h1 className="text-3xl font-black">Dashboard</h1>
-          <div className="admin-cards mt-6">
-            <Link className="admin-card" href="/admin/orders"><span>Pending orders</span><strong>{counts ? counts.pending : "–"}</strong><em>{counts ? `of the latest ${counts.recentOrders}${counts.recentOrders === recentOrderPage ? "+" : ""} orders` : "Review COD orders"}</em></Link>
+          <h2 className="mt-6 text-xl font-black">Waiting for you</h2>
+          <div className="admin-cards mt-3">
+            <Link className="admin-card" href="/admin/orders"><span>Orders to confirm</span><strong>{todo ? todo.orders_to_confirm : "–"}</strong><em>Call, check and confirm</em></Link>
+            <Link className="admin-card" href="/admin/payments"><span>bKash to check</span><strong>{todo ? todo.payments_to_check : "–"}</strong><em>Match the TrxID in your bKash app</em></Link>
+            <Link className="admin-card" href="/admin/callbacks"><span>Call-backs</span><strong>{todo ? todo.callbacks_open : "–"}</strong><em>Customers asking about a lens</em></Link>
+            <Link className="admin-card" href="/admin/returns"><span>New returns</span><strong>{todo ? todo.returns_new : "–"}</strong><em data-alert={todo && todo.returns_overdue > 0 ? "" : undefined}>{todo && todo.returns_overdue > 0 ? `${todo.returns_overdue} overdue` : "Call and agree a solution"}</em></Link>
+          </div>
+          <h2 className="mt-8 text-xl font-black">Catalog</h2>
+          <div className="admin-cards mt-3">
             <Link className="admin-card" href="/admin/products"><span>Products</span><strong>{counts ? counts.products : "–"}</strong><em data-alert={lowStock && lowStock.length > 0 ? "" : undefined}>{lowStock ? `${lowStock.length} low on stock` : "Manage the catalog"}</em></Link>
             <Link className="admin-card" href="/admin/categories"><span>Categories</span><strong>{counts ? counts.categories : "–"}</strong><em>Maintain categories</em></Link>
           </div>

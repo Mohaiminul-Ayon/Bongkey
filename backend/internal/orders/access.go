@@ -52,6 +52,7 @@ type Record struct {
 	EmailConfirmed  bool
 	RiskFlags       []string
 	DeliveryNote    string
+	StaffNote       string
 	PaymentMethod   string
 	PaymentStatus   string
 	CreatedAt       string
@@ -90,8 +91,10 @@ type AdminDetail struct {
 	RiskFlags     []string
 	CustomerEmail string
 	// EmailConfirmed is the staff tick that the email was read back on the confirmation call.
-	EmailConfirmed  bool
-	DeliveryNote    string
+	EmailConfirmed bool
+	DeliveryNote   string
+	// StaffNote is the team's private note on the order; it is never part of a customer response.
+	StaffNote       string
 	PaymentMethod   string
 	PaymentStatus   string
 	CreatedAt       string
@@ -176,7 +179,7 @@ func (s AccessService) detail(ctx context.Context, record Record) (AdminDetail, 
 		return AdminDetail{}, err
 	}
 	return AdminDetail{
-		Summary: record.Summary, CustomerEmail: record.CustomerEmail, DeliveryNote: record.DeliveryNote,
+		Summary: record.Summary, CustomerEmail: record.CustomerEmail, DeliveryNote: record.DeliveryNote, StaffNote: record.StaffNote,
 		PaymentMethod: record.PaymentMethod, PaymentStatus: record.PaymentStatus, CreatedAt: record.CreatedAt, Items: items,
 		InvoiceIssuedAt: record.InvoiceIssuedAt, EmailConfirmed: record.EmailConfirmed, RiskFlags: record.RiskFlags,
 	}, nil

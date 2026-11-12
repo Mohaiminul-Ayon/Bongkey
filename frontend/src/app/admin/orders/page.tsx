@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
+import { OrderContactButtons } from "@/components/OrderContactButtons";
+import { OrderStatusActions, orderStatusLabel } from "@/components/OrderStatusActions";
 import { RiskFlags } from "@/components/RiskFlags";
 import { adminRequest, updateAdminOrderStatus } from "@/lib/api";
 import { formatPrice } from "@/lib/products";
@@ -16,26 +18,22 @@ type OrderRow = {
   city: string;
   total: number;
   order_status: string;
+  payment_status: string;
+  lens_order: boolean;
+  created_at: string;
   risk_flags?: string[];
 };
 
 // orderPageSize matches the backend AdminOrderPageSize so a full page means older orders may exist.
 const orderPageSize = 50;
 
-const nextStatuses: Record<string, string[]> = {
-  pending: ["confirmed", "cancelled"],
-  confirmed: ["preparing", "cancelled"],
-  preparing: ["shipped"],
-  shipped: ["delivered"],
-};
+const placedAt = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dhaka" });
 
-const statusLabel: Record<string, string> = {
-  pending: "Pending",
-  confirmed: "Confirmed",
-  preparing: "Preparing",
-  shipped: "Shipped",
-  delivered: "Delivered",
-  cancelled: "Cancelled",
+// paymentTag shows at a glance whether money is still due before the order can be confirmed.
+const paymentTag: Record<string, { label: string; className: string }> = {
+  unpaid: { label: "Cash on delivery", className: "bg-neutral-100" },
+  advance_due: { label: "bKash due", className: "bg-amber-50 text-[#7b531c]" },
+  advance_received: { label: "Paid", className: "bg-green-50 text-green-800" },
 };
 
 // AdminOrdersPage lists orders and submits backend-authorized fulfillment transitions.
@@ -88,7 +86,6 @@ export default function AdminOrdersPage() {
 
   // changeStatus updates only the row accepted by the backend state machine.
   async function changeStatus(order: OrderRow, status: string) {
-    if (status === "cancelled" && !window.confirm(`Cancel ${order.order_number} and restore its stock?`)) return;
     setBusyOrder(order.id);
     setError("");
     try {
@@ -114,7 +111,7 @@ export default function AdminOrdersPage() {
             <label className="grid gap-1 text-sm font-bold">Status
               <select name="status" className="rounded-md border border-neutral-300 px-3 py-2 font-normal">
                 <option value="">All</option>
-                {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                {Object.entries(orderStatusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </label>
             <label className="grid gap-1 text-sm font-bold">From
@@ -131,34 +128,29 @@ export default function AdminOrdersPage() {
             {loading ? <p>Loading orders...</p> : null}
             {!loading && orders.length === 0 ? <p>{filterQuery ? "No orders match this search." : "No orders yet."}</p> : null}
             {orders.map((order) => {
-              const transitions = nextStatuses[order.order_status] ?? [];
+              const payment = paymentTag[order.payment_status];
               return (
                 <article key={order.id} className="rounded-md border border-neutral-200 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <strong>{order.order_number}</strong>
+                      <span className="ml-2 text-xs text-neutral-500">{placedAt.format(new Date(order.created_at))}</span>
                       <p className="mt-1 text-sm text-neutral-600">{order.customer_name} · {order.customer_phone} · {order.city}</p>
-                      <p className="mt-1 font-bold">{formatPrice(order.total)}</p>
+                      <p className="mt-1 flex flex-wrap items-center gap-2">
+                        <strong>{formatPrice(order.total)}</strong>
+                        {payment ? <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${payment.className}`}>{payment.label}</span> : null}
+                        {order.lens_order ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold">Lens</span> : null}
+                      </p>
                       <RiskFlags flags={order.risk_flags} />
                       <Link className="mt-2 inline-block text-sm font-black text-[#173c34] underline" href={`/admin/orders/${order.id}`}>View details</Link>
                     </div>
                     <span className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-black uppercase tracking-wide">
-                      {statusLabel[order.order_status] ?? order.order_status}
+                      {orderStatusLabel[order.order_status] ?? order.order_status}
                     </span>
                   </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {transitions.map((status) => (
-                      <button
-                        key={status}
-                        type="button"
-                        disabled={busyOrder === order.id}
-                        onClick={() => changeStatus(order, status)}
-                        className={status === "cancelled" ? "rounded-md border border-red-300 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-50" : "rounded-md bg-neutral-950 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"}
-                      >
-                        {status === "cancelled" ? "Cancel order" : `Mark ${statusLabel[status]}`}
-                      </button>
-                    ))}
-                    {transitions.length === 0 ? <span className="text-sm font-semibold text-neutral-500">No further fulfillment action</span> : null}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+                    <OrderStatusActions order={order} busy={busyOrder === order.id} onChange={(status) => void changeStatus(order, status)} />
+                    <OrderContactButtons name={order.customer_name} phone={order.customer_phone} orderNumber={order.order_number} />
                   </div>
                 </article>
               );

@@ -169,7 +169,7 @@ func (h OrderAccessHandler) GetAdminOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"id": order.ID, "order_number": order.OrderNumber, "invoice_number": order.InvoiceNumber,
 		"customer_name": order.CustomerName, "customer_phone": order.CustomerPhone, "customer_email": order.CustomerEmail,
-		"shipping_address": order.ShippingAddress, "city": order.City, "delivery_note": order.DeliveryNote,
+		"shipping_address": order.ShippingAddress, "city": order.City, "delivery_note": order.DeliveryNote, "staff_note": order.StaffNote,
 		"subtotal": order.Subtotal, "delivery_fee": order.DeliveryFee, "total": order.Total,
 		"order_status": order.Status, "payment_method": order.PaymentMethod, "payment_status": order.PaymentStatus,
 		"advance_mode": order.AdvanceMode, "advance_required": order.AdvanceRequired, "amount_paid": order.AmountPaid,

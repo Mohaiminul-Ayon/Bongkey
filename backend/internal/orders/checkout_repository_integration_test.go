@@ -321,6 +321,19 @@ func TestCheckoutOrderPostgres(t *testing.T) {
 	if err != nil || len(adminDetail.Items) != 1 || adminDetail.Items[0].ProductName != "QA stock fixture" || adminDetail.Items[0].UnitPrice != 100 {
 		t.Fatalf("admin did not receive saved item snapshots: detail=%+v err=%v", adminDetail, err)
 	}
+	if newest[0].LensOrder || newest[0].PaymentStatus == "" {
+		t.Fatalf("frame-only list row: lens %v, payment %q", newest[0].LensOrder, newest[0].PaymentStatus)
+	}
+	notes := StaffNoteService{Store: PostgresFulfillmentStore{DB: db}}
+	if err := notes.SetStaffNote(ctx, receipt.ID, " deliver after 5pm "); err != nil {
+		t.Fatal(err)
+	}
+	if noted, err := access.Admin(ctx, orderID); err != nil || noted.StaffNote != "deliver after 5pm" {
+		t.Fatalf("staff note not saved: %q %v", noted.StaffNote, err)
+	}
+	if err := notes.SetStaffNote(ctx, 1<<30, "x"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("note on a missing order: %v", err)
+	}
 	request.Items[0].Quantity = 2
 	request.IdempotencyKey = "checkout-postgres-0002"
 	if _, err := service.Place(ctx, request); !errors.Is(err, ErrUnavailable) {

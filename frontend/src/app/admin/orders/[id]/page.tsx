@@ -5,10 +5,12 @@ import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AdminGuard } from "@/components/AdminGuard";
 import { AdminNav } from "@/components/AdminNav";
+import { OrderContactButtons } from "@/components/OrderContactButtons";
+import { OrderStatusActions, orderStatusLabel } from "@/components/OrderStatusActions";
 import { OrderTimeline } from "@/components/OrderTimeline";
 import { PaymentReviewList } from "@/components/PaymentReviewList";
 import { RiskFlags } from "@/components/RiskFlags";
-import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderTracking, setEmailConfirmed, setLensPrice, setPrescriptionStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
+import { attachPrescription, downloadInvoice, fetchAdminOrder, fetchAdminOrderPayments, type Payment, getAdminToken, markAdvanceReceived, openPrescription, saveOrderNote, saveOrderTracking, setEmailConfirmed, setLensPrice, setPrescriptionStatus, updateAdminOrderStatus, type AdminOrderDetail, type AdminOrderItem } from "@/lib/api";
 import { formatPower } from "@/lib/lens";
 import { formatPrice } from "@/lib/products";
 
@@ -91,14 +93,17 @@ function OrderDetails({ id }: { id: string }) {
         <div className="rounded-xl bg-white p-6 shadow-sm">
           <h1 className="text-3xl font-black">{order.order_number}</h1>
           <p className="mt-2 text-sm text-neutral-600">Invoice {order.invoice_number || "Pending"} · {new Date(order.created_at).toLocaleString("en-BD")}</p>
-          <p className="mt-3 font-bold">Order: {order.order_status} · Payment: {paymentStatusLabel[order.payment_status] ?? order.payment_status} · {paymentMethodLabel[order.payment_method] ?? order.payment_method}</p>
+          <p className="mt-3 font-bold">Order: {orderStatusLabel[order.order_status] ?? order.order_status} · Payment: {paymentStatusLabel[order.payment_status] ?? order.payment_status} · {paymentMethodLabel[order.payment_method] ?? order.payment_method}</p>
           {payInAdvance ? (
             <p className="mt-1 text-sm">
               Rule: {advanceLabel[order.advance_mode] ?? order.advance_mode} · due before confirming {formatPrice(order.advance_required)} · received {formatPrice(paid)} · on delivery {formatPrice(Math.max(0, order.total - Math.max(paid, order.advance_required)))}
             </p>
           ) : null}
-          <button type="button" disabled={busy} onClick={saveInvoice} className="site-button button-primary mt-4 disabled:opacity-50">Download invoice PDF</button>
+          <div className="mt-4"><OrderStatusActions order={order} busy={busy} onChange={(status) => void run(() => updateAdminOrderStatus(order.id, status))} /></div>
+          <button type="button" disabled={busy} onClick={saveInvoice} className="site-button button-secondary mt-4 disabled:opacity-50">Download invoice PDF</button>
         </div>
+
+        <StaffNoteBox key={order.staff_note} orderId={order.id} saved={order.staff_note} busy={busy} run={run} />
 
         {lensItems.length > 0 ? (
           <div className="rounded-xl bg-white p-6 shadow-sm">
@@ -107,7 +112,7 @@ function OrderDetails({ id }: { id: string }) {
               <li>Open each prescription and accept it, or ask for a new one.</li>
               <li>Confirm each lens price (custom lenses: agreed in chat).</li>
               <li>Check the customer&apos;s bKash payment below ({formatPrice(order.advance_required)} due) and approve it (or, if paid another way, press &quot;Advance received&quot;).</li>
-              <li>Mark the order Confirmed in the order list.</li>
+              <li>Press &quot;Mark Confirmed&quot; at the top of this page.</li>
             </ol>
             <div className="mt-4 grid gap-4">
               {lensItems.map((item) => <LensLine key={item.id} orderId={order.id} item={item} busy={busy} run={run} locked={order.order_status !== "pending" || order.payment_status !== "advance_due"} reviewLocked={order.order_status !== "pending"} />)}
@@ -177,6 +182,7 @@ function OrderDetails({ id }: { id: string }) {
               </label>
             ) : null}
             <p>{order.customer_phone}</p>
+            <div className="mt-2"><OrderContactButtons name={order.customer_name} phone={order.customer_phone} orderNumber={order.order_number} /></div>
             <p className="mt-3 whitespace-pre-wrap">{order.shipping_address}, {order.city}</p>
             {order.delivery_note ? <p className="mt-3 text-sm text-neutral-600">Note: {order.delivery_note}</p> : null}
           </div>
@@ -200,6 +206,24 @@ function OrderDetails({ id }: { id: string }) {
         </div>
       </div> : null}
     </section>
+  );
+}
+
+/** StaffNoteBox edits the team's private note on the order ("called twice, no answer"); customers never see it. */
+function StaffNoteBox({ orderId, saved, busy, run }: { orderId: number; saved: string; busy: boolean; run: (action: () => Promise<unknown>) => Promise<void> }) {
+  const [note, setNote] = useState(saved);
+  return (
+    <div className="rounded-xl bg-white p-6 shadow-sm">
+      <label className="grid gap-2">
+        <span className="text-xl font-black">Team note</span>
+        <span className="text-sm text-neutral-600">Only staff see this. Write what happened on calls, delivery wishes, anything the next person should know.</span>
+        <textarea value={note} maxLength={1000} onChange={(event) => setNote(event.target.value)} placeholder="Called twice, no answer. Try after 5pm." className="min-h-20 rounded-md border border-neutral-300 px-3 py-2" />
+      </label>
+      <div className="mt-3 flex items-center gap-3">
+        <button type="button" disabled={busy || note.trim() === saved} onClick={() => void run(() => saveOrderNote(orderId, note))} className="site-button button-primary w-fit disabled:opacity-50">Save note</button>
+        <span className="text-xs text-neutral-500">{note.length}/1000</span>
+      </div>
+    </div>
   );
 }
 

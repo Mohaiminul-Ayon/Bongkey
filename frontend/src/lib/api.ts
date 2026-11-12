@@ -95,8 +95,29 @@ export type AdminOrderDetail = {
   email_confirmed: boolean;
   /** risk_flags are checkout red flags for staff, such as "short_address". */
   risk_flags?: string[];
+  /** staff_note is the team's private note; customers never see it. */
+  staff_note: string;
   items: AdminOrderItem[];
 };
+
+/** AdminTodo counts the work waiting in each staff queue, for the dashboard and menu badges. */
+export type AdminTodo = {
+  orders_to_confirm: number;
+  payments_to_check: number;
+  callbacks_open: number;
+  returns_new: number;
+  returns_overdue: number;
+};
+
+/** fetchAdminTodo reads the waiting-work counts across orders, bKash payments, call-backs and returns. */
+export async function fetchAdminTodo() {
+  return adminRequest<AdminTodo>("/api/admin/todo", { cache: "no-store" });
+}
+
+/** saveOrderNote replaces the team's private note on an order; an empty note clears it. */
+export async function saveOrderNote(id: number, note: string) {
+  return adminRequest(`/api/admin/orders/${id}/note`, { method: "PUT", body: JSON.stringify({ note }) });
+}
 
 /** OrderTracking is when each status step happened (null for steps not reached or older orders) and the courier details. */
 export type OrderTracking = {
