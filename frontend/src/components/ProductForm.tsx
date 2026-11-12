@@ -152,7 +152,7 @@ export function ProductForm({ product }: ProductFormProps) {
       <div className="grid gap-4 md:grid-cols-2">
         <ImageUpload
           label="Product Display Image"
-          helper="Upload the image shown on product cards and product details."
+          helper="Shown on product cards and the product page. Best: a landscape photo (about 4:3, e.g. 1600×1200) with the frame centred on a plain background, so nothing is cut off."
           url={imageUrl}
           uploading={uploading === "product"}
           buttonLabel="Upload Product Image"

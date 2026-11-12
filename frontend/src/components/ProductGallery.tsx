@@ -12,7 +12,7 @@ export function ProductGallery({ product }: { product: Product }) {
   const [index, setIndex] = useState(0);
   const touchStart = useRef<number | null>(null);
 
-  if (photos.length <= 1) return <ProductVisual product={product} />;
+  if (photos.length === 0) return <ProductVisual product={product} />;
 
   // show wraps around so swiping past the last photo returns to the first.
   const show = (next: number) => setIndex((next + photos.length) % photos.length);
@@ -28,16 +28,18 @@ export function ProductGallery({ product }: { product: Product }) {
           const moved = event.changedTouches[0].clientX - start;
           if (Math.abs(moved) > 40) show(index + (moved < 0 ? 1 : -1));
         }}>
-        <img alt={`${product.name}, photo ${index + 1} of ${photos.length}`} className="h-full w-full object-cover" src={assetUrl(photos[index])} />
+        {/* A blurred copy fills the box behind the photo, so a photo of any shape shows whole without bare bands. */}
+        <img aria-hidden="true" alt="" className="product-photo-backdrop" src={assetUrl(photos[index])} />
+        <img alt={photos.length > 1 ? `${product.name}, photo ${index + 1} of ${photos.length}` : product.name} src={assetUrl(photos[index])} />
       </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
+      {photos.length > 1 ? <div className="flex gap-2 overflow-x-auto pb-1">
         {photos.map((url, photo) => (
           <button key={`${url}-${photo}`} type="button" aria-label={`Show photo ${photo + 1}`} aria-pressed={photo === index} onClick={() => show(photo)}
             className={`size-16 shrink-0 overflow-hidden rounded-md border-2 bg-[var(--surface)] ${photo === index ? "border-[var(--foreground)]" : "border-transparent opacity-70 hover:opacity-100"}`}>
             <img alt="" className="h-full w-full object-cover" src={assetUrl(url)} />
           </button>
         ))}
-      </div>
+      </div> : null}
     </div>
   );
 }
