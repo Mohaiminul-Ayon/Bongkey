@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/Button";
 import { LensPanel } from "@/components/LensPanel";
@@ -20,8 +21,7 @@ export default function ProductDetailsPage() {
   const [showTryOn, setShowTryOn] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [showLenses, setShowLenses] = useState(false);
-  const [added, setAdded] = useState("");
-  const { addItem } = useCart();
+  const { addItem, openBag } = useCart();
 
   useEffect(() => {
     let active = true;
@@ -29,7 +29,6 @@ export default function ProductDetailsPage() {
     setRelated([]);
     setError("");
     setSelectedVariantId(null);
-    setAdded("");
     fetchProduct(params.slug)
       .then((item) => { if (active) setProduct(item); })
       .catch(() => { if (active) setError("This product is unavailable right now."); });
@@ -58,7 +57,7 @@ export default function ProductDetailsPage() {
       {showTryOn ? <TryOnModal product={variant} onClose={() => setShowTryOn(false)} /> : null}
       {/* Rendered outside the sticky info column, which is its own layer and would sit under the site header. */}
       {showLenses ? <LensPanel slug={product.slug} productName={product.name} framePrice={variant.price}
-        onAdd={(lens) => { addItem(variant, lens); setAdded("Added to your bag with lenses."); }} onClose={() => setShowLenses(false)} /> : null}
+        onAdd={(lens) => { addItem(variant, lens); openBag(); }} onClose={() => setShowLenses(false)} /> : null}
       <div className="product-layout">
         <div className="product-gallery"><ProductVisual product={variant} /></div>
 
@@ -82,14 +81,13 @@ export default function ProductDetailsPage() {
           <div className="product-actions">
             {/* Frame only is the default: Add to bag puts the bare frame in the bag at once; lenses are chosen in the panel. */}
             {(variant.stockQuantity ?? 0) < 1 ? <Button disabled>Out of stock</Button> : <>
-              <Button onClick={() => { addItem(variant); setAdded("Added to your bag (frame only)."); }}>Add to bag</Button>
-              <Button variant="secondary" onClick={() => { setAdded(""); setShowLenses(true); }}>{product.shape === "sunglass" ? "With power lenses" : "With lenses"}</Button>
+              <Button onClick={() => { addItem(variant); openBag(); }}>Add to bag</Button>
+              <Button variant="secondary" onClick={() => setShowLenses(true)}>{product.shape === "sunglass" ? "With power lenses" : "With lenses"}</Button>
             </>}
             <Button variant="secondary" disabled={!variant.tryOnImageUrl} onClick={() => setShowTryOn(true)}>Try on</Button>
           </div>
-          {added ? <p role="status" className="info-note">{added}</p> : null}
           {!variant.tryOnImageUrl ? <p className="info-note">Try-on preview will be available when a frame mockup is added.</p> : null}
-          <p className="info-note">Easy exchange and warranty support are available after order confirmation.</p>
+          <p className="info-note">Exchange the frame within 3 days of delivery. See our <Link href="/return-policy" className="underline underline-offset-4">return &amp; exchange policy</Link>.</p>
 
           <div className="product-block">
             <h2>Frame details</h2>

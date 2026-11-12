@@ -26,6 +26,10 @@ type CartContextValue = {
   removeItem: (lineId: string) => void;
   clearCart: () => void;
   refreshProducts: (current: Product[], lensTypes?: Map<string, LensPackage[]>) => string[];
+  /** bagOpen shows the slide-in bag panel; shopping pages open it right after adding an item. */
+  bagOpen: boolean;
+  openBag: () => void;
+  closeBag: () => void;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -36,6 +40,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [ready, setReady] = useState(false);
   const [deliverySettings, setDeliverySettings] = useState<DeliverySettings | null>(null);
+  const [bagOpen, setBagOpen] = useState(false);
+  // Stable identities, so the panel's focus and key handling run only when it opens or closes.
+  const openBag = useCallback(() => setBagOpen(true), []);
+  const closeBag = useCallback(() => setBagOpen(false), []);
 
   // refreshDeliverySettings invalidates estimates if either server price cannot be read.
   const refreshDeliverySettings = useCallback(async () => {
@@ -76,6 +84,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       subtotal,
       deliverySettings,
       refreshDeliverySettings,
+      bagOpen,
+      openBag,
+      closeBag,
       addItem(product, lens) {
         setItems((current) => {
           // Different powers stay separate lines, because each line gets one prescription.
@@ -128,7 +139,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return changes;
       },
     };
-  }, [items, ready, deliverySettings, refreshDeliverySettings]);
+  }, [items, ready, deliverySettings, refreshDeliverySettings, bagOpen, openBag, closeBag]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

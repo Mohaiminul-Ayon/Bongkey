@@ -370,7 +370,6 @@ section:has(> .admin-nav) [class~="bg-[#173c34]"] { background: var(--foreground
   .product-card-name { font-size: 14px; }
   .catalog-page, .product-page { padding: 28px 16px 64px; }
   .product-actions { grid-template-columns: 1fr; }
-  .store-flow article.grid { grid-template-columns: 96px minmax(0, 1fr); }
   .footer-inner { flex-direction: column; padding: 40px 16px; }
   .footer-links { flex-wrap: wrap; }
   .footer-bottom { margin: 0 16px; }
