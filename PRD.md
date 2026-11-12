@@ -1,6 +1,6 @@
 # Eyewear Ecommerce — Base PRD
 
-Version: 2.56
+Version: 2.57
 Last updated: 2026-11-05
 Status: Revised staged scope; existing prototype has unresolved blockers and is not ready for real customers.  
 Owner: Business owner / sole administrator
@@ -736,6 +736,7 @@ Required working artifacts should be lean: this PRD/backlog, AGENTS.md, a mainta
 | 2026-11-07 | 2.38 | STOCK-01 (#20): low-stock thresholds and list; trigger-written stock history with reasons and orders. |
 | 2026-11-07 | 2.39 | AUDIT-01 (#26): trigger-written append-only audit log and owner audit page. |
 | 2026-11-09 | 2.40 | ACCOUNT-01: email + password sign-up/sign-in/reset with email codes, one account per email, required name + mobile profile, shadcn/ui sign-in and profile pages. |
+| 2026-11-12 | 2.57 | ADMIN-01: moderator to-do dashboard and menu badges, Call/WhatsApp and payment/lens tags on orders, status buttons and a staff-only team note on the order page, delete confirmation for products. |
 | 2026-11-12 | 2.56 | Product cards always show Add to bag; "Choose options" removed because each colour is uploaded as its own product. (2.54 and 2.55 are on their own branches.) |
 | 2026-11-12 | 2.55 | Product page photos show whole (no cropping or stretched box), with a blurred fill behind photos of any shape; square photo box on phones; admin photo-shape tip. (2.54 is THEME-01 on its own branch.) |
 | 2026-11-12 | 2.54 | THEME-01: "Onyx & champagne" dark mode (neutral near-black, ivory text, champagne-gold buttons and accents); older fixed colours readable in dark mode; first visit follows the device's light/dark setting. Light mode unchanged. Also fixes two Place order buttons showing on phones. |

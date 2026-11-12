@@ -938,6 +938,30 @@ Each entry is written in the same transaction as the change, so a failed or roll
 - Route test: `/api/admin/audit` needs login.
 - Live: 401 without a token, 400 for a bad page, and the page showed entries in the browser with a temporary no-login QA owner (removed afterwards).
 
+## ADMIN-01 — Moderator tools: to-do counts, order contact, status on the order page, team notes
+
+**Status:** Built 2026-11-12 on `feat/admin-moderator-tools`.
+
+**Owner decisions (2026-11-12):** after a moderator-eye review of the admin panel the owner chose: a to-do dashboard with menu badges; Call/WhatsApp on orders; status buttons on the order page; a staff-only note per order; date, payment and lens tags in the order list; no auto-refresh for now. Products → Delete now asks first.
+
+**To-do counts — request:** `GET /api/admin/todo` with the owner's bearer token.
+
+1. [AdminNav](../frontend/src/components/AdminNav.tsx:43) (on every admin page) and the [dashboard](../frontend/src/app/admin/dashboard/page.tsx) call [fetchAdminTodo](../frontend/src/lib/api.ts:113). The nav reloads the counts each time the admin page changes.
+2. [SetupRouter](../backend/internal/routes/routes.go:180) registered the route in the admin group, so [AdminAuth](../backend/internal/middleware/admin_auth.go:14) runs first (registered at [routes.go:154](../backend/internal/routes/routes.go:154)); a missing or bad token aborts with 401 and the handler never runs.
+3. [TodoHandler.Counts](../backend/internal/handlers/todo_handler.go:20) calls [dashboard.Reader.Todo](../backend/internal/dashboard/todo.go:27): one read-only query counts pending orders, pending bKash payments, open call-backs, new returns, and open problem returns older than `returns.RefundDeadline` (the same 15 days the Returns page uses). It counts the whole table, not the latest 50 orders the old card used.
+4. The JSON becomes the dashboard cards and the badges (zero shows no badge; overdue returns show a red "N late" badge). A database error returns 500 "could not load the to-do counts"; the nav then shows no badges and the dashboard shows "–".
+
+**Team note — request:** `PUT /api/admin/orders/344/note` with `{"note": "Called twice, no answer"}`.
+
+1. [StaffNoteBox](../frontend/src/app/admin/orders/%5Bid%5D/page.tsx:213) on the order page calls [saveOrderNote](../frontend/src/lib/api.ts:118) through the page's `run`, which reloads the order afterwards.
+2. `AdminAuth` runs first, as above. [SetStaffNote](../backend/internal/handlers/order_fulfillment_handler.go:21) parses the ID, caps the body at 8 KB and requires a `note` field (empty clears it).
+3. [StaffNoteService.SetStaffNote](../backend/internal/orders/staff_note.go:26) trims it and refuses more than 1000 characters (counted as characters, so Bangla fits); [SaveStaffNote](../backend/internal/orders/staff_note.go:38) runs one `UPDATE orders SET staff_note` (migration 027 also limits it to 1000 in the database). An unknown order is 404.
+4. `GetAdminOrder` returns `staff_note`; guest and Track responses never include it.
+
+**Order list and page (frontend only):** the list query now also returns `payment_status`, `lens_order` and the date. [OrderStatusActions](../frontend/src/components/OrderStatusActions.tsx) is shared by the list and the order page: it asks before a cancel and hides "Mark Confirmed" while a bKash payment is due (the server still refuses it with 409 if a rule is unmet, such as a prescription not accepted). [OrderContactButtons](../frontend/src/components/OrderContactButtons.tsx) opens a call or a WhatsApp chat whose ready message names only the order number.
+
+**Evidence:** `go vet`, `go test ./...`; with `RUN_LOCAL_DB_QA=1` the dashboard count test (a new call-back raises the count by one) and the checkout test (list tags, note saved and trimmed, note on a missing order is not found) passed; route tests show both routes need admin. In the browser, signed in by the owner: the dashboard showed 7 orders to confirm and 1 call-back with matching badges; the order list showed dates, Paid / bKash due / Lens tags and Call/WhatsApp, with Confirm hidden on a bKash-due order. The note API round trip on order 344 saved, refused 1001 characters and a missing note, and was cleared again. Not checked: the order page itself in the browser (the owner was using the tab), status changes from the order page, and admin pages in dark mode.
+
 ## Stories without a completed request flow
 
 - `BASE-01` is still open: documentation/test-baseline reconciliation and owner-led CI practice have no single completed customer request to trace yet. The baseline code paths above are observed implementation, not a claim that `BASE-01` is Done.

@@ -10,6 +10,7 @@ import (
 	"bongkey/backend/internal/catalog"
 	"bongkey/backend/internal/config"
 	"bongkey/backend/internal/customers"
+	"bongkey/backend/internal/dashboard"
 	"bongkey/backend/internal/database"
 	"bongkey/backend/internal/delivery"
 	"bongkey/backend/internal/emailotp"
@@ -107,7 +108,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 		Store:    orders.PostgresFulfillmentStore{DB: database.DB},
 		Notifier: notifier,
 	}, Tracking: orders.TrackingService{Store: orders.PostgresFulfillmentStore{DB: database.DB}},
-		Emails: orders.EmailConfirmationService{Store: orders.PostgresFulfillmentStore{DB: database.DB}, Notifier: notifier}}
+		Emails: orders.EmailConfirmationService{Store: orders.PostgresFulfillmentStore{DB: database.DB}, Notifier: notifier},
+		Notes:  orders.StaffNoteService{Store: orders.PostgresFulfillmentStore{DB: database.DB}}}
 
 	router.GET("/health", handlers.Health)
 	router.POST("/api/admin/login", adminHandler.Login)
@@ -174,6 +176,8 @@ func SetupRouter(cfg config.Config) *gin.Engine {
 	admin.PATCH("/orders/:id/status", orderFulfillment.ChangeStatus)
 	admin.PUT("/orders/:id/tracking", orderFulfillment.SetTracking)
 	admin.PUT("/orders/:id/email-confirmed", orderFulfillment.SetEmailConfirmed)
+	admin.PUT("/orders/:id/note", orderFulfillment.SetStaffNote)
+	admin.GET("/todo", handlers.TodoHandler{Reader: dashboard.Reader{DB: database.DB}}.Counts)
 	admin.POST("/orders/:id/advance-received", lensReview.MarkAdvanceReceived)
 	admin.PATCH("/orders/:id/items/:itemId/prescription-status", lensReview.SetPrescriptionStatus)
 	admin.PATCH("/orders/:id/items/:itemId/lens-price", lensReview.SetLensPrice)

@@ -14,6 +14,37 @@ type OrderFulfillmentHandler struct {
 	Service  orders.FulfillmentService
 	Tracking orders.TrackingService
 	Emails   orders.EmailConfirmationService
+	Notes    orders.StaffNoteService
+}
+
+// SetStaffNote saves the team's private note on an order; an empty note clears it.
+func (h OrderFulfillmentHandler) SetStaffNote(c *gin.Context) {
+	orderID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || orderID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+	// 1000 characters of Bangla can be 3000 bytes; 8 KB leaves room for JSON escaping.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8<<10)
+	var req struct {
+		Note *string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Note == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "note is required (send an empty note to clear it)"})
+		return
+	}
+	err = h.Notes.SetStaffNote(c.Request.Context(), orderID, *req.Note)
+	c.Header("Cache-Control", "no-store")
+	switch {
+	case errors.Is(err, orders.ErrInvalidStaffNote):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keep the note under 1000 characters"})
+	case errors.Is(err, orders.ErrNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "order not found"})
+	case err != nil:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save the note"})
+	default:
+		c.JSON(http.StatusOK, gin.H{"saved": true})
+	}
 }
 
 // SetEmailConfirmed saves the staff tick that the customer's email was read back on the confirmation call.

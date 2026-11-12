@@ -34,8 +34,8 @@ const (
 	day            = 24 * time.Hour
 	exchangeWindow = 3 * day
 	problemWindow  = 15 * day
-	// refundDeadline counts from the request, not from approval (PRD 10.1), so slow review cannot stretch it.
-	refundDeadline = 15 * day
+	// RefundDeadline counts from the request, not from approval (PRD 10.1), so slow review cannot stretch it.
+	RefundDeadline = 15 * day
 	// MaxPhotos bounds one ticket's pictures; each file is checked by the photo store.
 	MaxPhotos              = 3
 	minMessage, maxMessage = 5, 1000
@@ -235,7 +235,7 @@ func (s Service) addDeadline(t *Ticket) {
 	if t.Kind == KindExchange || t.CreatedAt.IsZero() {
 		return
 	}
-	due := t.CreatedAt.Add(refundDeadline)
+	due := t.CreatedAt.Add(RefundDeadline)
 	t.RefundDue = &due
 	t.Overdue = t.Status != StatusClosed && s.now().After(due)
 }

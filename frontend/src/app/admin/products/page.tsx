@@ -18,10 +18,16 @@ export default function AdminProductsPage() {
 
   useEffect(load, []);
 
-  async function remove(id?: number) {
-    if (!id) return;
-    await adminRequest(`/api/admin/products/${id}`, { method: "DELETE" });
-    load();
+  // remove asks first: deleting a product cannot be undone from the admin panel.
+  async function remove(product: Product) {
+    if (!product.id || !window.confirm(`Delete ${product.name} (${product.sku})? This cannot be undone. To hide it from the shop instead, edit it and untick Active.`)) return;
+    setError("");
+    try {
+      await adminRequest(`/api/admin/products/${product.id}`, { method: "DELETE" });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the product.");
+    }
   }
 
   return (
@@ -46,7 +52,7 @@ export default function AdminProductsPage() {
                   <td>{product.isActive ? "Active" : "Inactive"}</td>
                   <td className="space-x-3">
                     <Link className="font-black text-[#173c34]" href={`/admin/products/${product.id}/edit`}>Edit</Link>
-                    <button className="font-black text-red-600" onClick={() => remove(product.id)}>Delete</button>
+                    <button className="font-black text-red-600" onClick={() => void remove(product)}>Delete</button>
                   </td>
                 </tr>
               ))}
