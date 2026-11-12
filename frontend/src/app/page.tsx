@@ -18,7 +18,7 @@ const shelves: { key: Shelf; label: string; href: string; link: string }[] = [
 const steps = [
   { title: "Pick your frame", text: "Clear photos, sizes and prices before anything goes in your bag." },
   { title: "We call to confirm", text: "We phone you to check the frame, lenses and address before it ships." },
-  { title: "Pay your way", text: "Cash on delivery, with a small bKash advance when an order needs one." },
+  { title: "Pay your way", text: "Frames: cash on delivery, with the delivery charge by bKash first. Lens orders: by bKash before we make them." },
 ];
 
 /** TextLink is the quiet underlined call to action used across the home page. */
