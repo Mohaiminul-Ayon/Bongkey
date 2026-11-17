@@ -8,7 +8,7 @@ Bongkey is an MVP e-commerce foundation for a Bangladesh-focused eyewear brand. 
 
 ## Project Structure
 
-```txt
+```txt...
 frontend/          Next.js, TypeScript, Tailwind CSS
 backend/           Go backend using Gin
 backend/migrations SQL migrations applied at backend startup
